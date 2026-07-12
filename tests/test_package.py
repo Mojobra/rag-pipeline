@@ -15,6 +15,21 @@ SRC_ROOT = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 
+class PromptTokenizerStub:
+    model_max_length = 2000
+
+    def encode(
+        self,
+        text: str,
+        *,
+        add_special_tokens: bool = True,
+        truncation: bool = False,
+        verbose: bool = False,
+    ) -> list[int]:
+        special_tokens = 1 if add_special_tokens else 0
+        return [0] * (len(text) + special_tokens)
+
+
 class PackageSmokeTests(unittest.TestCase):
     def test_package_exposes_semantic_version(self) -> None:
         import rag_pipeline
@@ -31,6 +46,17 @@ class PackageSmokeTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("RAG Pipeline skeleton is ready.", output.getvalue())
+
+    def test_answer_has_quality_gate_while_retrieve_remains_diagnostic(self) -> None:
+        from rag_pipeline.__main__ import build_parser
+
+        parser = build_parser()
+
+        answer_args = parser.parse_args(["answer", "Question"])
+        retrieve_args = parser.parse_args(["retrieve", "Question"])
+
+        self.assertEqual(answer_args.score_threshold, 0.2)
+        self.assertIsNone(retrieve_args.score_threshold)
 
     def test_ingest_command_reports_loaded_documents(self) -> None:
         from rag_pipeline.__main__ import main
@@ -253,6 +279,7 @@ class PackageSmokeTests(unittest.TestCase):
         answer_generator = AnswerGenerator(
             FakeListLLM(responses=["Receipts are required."]),
             model_identifier="test-generation-model",
+            tokenizer=PromptTokenizerStub(),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -294,7 +321,7 @@ class PackageSmokeTests(unittest.TestCase):
         self.assertIn("Sources:\n[1] expenses.txt (chunk 1)", output.getvalue())
         self.assertIn("Expense claims require receipts.", output.getvalue())
 
-    def test_answer_command_skips_generation_when_retrieval_is_empty(self) -> None:
+    def test_answer_command_default_gate_skips_irrelevant_retrieval(self) -> None:
         from langchain_core.documents import Document
         from langchain_core.embeddings import Embeddings
 
@@ -340,8 +367,6 @@ class PackageSmokeTests(unittest.TestCase):
                                 "An unrelated question",
                                 "--store-path",
                                 str(config.resolved_path),
-                                "--score-threshold",
-                                "1.0",
                             ]
                         )
 
