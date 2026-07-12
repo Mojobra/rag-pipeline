@@ -9,6 +9,13 @@ The implementation starts with a local, reproducible baseline while preserving
 the contracts needed to evolve toward hosted models, production APIs,
 evaluation, observability, and enterprise data sources.
 
+## Development Approach
+
+This project was developed using AI-assisted software engineering with Codex. I
+used AI as a development partner for implementation support while defining the
+architecture, requirements, tests, and design decisions myself. All generated
+code was reviewed, adapted, and validated through automated tests.
+
 ## Highlights
 
 - Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
