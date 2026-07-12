@@ -9,6 +9,9 @@ from rag_pipeline import __version__
 from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
 
 
+DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line parser for the package entry point."""
     parser = argparse.ArgumentParser(
@@ -80,12 +83,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_embedding_arguments(answer_parser)
     _add_vector_store_location_arguments(answer_parser)
-    _add_retrieval_arguments(answer_parser)
+    _add_retrieval_arguments(
+        answer_parser,
+        default_score_threshold=DEFAULT_ANSWER_SCORE_THRESHOLD,
+    )
     _add_generation_arguments(answer_parser)
     return parser
 
 
-def _add_retrieval_arguments(command_parser: argparse.ArgumentParser) -> None:
+def _add_retrieval_arguments(
+    command_parser: argparse.ArgumentParser,
+    *,
+    default_score_threshold: float | None = None,
+) -> None:
     command_parser.add_argument(
         "--top-k",
         type=int,
@@ -95,7 +105,15 @@ def _add_retrieval_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--score-threshold",
         type=float,
-        help="Optional minimum cosine similarity from -1 to 1.",
+        default=default_score_threshold,
+        help=(
+            "Minimum cosine similarity from -1 to 1"
+            + (
+                "."
+                if default_score_threshold is None
+                else f" (default: {default_score_threshold})."
+            )
+        ),
     )
 
 
@@ -130,7 +148,12 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
         "--max-context-characters",
         type=int,
         default=1200,
-        help="Maximum retrieved context characters in the prompt (default: 1200).",
+        help="Secondary context character cap (default: 1200).",
+    )
+    command_parser.add_argument(
+        "--max-input-tokens",
+        type=int,
+        help="Optional prompt-token cap; defaults to the tokenizer model limit.",
     )
 
 
@@ -445,6 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             generation_config = GenerationConfig(
                 max_context_characters=args.max_context_characters,
+                max_input_tokens=args.max_input_tokens,
             )
         except (
             InvalidEmbeddingConfigurationError,

@@ -25,7 +25,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Collection compatibility checks for embedding model, vector dimension,
   distance metric, and schema version
 - Ranked semantic retrieval with configurable top-k and score thresholds
-- Guarded local answer generation with explicit abstention behavior
+- Tokenizer-bounded local generation with explicit abstention behavior
 - Deterministic citations built from retrieval metadata, never model output
 - Typed configuration, stage-specific exceptions, and automated tests
 
@@ -52,6 +52,7 @@ flowchart LR
 | Use deterministic chunk IDs | Re-indexing updates logical chunks instead of creating duplicates. |
 | Record collection model and dimension | Incompatible query vectors fail before corrupting retrieval behavior. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
+| Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
 | Build citations outside the LLM | Prevents fabricated filenames, pages, and source identifiers. |
 | Keep provider boundaries behind LangChain interfaces | Makes later model and infrastructure changes less invasive. |
 
@@ -77,8 +78,13 @@ uv run python -m rag_pipeline index path/to/documents
 Ask a question against the persisted collection:
 
 ```powershell
-uv run python -m rag_pipeline answer "What does the expense policy require?"
+uv run python -m rag_pipeline answer "Which vector database does this project use?"
 ```
+
+Use separate collection names for unrelated corpora. For example, index an
+expense-policy corpus with `--collection-name expense_policies` and pass the
+same option to `retrieve` and `answer`; local Qdrant collections persist across
+commands.
 
 The first embedding and generation runs download the configured Hugging Face
 model weights. Public local models do not require an API key.
@@ -87,11 +93,11 @@ model weights. Public local models do not require an API key.
 
 ```text
 Answer:
-Expense claims require receipts.
+The project uses a persistent local Qdrant vector store.
 
 Sources:
-[1] documents/expense-policy.pdf (page 4, chunk 2, characters 1020-1394)
-    Employees must attach a receipt to every expense claim...
+[1] README.md (chunk 3, characters 1740-2050)
+    The local prototype stores vectors in Qdrant under .rag_data/qdrant...
 ```
 
 Citation records also retain the stable chunk ID, retrieval rank, and retrieval
@@ -129,7 +135,8 @@ Useful options include:
 - `--generation-model` and `--generation-model-revision` for the local LLM
 - `--device` and `--generation-device` for CPU or CUDA placement
 - `--top-k` and `--score-threshold` for retrieval behavior
-- `--max-context-characters` for the generation context budget
+- `--max-input-tokens` for an optional limit below the tokenizer model maximum
+- `--max-context-characters` as a secondary generation context guard
 - `--collection-name` and `--store-path` for Qdrant persistence
 
 ## Local Baseline
@@ -143,6 +150,18 @@ Transformers is pinned below version 5 because the current LangChain T5 adapter
 uses the `text2text-generation` pipeline API. Model revisions can be pinned
 independently for reproducible indexing and generation.
 
+Generation counts the exact rendered prompt with the selected tokenizer,
+including special tokens, and reserves an eight-token safety margin below the
+model limit. The Hugging Face pipeline also enables truncation as a final guard,
+although application-level budgeting remains authoritative so citation ranges
+stay accurate.
+
+The `answer` command defaults to a cosine score threshold of `0.20` and abstains
+when no chunk meets it. The `retrieve` command intentionally has no default
+threshold so retrieval scores can be inspected during evaluation. Similarity
+thresholds are model- and corpus-specific and should be calibrated rather than
+treated as confidence scores.
+
 ## Testing
 
 Run the complete suite:
@@ -151,7 +170,7 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 54 tests covering ingestion, extraction, chunking,
+The suite currently contains 56 tests covering ingestion, extraction, chunking,
 embedding contracts, persistent indexing, semantic retrieval, guarded
 generation, deterministic citations, and CLI integration. Provider calls use
 LangChain test doubles where appropriate; the local model path has also been
@@ -193,7 +212,8 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 ## Current Limitations
 
 - Retrieval is dense-only; hybrid search and reranking are roadmap items.
-- Context is budgeted by characters rather than model tokens.
+- The default retrieval threshold is a conservative safety baseline pending
+  calibration against an evaluation dataset.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
 - Local source paths should become stable document IDs or authorized URLs before
