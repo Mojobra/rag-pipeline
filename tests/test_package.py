@@ -55,11 +55,17 @@ class PackageSmokeTests(unittest.TestCase):
 
         answer_args = parser.parse_args(["answer", "Question"])
         retrieve_args = parser.parse_args(["retrieve", "Question"])
+        hybrid_index_args = parser.parse_args(
+            ["index", "documents", "--search-mode", "hybrid"]
+        )
 
         self.assertEqual(answer_args.score_threshold, 0.2)
         self.assertIsNone(retrieve_args.score_threshold)
         self.assertIsNone(answer_args.metadata_filters)
         self.assertIsNone(retrieve_args.metadata_filters)
+        self.assertEqual(answer_args.search_mode, "dense")
+        self.assertEqual(retrieve_args.search_mode, "dense")
+        self.assertEqual(hybrid_index_args.search_mode, "hybrid")
 
     def test_ingest_command_reports_loaded_documents(self) -> None:
         from rag_pipeline.__main__ import main
@@ -241,6 +247,112 @@ class PackageSmokeTests(unittest.TestCase):
             "Indexed 3 chunk(s) into 'rag_documents'; collection now "
             "contains 3 point(s).",
             output.getvalue(),
+        )
+
+    def test_hybrid_index_and_retrieve_commands_use_rrf_without_downloads(
+        self,
+    ) -> None:
+        from langchain_core.embeddings import Embeddings
+        from langchain_qdrant import SparseEmbeddings, SparseVector
+
+        from rag_pipeline.__main__ import main
+        from rag_pipeline.embeddings import EmbeddingService
+        from rag_pipeline.sparse_embeddings import SparseEmbeddingService
+
+        class HybridDenseEmbeddings(Embeddings):
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                return [
+                    [0.0, 1.0] if "ZX-42" in text else [1.0, 0.0]
+                    for text in texts
+                ]
+
+            def embed_query(self, text: str) -> list[float]:
+                return [1.0, 0.0]
+
+        class HybridSparseEmbeddings(SparseEmbeddings):
+            def embed_documents(self, texts: list[str]) -> list[SparseVector]:
+                return [self._embed(text) for text in texts]
+
+            def embed_query(self, text: str) -> SparseVector:
+                return self._embed(text)
+
+            @staticmethod
+            def _embed(text: str) -> SparseVector:
+                if "zx-42" in text.lower():
+                    return SparseVector(indices=[42], values=[1.0])
+                return SparseVector(indices=[], values=[])
+
+        dense_service = EmbeddingService(
+            HybridDenseEmbeddings(),
+            model_name="test-dense-model",
+        )
+        sparse_service = SparseEmbeddingService(
+            HybridSparseEmbeddings(),
+            model_name="test-sparse-model",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document_dir = Path(temp_dir) / "documents"
+            document_dir.mkdir()
+            (document_dir / "exact.txt").write_text(
+                "Repair code ZX-42 requires approval.",
+                encoding="utf-8",
+            )
+            (document_dir / "semantic.txt").write_text(
+                "Conceptually related equipment policy.",
+                encoding="utf-8",
+            )
+            store_path = Path(temp_dir) / "qdrant"
+
+            with patch(
+                "rag_pipeline.embeddings.create_local_embedding_service",
+                return_value=dense_service,
+            ):
+                with patch(
+                    "rag_pipeline.sparse_embeddings."
+                    "create_local_sparse_embedding_service",
+                    return_value=sparse_service,
+                ):
+                    index_output = io.StringIO()
+                    with redirect_stdout(index_output):
+                        index_exit_code = main(
+                            [
+                                "index",
+                                str(document_dir),
+                                "--store-path",
+                                str(store_path),
+                                "--collection-name",
+                                "hybrid-policies",
+                                "--search-mode",
+                                "hybrid",
+                            ]
+                        )
+
+                    retrieve_output = io.StringIO()
+                    with redirect_stdout(retrieve_output):
+                        retrieve_exit_code = main(
+                            [
+                                "retrieve",
+                                "What does ZX-42 require?",
+                                "--store-path",
+                                str(store_path),
+                                "--collection-name",
+                                "hybrid-policies",
+                                "--search-mode",
+                                "hybrid",
+                                "--top-k",
+                                "2",
+                            ]
+                        )
+
+        retrieval_text = retrieve_output.getvalue()
+        self.assertEqual(index_exit_code, 0)
+        self.assertEqual(retrieve_exit_code, 0)
+        self.assertIn("Indexed 2 chunk(s)", index_output.getvalue())
+        self.assertIn("score_kind=rrf", retrieval_text)
+        self.assertLess(
+            retrieval_text.index("exact.txt"),
+            retrieval_text.index("semantic.txt"),
         )
 
     def test_retrieve_command_reports_ranked_evidence_without_model_download(

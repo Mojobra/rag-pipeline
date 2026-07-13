@@ -22,6 +22,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Configurable recursive chunking with page and character-level provenance
 - Reproducible chunking experiments with distribution and overlap-cost metrics
 - Local normalized MiniLM embeddings through LangChain
+- Optional local BM25 sparse embeddings with native Qdrant RRF hybrid search
 - Persistent Qdrant storage with deterministic IDs and idempotent upserts
 - Collection compatibility checks for embedding model, vector dimension,
   distance metric, and schema version
@@ -37,12 +38,15 @@ code was reviewed, adapted, and validated through automated tests.
 flowchart LR
     A["PDF / DOCX / Markdown / HTML / Text"] --> B["Extraction"]
     B --> C["LangChain chunking"]
-    C --> D["MiniLM embeddings"]
+    C --> D["MiniLM dense embeddings"]
+    C --> S["BM25 sparse embeddings"]
     D --> E["Persistent Qdrant index"]
-    Q["User question"] --> F["Semantic retrieval"]
+    S --> E
+    Q["User question"] --> F["Dense and sparse prefetch"]
     M["Metadata filters"] --> F
     E --> F
-    F --> G["Bounded guarded context"]
+    F --> R["Reciprocal-rank fusion"]
+    R --> G["Bounded guarded context"]
     G --> H["Local FLAN-T5 generation"]
     H --> I["Answer and deterministic citations"]
 ```
@@ -55,6 +59,8 @@ flowchart LR
 | Compare chunking candidates on one document snapshot | Keeps input variance from being mistaken for a chunking effect. |
 | Use deterministic chunk IDs | Re-indexing updates logical chunks instead of creating duplicates. |
 | Record collection model and dimension | Incompatible query vectors fail before corrupting retrieval behavior. |
+| Version dense and hybrid collection schemas separately | Prevents queries from silently using collections that do not contain the required sparse vectors. |
+| Fuse dense and sparse ranks with RRF | Combines semantic and exact-term retrieval without mixing incomparable raw scores. |
 | Push metadata filters into Qdrant | Selects top-k only from eligible chunks and avoids leaking excluded candidates into application code. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
@@ -130,6 +136,9 @@ uv run python -m rag_pipeline embed path/to/documents
 # Build or update the persistent Qdrant collection
 uv run python -m rag_pipeline index path/to/documents
 
+# Build a separate dual-vector collection for hybrid search
+uv run python -m rag_pipeline index path/to/documents --collection-name policies_hybrid --search-mode hybrid
+
 # Inspect ranked evidence without generation
 uv run python -m rag_pipeline retrieve "What is the policy?" --top-k 3
 
@@ -146,6 +155,9 @@ Useful options include:
 - `--generation-model` and `--generation-model-revision` for the local LLM
 - `--device` and `--generation-device` for CPU or CUDA placement
 - `--top-k` and `--score-threshold` for retrieval behavior
+- `--search-mode dense|hybrid` for the collection and retrieval strategy
+- `--sparse-model`, `--sparse-cache-dir`, `--sparse-batch-size`, and
+  `--sparse-threads` for local hybrid indexing and queries
 - repeatable `--filter KEY=VALUE` for exact metadata filters with AND semantics
 - repeatable `--candidate SIZE:OVERLAP` for chunking experiments
 - `--output-format table|json` for human or machine-readable experiment reports
@@ -210,12 +222,49 @@ themselves. A production API must inject mandatory tenant and ACL constraints
 server-side so callers cannot omit or replace them, and frequently filtered
 fields should receive Qdrant payload indexes at scale.
 
+## Hybrid Search
+
+Dense search remains the default and existing schema-v1 collections continue to
+work unchanged. Hybrid mode creates a schema-v2 collection containing named
+MiniLM dense vectors and BM25 sparse vectors. Use a separate collection name
+and pass the same mode to indexing and retrieval:
+
+```powershell
+uv run python -m rag_pipeline index path/to/documents `
+  --collection-name policies_hybrid `
+  --search-mode hybrid
+
+uv run python -m rag_pipeline retrieve "What does code ZX-42 require?" `
+  --collection-name policies_hybrid `
+  --search-mode hybrid
+```
+
+The first hybrid command downloads the configured FastEmbed sparse model into
+`.rag_data/fastembed`; it runs locally afterward and needs no API key. Qdrant's
+IDF modifier is part of the hybrid collection schema. At query time LangChain
+prefetches dense and sparse candidates, applies the same metadata filters to
+both branches, and asks Qdrant to combine ranks with reciprocal-rank fusion.
+Queries that produce an empty sparse vector safely fall back to the collection's
+dense vector.
+
+CLI results expose `score_kind=cosine` or `score_kind=rrf`. These scores are not
+interchangeable: dense thresholds are based on cosine similarity, while hybrid
+thresholds apply to the fused rank score. Calibrate each mode independently on
+a representative evaluation dataset. The default `Qdrant/bm25` model favors
+English tokenization and stemming; multilingual or domain-specific corpora may
+need a different sparse model.
+
+Attempting hybrid retrieval against an existing dense collection fails closed.
+This is intentional: adding a sparse field does not populate old points, so the
+documents must be reindexed into a hybrid collection before fusion is valid.
+
 ## Local Baseline
 
 The default embedding model is
 `sentence-transformers/all-MiniLM-L6-v2`, producing 384-dimensional normalized
 vectors. The default generation model is `google/flan-t5-small`, selected as a
 small architectural baseline rather than a production-quality answer model.
+Hybrid mode adds the local `Qdrant/bm25` FastEmbed sparse encoder and Qdrant RRF.
 
 Transformers is pinned below version 5 because the current LangChain T5 adapter
 uses the `text2text-generation` pipeline API. Model revisions can be pinned
@@ -227,11 +276,11 @@ model limit. The Hugging Face pipeline also enables truncation as a final guard,
 although application-level budgeting remains authoritative so citation ranges
 stay accurate.
 
-The `answer` command defaults to a cosine score threshold of `0.20` and abstains
-when no chunk meets it. The `retrieve` command intentionally has no default
-threshold so retrieval scores can be inspected during evaluation. Similarity
-thresholds are model- and corpus-specific and should be calibrated rather than
-treated as confidence scores.
+The `answer` command defaults to a retrieval score threshold of `0.20` and
+abstains when no chunk meets it. The `retrieve` command intentionally has no
+default threshold so retrieval scores can be inspected during evaluation.
+Dense and fused thresholds are model-, mode-, and corpus-specific and should be
+calibrated rather than treated as confidence scores.
 
 ## Testing
 
@@ -241,12 +290,12 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 68 tests covering ingestion, extraction, chunking,
-chunking experiments, embedding contracts, persistent indexing, typed metadata
-filtering, semantic retrieval, guarded generation, deterministic citations, and
-CLI integration. Provider calls use LangChain test doubles where appropriate;
-the local model path has also been verified end to end with MiniLM, Qdrant, and
-FLAN-T5.
+The suite currently contains 79 tests covering ingestion, extraction, chunking,
+chunking experiments, dense and sparse embedding contracts, persistent dense
+and hybrid indexing, typed metadata filtering, cosine and RRF retrieval, guarded
+generation, deterministic citations, and CLI integration. Provider calls use
+LangChain test doubles where appropriate; the local model path has also been
+verified end to end with MiniLM, Qdrant, and FLAN-T5.
 
 ## Project Layout
 
@@ -264,6 +313,7 @@ FLAN-T5.
 |       |-- generation.py
 |       |-- ingestion.py
 |       |-- retrieval.py
+|       |-- sparse_embeddings.py
 |       `-- vector_store.py
 |-- tests/
 |   |-- test_citations.py
@@ -275,6 +325,7 @@ FLAN-T5.
 |   |-- test_ingestion.py
 |   |-- test_package.py
 |   |-- test_retrieval.py
+|   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
 |-- ARCHITECTURE.md
 |-- PROJECT_BRIEF.md
@@ -285,7 +336,8 @@ FLAN-T5.
 
 ## Current Limitations
 
-- Retrieval is dense-only; hybrid search and reranking are roadmap items.
+- Hybrid retrieval currently uses fixed unweighted RRF; fusion tuning, learned
+  sparse retrieval, and reranking remain roadmap items.
 - Metadata filters currently support exact scalar AND conditions; range, OR,
   list-membership, and policy-composition support are future extensions.
 - The default retrieval threshold is a conservative safety baseline pending

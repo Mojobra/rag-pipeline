@@ -8,7 +8,7 @@
 4. Chunking
 5. Embedding Generation
 6. Vector Database
-7. Retrieval Layer
+7. Hybrid Retrieval Layer (dense + BM25 sparse with RRF)
 8. Reranking Layer
 9. Prompt Construction
 10. LLM Generation

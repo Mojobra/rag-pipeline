@@ -19,8 +19,10 @@ from rag_pipeline.exceptions import (  # noqa: E402
     VectorStoreCompatibilityError,
     VectorStoreInputError,
 )
+from rag_pipeline.sparse_embeddings import SparseEmbeddingVector  # noqa: E402
 from rag_pipeline.vector_store import (  # noqa: E402
     LocalVectorStore,
+    SearchMode,
     VectorStoreConfig,
     build_chunk_point_id,
 )
@@ -112,6 +114,129 @@ class LocalVectorStoreTests(unittest.TestCase):
         self.assertEqual(changed_result.total_count, 1)
         self.assertEqual(stored[0].page_content, "New policy wording.")
 
+    def test_indexes_hybrid_vectors_with_versioned_compatible_schema(self) -> None:
+        records = [
+            make_embedded_document("Policy ZX-42"),
+            make_embedded_document(
+                "Punctuation only",
+                chunk_index=1,
+                vector=(0.0, 1.0),
+            ),
+        ]
+        sparse_vectors = [
+            SparseEmbeddingVector(indices=(42,), values=(1.5,)),
+            SparseEmbeddingVector(indices=(), values=()),
+        ]
+
+        with LocalVectorStore(
+            VectorStoreConfig(
+                path=None,
+                collection_name="hybrid-index",
+                search_mode=SearchMode.HYBRID,
+            )
+        ) as store:
+            result = store.index(
+                records,
+                model_identifier="dense-model",
+                sparse_vectors=sparse_vectors,
+                sparse_model_identifier="sparse-model",
+            )
+            store.validate_compatibility(
+                model_identifier="dense-model",
+                dimension=2,
+                sparse_model_identifier="sparse-model",
+            )
+            stored_documents = store.as_langchain_vector_store().get_by_ids(
+                list(result.point_ids)
+            )
+
+        self.assertEqual(result.search_mode, SearchMode.HYBRID)
+        self.assertEqual(result.sparse_embedding_model, "sparse-model")
+        self.assertEqual(result.total_count, 2)
+        self.assertEqual(len(stored_documents), 2)
+        self.assertEqual(
+            stored_documents[0].metadata["sparse_embedding_model"],
+            "sparse-model",
+        )
+
+    def test_rejects_missing_or_incompatible_hybrid_inputs(self) -> None:
+        record = make_embedded_document("Policy ZX-42")
+        vector = SparseEmbeddingVector(indices=(42,), values=(1.0,))
+
+        with LocalVectorStore(
+            VectorStoreConfig(
+                path=None,
+                collection_name="hybrid-inputs",
+                search_mode="hybrid",
+            )
+        ) as store:
+            with self.assertRaisesRegex(
+                VectorStoreInputError,
+                "requires one sparse vector",
+            ):
+                store.index(
+                    [record],
+                    model_identifier="dense-model",
+                    sparse_model_identifier="sparse-model",
+                )
+
+            with self.assertRaisesRegex(
+                VectorStoreInputError,
+                "0 sparse vector.*1 document",
+            ):
+                store.index(
+                    [record],
+                    model_identifier="dense-model",
+                    sparse_vectors=[],
+                    sparse_model_identifier="sparse-model",
+                )
+
+            malformed_vectors = [
+                (
+                    SparseEmbeddingVector(indices=(42,), values=()),
+                    "different index and value counts",
+                ),
+                (
+                    SparseEmbeddingVector(
+                        indices=(42, 42),
+                        values=(1.0, 2.0),
+                    ),
+                    "duplicate sparse index",
+                ),
+                (
+                    SparseEmbeddingVector(
+                        indices=(42,),
+                        values=(float("nan"),),
+                    ),
+                    "non-finite value",
+                ),
+            ]
+            for malformed_vector, message in malformed_vectors:
+                with self.subTest(message=message):
+                    with self.assertRaisesRegex(VectorStoreInputError, message):
+                        store.index(
+                            [record],
+                            model_identifier="dense-model",
+                            sparse_vectors=[malformed_vector],
+                            sparse_model_identifier="sparse-model",
+                        )
+
+            store.index(
+                [record],
+                model_identifier="dense-model",
+                sparse_vectors=[vector],
+                sparse_model_identifier="sparse-model",
+            )
+            with self.assertRaisesRegex(
+                VectorStoreCompatibilityError,
+                "sparse_embedding_model",
+            ):
+                store.validate_compatibility(
+                    model_identifier="dense-model",
+                    dimension=2,
+                    sparse_model_identifier="other-sparse-model",
+                )
+
     def test_persists_collection_across_reopen(self) -> None:
         record = make_embedded_document("Persistent policy chunk.")
 
@@ -128,6 +253,22 @@ class LocalVectorStoreTests(unittest.TestCase):
                 stored = reopened_store.as_langchain_vector_store().get_by_ids(
                     list(result.point_ids)
                 )
+
+            hybrid_config = VectorStoreConfig(
+                path=config.path,
+                collection_name=config.collection_name,
+                search_mode=SearchMode.HYBRID,
+            )
+            with LocalVectorStore(hybrid_config) as hybrid_store:
+                with self.assertRaisesRegex(
+                    VectorStoreCompatibilityError,
+                    "not a hybrid schema v2 collection",
+                ):
+                    hybrid_store.validate_compatibility(
+                        model_identifier="test-model",
+                        dimension=2,
+                        sparse_model_identifier="test-sparse-model",
+                    )
 
         self.assertEqual(count, 1)
         self.assertEqual(stored[0].page_content, "Persistent policy chunk.")
@@ -196,6 +337,7 @@ class LocalVectorStoreTests(unittest.TestCase):
             ({"collection_name": ""}, "collection_name must be a non-empty"),
             ({"write_batch_size": 0}, "write_batch_size must be greater"),
             ({"write_batch_size": True}, "write_batch_size must be an integer"),
+            ({"search_mode": "unsupported"}, "search_mode must be one of"),
         ]
 
         for settings, message in invalid_settings:
