@@ -31,6 +31,10 @@ class InvalidChunkingConfigurationError(ChunkingError, ValueError):
     """Raised when chunk size or overlap settings are invalid."""
 
 
+class InvalidChunkingExperimentError(ChunkingError, ValueError):
+    """Raised when chunking experiment candidates are invalid."""
+
+
 class EmbeddingError(RagPipelineError):
     """Base error for embedding generation failures."""
 
