@@ -38,6 +38,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_document_input_arguments(chunk_parser)
     _add_chunking_arguments(chunk_parser)
 
+    chunk_experiment_parser = subparsers.add_parser(
+        "chunk-experiment",
+        help="Compare chunking candidates against the same documents.",
+    )
+    _add_document_input_arguments(chunk_experiment_parser)
+    chunk_experiment_parser.add_argument(
+        "--candidate",
+        action="append",
+        dest="chunking_candidates",
+        metavar="SIZE:OVERLAP",
+        help=(
+            "Candidate to evaluate; repeat for multiple settings "
+            "(defaults: 500:100, 1000:200, 1500:300)."
+        ),
+    )
+    chunk_experiment_parser.add_argument(
+        "--output-format",
+        choices=("table", "json"),
+        default="table",
+        help="Report format (default: table).",
+    )
+
     embed_parser = subparsers.add_parser(
         "embed",
         help="Load, chunk, and locally embed supported documents.",
@@ -259,6 +281,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"Chunked {len(documents)} document(s) into {len(chunks)} chunk(s)."
         )
+        return 0
+
+    if args.command == "chunk-experiment":
+        import json
+
+        from rag_pipeline.chunking_experiments import (
+            DEFAULT_CHUNKING_CANDIDATES,
+            chunking_experiment_to_dict,
+            format_chunking_experiment_table,
+            parse_chunking_candidate,
+            run_chunking_experiment,
+        )
+        from rag_pipeline.exceptions import InvalidChunkingExperimentError
+        from rag_pipeline.ingestion import load_documents
+
+        try:
+            candidates = (
+                DEFAULT_CHUNKING_CANDIDATES
+                if args.chunking_candidates is None
+                else tuple(
+                    parse_chunking_candidate(value)
+                    for value in args.chunking_candidates
+                )
+            )
+            documents = load_documents(args.paths, recursive=args.recursive)
+            report = run_chunking_experiment(documents, candidates=candidates)
+        except InvalidChunkingExperimentError as exc:
+            parser.error(str(exc))
+
+        if args.output_format == "json":
+            print(json.dumps(chunking_experiment_to_dict(report), indent=2))
+        else:
+            print(format_chunking_experiment_table(report))
         return 0
 
     if args.command == "embed":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import sys
 import tempfile
@@ -98,6 +99,57 @@ class PackageSmokeTests(unittest.TestCase):
             "Chunked 1 document(s) into 3 chunk(s).",
             output.getvalue(),
         )
+
+    def test_chunk_experiment_command_compares_candidates_as_json(self) -> None:
+        from rag_pipeline.__main__ import main
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "alphabet.txt"
+            file_path.write_text("abcdefghijklmnopqrstuvwxyz", encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "chunk-experiment",
+                        "--candidate",
+                        "10:3",
+                        "--candidate",
+                        "13:0",
+                        "--output-format",
+                        "json",
+                        str(file_path),
+                    ]
+                )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["input_document_count"], 1)
+        self.assertEqual(report["candidates"][0]["chunk_count"], 4)
+        self.assertEqual(report["candidates"][0]["duplicated_characters"], 9)
+        self.assertEqual(report["candidates"][1]["chunk_count"], 2)
+
+    def test_chunk_experiment_command_uses_readable_table_by_default(self) -> None:
+        from rag_pipeline.__main__ import main
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "alphabet.txt"
+            file_path.write_text("abcdefghijklmnopqrstuvwxyz", encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "chunk-experiment",
+                        "--candidate",
+                        "10:3",
+                        str(file_path),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Chunking experiment", output.getvalue())
+        self.assertIn("9 (25.7%)", output.getvalue())
 
     def test_embed_command_reports_vector_dimension_without_downloading_model(
         self,

@@ -20,6 +20,7 @@ code was reviewed, adapted, and validated through automated tests.
 
 - Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
 - Configurable recursive chunking with page and character-level provenance
+- Reproducible chunking experiments with distribution and overlap-cost metrics
 - Local normalized MiniLM embeddings through LangChain
 - Persistent Qdrant storage with deterministic IDs and idempotent upserts
 - Collection compatibility checks for embedding model, vector dimension,
@@ -49,6 +50,7 @@ flowchart LR
 | Decision | Production rationale |
 | --- | --- |
 | Preserve provenance during extraction and chunking | Citations cannot be reconstructed reliably after metadata is lost. |
+| Compare chunking candidates on one document snapshot | Keeps input variance from being mistaken for a chunking effect. |
 | Use deterministic chunk IDs | Re-indexing updates logical chunks instead of creating duplicates. |
 | Record collection model and dimension | Incompatible query vectors fail before corrupting retrieval behavior. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
@@ -116,6 +118,9 @@ uv run python -m rag_pipeline ingest path/to/documents
 # Inspect chunk counts
 uv run python -m rag_pipeline chunk path/to/documents
 
+# Compare several chunking configurations without model calls or indexing
+uv run python -m rag_pipeline chunk-experiment path/to/documents --candidate 500:100 --candidate 1000:200 --candidate 1500:300
+
 # Verify local embedding output
 uv run python -m rag_pipeline embed path/to/documents
 
@@ -135,9 +140,37 @@ Useful options include:
 - `--generation-model` and `--generation-model-revision` for the local LLM
 - `--device` and `--generation-device` for CPU or CUDA placement
 - `--top-k` and `--score-threshold` for retrieval behavior
+- repeatable `--candidate SIZE:OVERLAP` for chunking experiments
+- `--output-format table|json` for human or machine-readable experiment reports
 - `--max-input-tokens` for an optional limit below the tokenizer model maximum
 - `--max-context-characters` as a secondary generation context guard
 - `--collection-name` and `--store-path` for Qdrant persistence
+
+## Chunking Experiments
+
+The `chunk-experiment` command materializes one document snapshot and runs every
+candidate against that same input. With no `--candidate` options, it compares
+`500:100`, `1000:200`, and `1500:300`; each pair represents maximum chunk
+characters and target overlap characters.
+
+The report includes chunk count, min/mean/p95/max chunk length, total emitted
+characters, and duplicated characters. Duplication is calculated from the
+actual provenance intervals emitted by LangChain, because separator-aware
+splitting does not always produce the configured overlap exactly. Chunk count
+and total characters are useful cost proxies; the length distribution exposes
+undersized tails and context pressure.
+
+Use JSON when recording or comparing runs:
+
+```powershell
+uv run python -m rag_pipeline chunk-experiment path/to/documents --output-format json
+```
+
+These are structural diagnostics, not retrieval-quality scores. A candidate
+with fewer chunks or less duplication is not automatically better. Production
+selection should combine these measurements with representative queries,
+relevance labels, latency, and cost; that benchmark is introduced in the later
+retrieval-evaluation task.
 
 ## Local Baseline
 
@@ -170,11 +203,11 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 56 tests covering ingestion, extraction, chunking,
-embedding contracts, persistent indexing, semantic retrieval, guarded
-generation, deterministic citations, and CLI integration. Provider calls use
-LangChain test doubles where appropriate; the local model path has also been
-verified end to end with MiniLM, Qdrant, and FLAN-T5.
+The suite currently contains 64 tests covering ingestion, extraction, chunking,
+chunking experiments, embedding contracts, persistent indexing, semantic
+retrieval, guarded generation, deterministic citations, and CLI integration.
+Provider calls use LangChain test doubles where appropriate; the local model
+path has also been verified end to end with MiniLM, Qdrant, and FLAN-T5.
 
 ## Project Layout
 
@@ -185,6 +218,7 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 |       |-- __main__.py
 |       |-- citations.py
 |       |-- chunking.py
+|       |-- chunking_experiments.py
 |       |-- embeddings.py
 |       |-- exceptions.py
 |       |-- extraction.py
@@ -195,6 +229,7 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 |-- tests/
 |   |-- test_citations.py
 |   |-- test_chunking.py
+|   |-- test_chunking_experiments.py
 |   |-- test_embeddings.py
 |   |-- test_extraction.py
 |   |-- test_generation.py
