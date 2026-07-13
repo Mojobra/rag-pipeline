@@ -7,6 +7,10 @@ from collections.abc import Sequence
 
 from rag_pipeline import __version__
 from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
+from rag_pipeline.sparse_embeddings import (
+    DEFAULT_FASTEMBED_CACHE_DIR,
+    DEFAULT_LOCAL_SPARSE_MODEL,
+)
 
 
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
@@ -76,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_chunking_arguments(index_parser)
     _add_embedding_arguments(index_parser)
     _add_vector_store_location_arguments(index_parser)
+    _add_hybrid_search_arguments(index_parser)
     index_parser.add_argument(
         "--write-batch-size",
         type=int,
@@ -93,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_embedding_arguments(retrieve_parser)
     _add_vector_store_location_arguments(retrieve_parser)
+    _add_hybrid_search_arguments(retrieve_parser)
     _add_retrieval_arguments(retrieve_parser)
 
     answer_parser = subparsers.add_parser(
@@ -105,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_embedding_arguments(answer_parser)
     _add_vector_store_location_arguments(answer_parser)
+    _add_hybrid_search_arguments(answer_parser)
     _add_retrieval_arguments(
         answer_parser,
         default_score_threshold=DEFAULT_ANSWER_SCORE_THRESHOLD,
@@ -129,7 +136,7 @@ def _add_retrieval_arguments(
         type=float,
         default=default_score_threshold,
         help=(
-            "Minimum cosine similarity from -1 to 1"
+            "Minimum retrieval score from -1 to 1"
             + (
                 "."
                 if default_score_threshold is None
@@ -146,6 +153,42 @@ def _add_retrieval_arguments(
             "Exact metadata condition; repeat for AND semantics "
             "(integers and booleans are typed automatically)."
         ),
+    )
+
+
+def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--search-mode",
+        choices=("dense", "hybrid"),
+        default="dense",
+        help="Collection and retrieval mode (default: dense).",
+    )
+    command_parser.add_argument(
+        "--sparse-model",
+        default=DEFAULT_LOCAL_SPARSE_MODEL,
+        help=(
+            "FastEmbed sparse model used in hybrid mode "
+            f"(default: {DEFAULT_LOCAL_SPARSE_MODEL})."
+        ),
+    )
+    command_parser.add_argument(
+        "--sparse-cache-dir",
+        default=str(DEFAULT_FASTEMBED_CACHE_DIR),
+        help=(
+            "Sparse model cache directory "
+            f"(default: {DEFAULT_FASTEMBED_CACHE_DIR})."
+        ),
+    )
+    command_parser.add_argument(
+        "--sparse-batch-size",
+        type=int,
+        default=256,
+        help="Texts encoded per sparse batch (default: 256).",
+    )
+    command_parser.add_argument(
+        "--sparse-threads",
+        type=int,
+        help="Optional FastEmbed CPU thread count.",
     )
 
 
@@ -385,7 +428,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         from rag_pipeline.exceptions import InvalidVectorStoreConfigurationError
         from rag_pipeline.ingestion import load_documents
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.sparse_embeddings import (
+            LocalSparseEmbeddingConfig,
+            create_local_sparse_embedding_service,
+        )
+        from rag_pipeline.vector_store import (
+            LocalVectorStore,
+            SearchMode,
+            VectorStoreConfig,
+        )
 
         try:
             chunking_config = ChunkingConfig(
@@ -398,10 +449,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 batch_size=args.batch_size,
             )
+            search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
                 collection_name=args.collection_name,
                 write_batch_size=args.write_batch_size,
+                search_mode=search_mode,
+            )
+            sparse_embedding_config = (
+                LocalSparseEmbeddingConfig(
+                    model_name=args.sparse_model,
+                    cache_dir=args.sparse_cache_dir,
+                    batch_size=args.sparse_batch_size,
+                    threads=args.sparse_threads,
+                )
+                if search_mode == SearchMode.HYBRID
+                else None
             )
         except (
             InvalidChunkingConfigurationError,
@@ -414,11 +477,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         chunks = chunk_documents(documents, config=chunking_config)
         embedding_service = create_local_embedding_service(embedding_config)
         embedded_documents = embedding_service.embed_documents(chunks)
+        sparse_embedding_service = (
+            create_local_sparse_embedding_service(sparse_embedding_config)
+            if sparse_embedding_config is not None
+            else None
+        )
+        sparse_vectors = (
+            sparse_embedding_service.embed_documents(chunks)
+            if sparse_embedding_service is not None
+            else None
+        )
 
         with LocalVectorStore(vector_store_config) as vector_store:
             result = vector_store.index(
                 embedded_documents,
                 model_identifier=embedding_service.model_identifier,
+                sparse_vectors=sparse_vectors,
+                sparse_model_identifier=(
+                    None
+                    if sparse_embedding_service is None
+                    else sparse_embedding_service.model_identifier
+                ),
             )
 
         print(
@@ -443,7 +522,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             RetrieverService,
             parse_metadata_filter,
         )
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.sparse_embeddings import (
+            LocalSparseEmbeddingConfig,
+            create_local_sparse_embedding_service,
+        )
+        from rag_pipeline.vector_store import (
+            LocalVectorStore,
+            SearchMode,
+            VectorStoreConfig,
+        )
 
         try:
             embedding_config = LocalEmbeddingConfig(
@@ -452,9 +539,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 batch_size=args.batch_size,
             )
+            search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
                 collection_name=args.collection_name,
+                search_mode=search_mode,
+            )
+            sparse_embedding_config = (
+                LocalSparseEmbeddingConfig(
+                    model_name=args.sparse_model,
+                    cache_dir=args.sparse_cache_dir,
+                    batch_size=args.sparse_batch_size,
+                    threads=args.sparse_threads,
+                )
+                if search_mode == SearchMode.HYBRID
+                else None
             )
             retrieval_config = RetrievalConfig(
                 top_k=args.top_k,
@@ -472,11 +571,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(str(exc))
 
         embedding_service = create_local_embedding_service(embedding_config)
+        sparse_embedding_service = (
+            create_local_sparse_embedding_service(sparse_embedding_config)
+            if sparse_embedding_config is not None
+            else None
+        )
         with LocalVectorStore(vector_store_config) as vector_store:
-            results = RetrieverService(embedding_service, vector_store).retrieve(
-                args.query,
-                config=retrieval_config,
-            )
+            results = RetrieverService(
+                embedding_service,
+                vector_store,
+                sparse_embedding_service,
+            ).retrieve(args.query, config=retrieval_config)
 
         if not results:
             print("No chunks met the retrieval criteria.")
@@ -492,7 +597,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if isinstance(chunk_index, int) and not isinstance(chunk_index, bool):
                 location += f" chunk={chunk_index}"
 
-            print(f"{result.rank}. score={result.score:.4f} {location}")
+            print(
+                f"{result.rank}. score={result.score:.4f} {location} "
+                f"score_kind={result.score_kind}"
+            )
             print(f"   {_content_preview(result.document.page_content)}")
         return 0
 
@@ -519,7 +627,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             RetrieverService,
             parse_metadata_filter,
         )
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.sparse_embeddings import (
+            LocalSparseEmbeddingConfig,
+            create_local_sparse_embedding_service,
+        )
+        from rag_pipeline.vector_store import (
+            LocalVectorStore,
+            SearchMode,
+            VectorStoreConfig,
+        )
 
         try:
             embedding_config = LocalEmbeddingConfig(
@@ -528,9 +644,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 batch_size=args.batch_size,
             )
+            search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
                 collection_name=args.collection_name,
+                search_mode=search_mode,
+            )
+            sparse_embedding_config = (
+                LocalSparseEmbeddingConfig(
+                    model_name=args.sparse_model,
+                    cache_dir=args.sparse_cache_dir,
+                    batch_size=args.sparse_batch_size,
+                    threads=args.sparse_threads,
+                )
+                if search_mode == SearchMode.HYBRID
+                else None
             )
             retrieval_config = RetrievalConfig(
                 top_k=args.top_k,
@@ -560,10 +688,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(str(exc))
 
         embedding_service = create_local_embedding_service(embedding_config)
+        sparse_embedding_service = (
+            create_local_sparse_embedding_service(sparse_embedding_config)
+            if sparse_embedding_config is not None
+            else None
+        )
         with LocalVectorStore(vector_store_config) as vector_store:
             retrieval_results = RetrieverService(
                 embedding_service,
                 vector_store,
+                sparse_embedding_service,
             ).retrieve(args.query, config=retrieval_config)
 
         if not retrieval_results:

@@ -19,6 +19,7 @@ dependencies = [
     "transformers>=4.48,<5.0",
     "pypdf>=6.0,<7.0",
     "docx2txt>=0.9,<1.0",
+    "fastembed>=0.3.3,<1.0",
 ]
 
 [tool.setuptools.packages.find]

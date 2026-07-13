@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_qdrant import SparseEmbeddings, SparseVector
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,8 +29,10 @@ from rag_pipeline.retrieval import (  # noqa: E402
     RetrieverService,
     parse_metadata_filter,
 )
+from rag_pipeline.sparse_embeddings import SparseEmbeddingService  # noqa: E402
 from rag_pipeline.vector_store import (  # noqa: E402
     LocalVectorStore,
+    SearchMode,
     VectorStoreConfig,
 )
 
@@ -45,6 +48,26 @@ class QueryEmbeddings(Embeddings):
     def embed_query(self, text: str) -> list[float]:
         self.queries.append(text)
         return self.query_vector
+
+
+class KeywordSparseEmbeddings(SparseEmbeddings):
+    def __init__(self) -> None:
+        self.document_requests: list[list[str]] = []
+        self.query_requests: list[str] = []
+
+    def embed_documents(self, texts: list[str]) -> list[SparseVector]:
+        self.document_requests.append(texts)
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> SparseVector:
+        self.query_requests.append(text)
+        return self._embed(text)
+
+    @staticmethod
+    def _embed(text: str) -> SparseVector:
+        if "zx-42" in text.lower():
+            return SparseVector(indices=[42], values=[1.0])
+        return SparseVector(indices=[], values=[])
 
 
 def make_record(
@@ -215,6 +238,121 @@ class SemanticRetrievalTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].document.page_content, "Current finance policy.")
         self.assertEqual(results[0].rank, 1)
+
+    def test_hybrid_rrf_promotes_exact_terms_and_preserves_filters(self) -> None:
+        records = [
+            make_record(
+                "Conceptually related equipment policy.",
+                source="semantic.txt",
+                chunk_index=0,
+                vector=(1.0, 0.0),
+                metadata={"department": "finance"},
+            ),
+            make_record(
+                "Repair code ZX-42 requires manager approval.",
+                source="exact.txt",
+                chunk_index=0,
+                vector=(0.0, 1.0),
+                metadata={"department": "finance"},
+            ),
+            make_record(
+                "HR procedure ZX-42.",
+                source="hr.txt",
+                chunk_index=0,
+                vector=(0.9, 0.435889894),
+                metadata={"department": "hr"},
+            ),
+        ]
+        dense_provider = QueryEmbeddings([1.0, 0.0])
+        dense_service = EmbeddingService(dense_provider, model_name="dense-model")
+        sparse_provider = KeywordSparseEmbeddings()
+        sparse_service = SparseEmbeddingService(
+            sparse_provider,
+            model_name="sparse-model",
+        )
+        sparse_vectors = sparse_service.embed_documents(
+            [record.document for record in records]
+        )
+
+        with LocalVectorStore(
+            VectorStoreConfig(
+                path=None,
+                collection_name="hybrid-retrieval",
+                search_mode=SearchMode.HYBRID,
+            )
+        ) as store:
+            store.index(
+                records,
+                model_identifier="dense-model",
+                sparse_vectors=sparse_vectors,
+                sparse_model_identifier="sparse-model",
+            )
+            results = RetrieverService(
+                dense_service,
+                store,
+                sparse_service,
+            ).retrieve(
+                "What does ZX-42 require?",
+                config=RetrievalConfig(
+                    top_k=2,
+                    metadata_filters=(
+                        MetadataFilter("department", "finance"),
+                    ),
+                ),
+            )
+
+        self.assertEqual(dense_provider.queries, ["What does ZX-42 require?"])
+        self.assertEqual(
+            sparse_provider.query_requests,
+            ["What does ZX-42 require?"],
+        )
+        self.assertEqual(results[0].document.metadata["source"], "exact.txt")
+        self.assertEqual(results[0].score_kind, "rrf")
+        self.assertNotIn(
+            "hr.txt",
+            [result.document.metadata["source"] for result in results],
+        )
+
+    def test_hybrid_retrieval_falls_back_to_dense_for_empty_sparse_query(self) -> None:
+        record = make_record(
+            "Conceptually related policy.",
+            source="semantic.txt",
+            chunk_index=0,
+            vector=(1.0, 0.0),
+        )
+        dense_service = EmbeddingService(
+            QueryEmbeddings([1.0, 0.0]),
+            model_name="dense-model",
+        )
+        sparse_service = SparseEmbeddingService(
+            KeywordSparseEmbeddings(),
+            model_name="sparse-model",
+        )
+
+        with LocalVectorStore(
+            VectorStoreConfig(
+                path=None,
+                collection_name="hybrid-dense-fallback",
+                search_mode=SearchMode.HYBRID,
+            )
+        ) as store:
+            store.index(
+                [record],
+                model_identifier="dense-model",
+                sparse_vectors=[
+                    sparse_service.embed_documents([record.document])[0]
+                ],
+                sparse_model_identifier="sparse-model",
+            )
+            results = RetrieverService(
+                dense_service,
+                store,
+                sparse_service,
+            ).retrieve("general policy")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].document.metadata["source"], "semantic.txt")
+        self.assertEqual(results[0].score_kind, "cosine")
 
     def test_returns_empty_results_when_metadata_does_not_match(self) -> None:
         record = make_record(
