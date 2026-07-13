@@ -58,6 +58,8 @@ class PackageSmokeTests(unittest.TestCase):
 
         self.assertEqual(answer_args.score_threshold, 0.2)
         self.assertIsNone(retrieve_args.score_threshold)
+        self.assertIsNone(answer_args.metadata_filters)
+        self.assertIsNone(retrieve_args.metadata_filters)
 
     def test_ingest_command_reports_loaded_documents(self) -> None:
         from rag_pipeline.__main__ import main
@@ -258,11 +260,19 @@ class PackageSmokeTests(unittest.TestCase):
         documents = [
             Document(
                 page_content="Expense claims require receipts.",
-                metadata={"source": "expenses.txt", "chunk_index": 0},
+                metadata={
+                    "source": "expenses.txt",
+                    "chunk_index": 0,
+                    "department": "finance",
+                },
             ),
             Document(
                 page_content="Annual leave requests use the HR portal.",
-                metadata={"source": "leave.txt", "chunk_index": 0},
+                metadata={
+                    "source": "leave.txt",
+                    "chunk_index": 0,
+                    "department": "hr",
+                },
             ),
         ]
         embedded_documents = service.embed_documents(documents)
@@ -293,13 +303,16 @@ class PackageSmokeTests(unittest.TestCase):
                             "--collection-name",
                             "policies",
                             "--top-k",
-                            "1",
+                            "2",
+                            "--filter",
+                            "department=finance",
                         ]
                     )
 
         self.assertEqual(exit_code, 0)
         self.assertIn("1. score=1.0000 source=expenses.txt chunk=0", output.getvalue())
         self.assertIn("Expense claims require receipts.", output.getvalue())
+        self.assertNotIn("Annual leave", output.getvalue())
 
     def test_answer_command_generates_from_retrieved_context_without_downloads(
         self,
@@ -320,11 +333,19 @@ class PackageSmokeTests(unittest.TestCase):
         documents = [
             Document(
                 page_content="Expense claims require receipts.",
-                metadata={"source": "expenses.txt", "chunk_index": 0},
+                metadata={
+                    "source": "expenses.txt",
+                    "chunk_index": 0,
+                    "department": "finance",
+                },
             ),
             Document(
                 page_content="Annual leave requests use the HR portal.",
-                metadata={"source": "leave.txt", "chunk_index": 0},
+                metadata={
+                    "source": "leave.txt",
+                    "chunk_index": 0,
+                    "department": "hr",
+                },
             ),
         ]
         embedded_documents = embedding_service.embed_documents(documents)
@@ -365,6 +386,8 @@ class PackageSmokeTests(unittest.TestCase):
                                 "policies",
                                 "--top-k",
                                 "1",
+                                "--filter",
+                                "department=finance",
                             ]
                         )
 

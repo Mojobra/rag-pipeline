@@ -137,6 +137,16 @@ def _add_retrieval_arguments(
             )
         ),
     )
+    command_parser.add_argument(
+        "--filter",
+        action="append",
+        dest="metadata_filters",
+        metavar="KEY=VALUE",
+        help=(
+            "Exact metadata condition; repeat for AND semantics "
+            "(integers and booleans are typed automatically)."
+        ),
+    )
 
 
 def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
@@ -428,7 +438,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             InvalidRetrievalConfigurationError,
             InvalidVectorStoreConfigurationError,
         )
-        from rag_pipeline.retrieval import RetrievalConfig, RetrieverService
+        from rag_pipeline.retrieval import (
+            RetrievalConfig,
+            RetrieverService,
+            parse_metadata_filter,
+        )
         from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
 
         try:
@@ -445,6 +459,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             retrieval_config = RetrievalConfig(
                 top_k=args.top_k,
                 score_threshold=args.score_threshold,
+                metadata_filters=tuple(
+                    parse_metadata_filter(value)
+                    for value in (args.metadata_filters or ())
+                ),
             )
         except (
             InvalidEmbeddingConfigurationError,
@@ -496,7 +514,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             LocalGenerationConfig,
             create_local_answer_generator,
         )
-        from rag_pipeline.retrieval import RetrievalConfig, RetrieverService
+        from rag_pipeline.retrieval import (
+            RetrievalConfig,
+            RetrieverService,
+            parse_metadata_filter,
+        )
         from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
 
         try:
@@ -513,6 +535,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             retrieval_config = RetrievalConfig(
                 top_k=args.top_k,
                 score_threshold=args.score_threshold,
+                metadata_filters=tuple(
+                    parse_metadata_filter(value)
+                    for value in (args.metadata_filters or ())
+                ),
             )
             local_generation_config = LocalGenerationConfig(
                 model_name=args.generation_model,
