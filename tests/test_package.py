@@ -6,7 +6,7 @@ import re
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,6 +58,17 @@ class PackageSmokeTests(unittest.TestCase):
         hybrid_index_args = parser.parse_args(
             ["index", "documents", "--search-mode", "hybrid"]
         )
+        reranked_args = parser.parse_args(
+            [
+                "retrieve",
+                "Question",
+                "--rerank",
+                "--candidate-k",
+                "12",
+                "--top-k",
+                "3",
+            ]
+        )
 
         self.assertEqual(answer_args.score_threshold, 0.2)
         self.assertIsNone(retrieve_args.score_threshold)
@@ -66,6 +77,36 @@ class PackageSmokeTests(unittest.TestCase):
         self.assertEqual(answer_args.search_mode, "dense")
         self.assertEqual(retrieve_args.search_mode, "dense")
         self.assertEqual(hybrid_index_args.search_mode, "hybrid")
+        self.assertFalse(answer_args.rerank)
+        self.assertEqual(answer_args.candidate_k, 20)
+        self.assertTrue(reranked_args.rerank)
+        self.assertEqual(reranked_args.candidate_k, 12)
+        self.assertEqual(reranked_args.top_k, 3)
+
+    def test_rejects_candidate_width_smaller_than_reranked_result_width(
+        self,
+    ) -> None:
+        from rag_pipeline.__main__ import main
+
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            with self.assertRaises(SystemExit):
+                main(
+                    [
+                        "retrieve",
+                        "Question",
+                        "--rerank",
+                        "--candidate-k",
+                        "1",
+                        "--top-k",
+                        "2",
+                    ]
+                )
+
+        self.assertIn(
+            "candidate_k must be greater than or equal to top_k",
+            errors.getvalue(),
+        )
 
     def test_ingest_command_reports_loaded_documents(self) -> None:
         from rag_pipeline.__main__ import main
@@ -426,6 +467,144 @@ class PackageSmokeTests(unittest.TestCase):
         self.assertIn("Expense claims require receipts.", output.getvalue())
         self.assertNotIn("Annual leave", output.getvalue())
 
+    def test_retrieve_and_answer_commands_use_reranked_order_without_downloads(
+        self,
+    ) -> None:
+        from langchain_core.documents import Document
+        from langchain_core.embeddings import Embeddings
+        from langchain_core.language_models.fake import FakeListLLM
+
+        from rag_pipeline.__main__ import main
+        from rag_pipeline.embeddings import EmbeddingService
+        from rag_pipeline.generation import AnswerGenerator
+        from rag_pipeline.reranking import RerankerService
+        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+
+        class CandidateEmbeddings(Embeddings):
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                return [
+                    [0.8, 0.6] if "itemized receipts" in text else [1.0, 0.0]
+                    for text in texts
+                ]
+
+            def embed_query(self, text: str) -> list[float]:
+                return [1.0, 0.0]
+
+        class ReceiptCrossEncoder:
+            def __init__(self) -> None:
+                self.requests: list[list[tuple[str, str]]] = []
+
+            def score(self, text_pairs: list[tuple[str, str]]) -> list[float]:
+                self.requests.append(text_pairs)
+                return [
+                    0.95 if "itemized receipts" in content else 0.1
+                    for _, content in text_pairs
+                ]
+
+        embedding_service = EmbeddingService(
+            CandidateEmbeddings(),
+            model_name="test-embedding-model",
+        )
+        documents = [
+            Document(
+                page_content="Equipment reimbursements are governed by policy.",
+                metadata={"source": "semantic.txt", "chunk_index": 0},
+            ),
+            Document(
+                page_content="Expense claims require itemized receipts.",
+                metadata={"source": "exact.txt", "chunk_index": 0},
+            ),
+        ]
+        scorer = ReceiptCrossEncoder()
+        reranker = RerankerService(
+            scorer,
+            model_identifier="test-reranker",
+        )
+        answer_generator = AnswerGenerator(
+            FakeListLLM(responses=["Itemized receipts are required."]),
+            model_identifier="test-generation-model",
+            tokenizer=PromptTokenizerStub(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = VectorStoreConfig(
+                path=Path(temp_dir) / "qdrant",
+                collection_name="reranking-policies",
+            )
+            with LocalVectorStore(config) as store:
+                store.index(
+                    embedding_service.embed_documents(documents),
+                    model_identifier=embedding_service.model_identifier,
+                )
+
+            reranker_factory_target = (
+                "rag_pipeline.reranking.create_local_reranker_service"
+            )
+            with patch(
+                "rag_pipeline.embeddings.create_local_embedding_service",
+                return_value=embedding_service,
+            ):
+                with patch(
+                    reranker_factory_target,
+                    return_value=reranker,
+                ) as reranker_factory:
+                    retrieve_output = io.StringIO()
+                    with redirect_stdout(retrieve_output):
+                        retrieve_exit_code = main(
+                            [
+                                "retrieve",
+                                "What do expense claims require?",
+                                "--store-path",
+                                str(config.resolved_path),
+                                "--collection-name",
+                                config.collection_name,
+                                "--rerank",
+                                "--candidate-k",
+                                "2",
+                                "--top-k",
+                                "1",
+                            ]
+                        )
+
+                    with patch(
+                        "rag_pipeline.generation.create_local_answer_generator",
+                        return_value=answer_generator,
+                    ):
+                        answer_output = io.StringIO()
+                        with redirect_stdout(answer_output):
+                            answer_exit_code = main(
+                                [
+                                    "answer",
+                                    "What do expense claims require?",
+                                    "--store-path",
+                                    str(config.resolved_path),
+                                    "--collection-name",
+                                    config.collection_name,
+                                    "--rerank",
+                                    "--candidate-k",
+                                    "2",
+                                    "--top-k",
+                                    "1",
+                                ]
+                            )
+
+        retrieval_text = retrieve_output.getvalue()
+        self.assertEqual(retrieve_exit_code, 0)
+        self.assertEqual(answer_exit_code, 0)
+        self.assertEqual(reranker_factory.call_count, 2)
+        self.assertEqual(len(scorer.requests), 2)
+        self.assertIn("score=0.9500 source=exact.txt", retrieval_text)
+        self.assertIn("score_kind=cross_encoder", retrieval_text)
+        self.assertIn("retrieval_rank=2", retrieval_text)
+        self.assertIn("retrieval_score=0.8000", retrieval_text)
+        self.assertIn("reranker_model=test-reranker", retrieval_text)
+        self.assertNotIn("semantic.txt", retrieval_text)
+        self.assertIn(
+            "Answer:\nItemized receipts are required.",
+            answer_output.getvalue(),
+        )
+        self.assertIn("Sources:\n[1] exact.txt", answer_output.getvalue())
+
     def test_answer_command_generates_from_retrieved_context_without_downloads(
         self,
     ) -> None:
@@ -545,21 +724,30 @@ class PackageSmokeTests(unittest.TestCase):
                 return_value=embedding_service,
             ):
                 with patch(
-                    "rag_pipeline.generation.create_local_answer_generator"
-                ) as generation_factory:
-                    with redirect_stdout(output):
-                        exit_code = main(
-                            [
-                                "answer",
-                                "An unrelated question",
-                                "--store-path",
-                                str(config.resolved_path),
-                            ]
-                        )
+                    "rag_pipeline.reranking.create_local_reranker_service"
+                ) as reranker_factory:
+                    with patch(
+                        "rag_pipeline.generation.create_local_answer_generator"
+                    ) as generation_factory:
+                        with redirect_stdout(output):
+                            exit_code = main(
+                                [
+                                    "answer",
+                                    "An unrelated question",
+                                    "--store-path",
+                                    str(config.resolved_path),
+                                    "--rerank",
+                                    "--candidate-k",
+                                    "2",
+                                    "--top-k",
+                                    "1",
+                                ]
+                            )
 
         self.assertEqual(exit_code, 0)
         self.assertIn(INSUFFICIENT_CONTEXT_ANSWER, output.getvalue())
         self.assertNotIn("Sources:", output.getvalue())
+        reranker_factory.assert_not_called()
         generation_factory.assert_not_called()
 
 

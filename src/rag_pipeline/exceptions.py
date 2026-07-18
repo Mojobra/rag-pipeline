@@ -91,6 +91,22 @@ class RetrievalProviderError(RetrievalError):
     """Raised when a vector search fails or returns an invalid response."""
 
 
+class RerankingError(RagPipelineError):
+    """Base error for second-stage reranking failures."""
+
+
+class InvalidRerankingConfigurationError(RerankingError, ValueError):
+    """Raised when local reranker settings or result limits are invalid."""
+
+
+class RerankingInputError(RerankingError, ValueError):
+    """Raised when a query or first-stage candidate cannot be reranked."""
+
+
+class RerankingProviderError(RerankingError):
+    """Raised when a reranking model fails or returns invalid scores."""
+
+
 class GenerationError(RagPipelineError):
     """Base error for grounded answer-generation failures."""
 

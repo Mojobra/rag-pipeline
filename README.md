@@ -23,6 +23,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Reproducible chunking experiments with distribution and overlap-cost metrics
 - Local normalized MiniLM embeddings through LangChain
 - Optional local BM25 sparse embeddings with native Qdrant RRF hybrid search
+- Optional local cross-encoder reranking with first-stage score provenance
 - Persistent Qdrant storage with deterministic IDs and idempotent upserts
 - Collection compatibility checks for embedding model, vector dimension,
   distance metric, and schema version
@@ -46,7 +47,8 @@ flowchart LR
     M["Metadata filters"] --> F
     E --> F
     F --> R["Reciprocal-rank fusion"]
-    R --> G["Bounded guarded context"]
+    R --> X["Optional cross-encoder reranking"]
+    X --> G["Bounded guarded context"]
     G --> H["Local FLAN-T5 generation"]
     H --> I["Answer and deterministic citations"]
 ```
@@ -62,6 +64,8 @@ flowchart LR
 | Version dense and hybrid collection schemas separately | Prevents queries from silently using collections that do not contain the required sparse vectors. |
 | Fuse dense and sparse ranks with RRF | Combines semantic and exact-term retrieval without mixing incomparable raw scores. |
 | Push metadata filters into Qdrant | Selects top-k only from eligible chunks and avoids leaking excluded candidates into application code. |
+| Overfetch before optional cross-encoder reranking | Lets the first stage optimize recall while the second stage improves precision without scoring the entire corpus. |
+| Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
 | Build citations outside the LLM | Prevents fabricated filenames, pages, and source identifiers. |
@@ -97,8 +101,9 @@ expense-policy corpus with `--collection-name expense_policies` and pass the
 same option to `retrieve` and `answer`; local Qdrant collections persist across
 commands.
 
-The first embedding and generation runs download the configured Hugging Face
-model weights. Public local models do not require an API key.
+The first embedding, reranking, and generation runs download their configured
+Hugging Face model weights when those stages are enabled. Public local models
+do not require an API key.
 
 ## Example Output
 
@@ -142,6 +147,9 @@ uv run python -m rag_pipeline index path/to/documents --collection-name policies
 # Inspect ranked evidence without generation
 uv run python -m rag_pipeline retrieve "What is the policy?" --top-k 3
 
+# Retrieve 20 candidates, then return the best 3 after local reranking
+uv run python -m rag_pipeline retrieve "What is the policy?" --rerank --candidate-k 20 --top-k 3
+
 # Restrict retrieval before semantic top-k selection
 uv run python -m rag_pipeline retrieve "What is the policy?" --filter file_extension=.pdf
 
@@ -155,6 +163,10 @@ Useful options include:
 - `--generation-model` and `--generation-model-revision` for the local LLM
 - `--device` and `--generation-device` for CPU or CUDA placement
 - `--top-k` and `--score-threshold` for retrieval behavior
+- `--rerank` and `--candidate-k` for optional second-stage reranking
+- `--reranker-model`, `--reranker-model-revision`, `--reranker-device`,
+  `--reranker-cache-dir`, `--reranker-batch-size`, and
+  `--reranker-max-length` for the local cross-encoder
 - `--search-mode dense|hybrid` for the collection and retrieval strategy
 - `--sparse-model`, `--sparse-cache-dir`, `--sparse-batch-size`, and
   `--sparse-threads` for local hybrid indexing and queries
@@ -258,6 +270,48 @@ Attempting hybrid retrieval against an existing dense collection fails closed.
 This is intentional: adding a sparse field does not populate old points, so the
 documents must be reindexed into a hybrid collection before fusion is valid.
 
+## Cross-Encoder Reranking
+
+Reranking works after either dense or hybrid retrieval and does not require
+reindexing. The first stage retrieves a wider candidate set, then the local
+cross-encoder scores each query-chunk pair jointly and returns the final
+`--top-k` results:
+
+```powershell
+uv run python -m rag_pipeline retrieve "What does code ZX-42 require?" `
+  --collection-name policies_hybrid `
+  --search-mode hybrid `
+  --rerank `
+  --candidate-k 20 `
+  --top-k 4
+```
+
+The first reranked query downloads
+`cross-encoder/ms-marco-MiniLM-L6-v2` into `.rag_data/rerankers`. It then runs
+locally through Sentence Transformers and needs no API key. The model scores
+all candidates in batches, with a maximum tokenized query-chunk length of 512
+by default. The service uses LangChain's cross-encoder
+`score([(query, document), ...])` contract, so a hosted or community scorer can
+replace the local adapter later without changing retrieval or generation
+contracts.
+
+On Windows without Developer Mode, Hugging Face may warn that cache symlinks
+are unavailable. Inference still works, but the fallback cache can consume more
+disk space.
+
+Metadata filters and `--score-threshold` apply during first-stage retrieval,
+before any text reaches the reranker. This is important for permissions-aware
+systems: reranking must never become a path around tenant or ACL filtering.
+`--candidate-k` must be at least `--top-k`; increasing it may improve recall but
+increases latency roughly in proportion to the number of scored pairs.
+
+Reranked CLI results use `score_kind=cross_encoder` and retain
+`retrieval_rank`, `retrieval_score`, and `retrieval_score_kind`. Cross-encoder
+scores are model-specific logits, not calibrated probabilities, and must not be
+compared directly with cosine or RRF scores. A later evaluation task should
+measure whether the selected model and candidate width improve ranking on this
+project's actual queries.
+
 ## Local Baseline
 
 The default embedding model is
@@ -265,6 +319,8 @@ The default embedding model is
 vectors. The default generation model is `google/flan-t5-small`, selected as a
 small architectural baseline rather than a production-quality answer model.
 Hybrid mode adds the local `Qdrant/bm25` FastEmbed sparse encoder and Qdrant RRF.
+Optional reranking uses the small English
+`cross-encoder/ms-marco-MiniLM-L6-v2` model as a CPU-friendly baseline.
 
 Transformers is pinned below version 5 because the current LangChain T5 adapter
 uses the `text2text-generation` pipeline API. Model revisions can be pinned
@@ -290,12 +346,13 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 79 tests covering ingestion, extraction, chunking,
+The suite currently contains 88 tests covering ingestion, extraction, chunking,
 chunking experiments, dense and sparse embedding contracts, persistent dense
-and hybrid indexing, typed metadata filtering, cosine and RRF retrieval, guarded
-generation, deterministic citations, and CLI integration. Provider calls use
-LangChain test doubles where appropriate; the local model path has also been
-verified end to end with MiniLM, Qdrant, and FLAN-T5.
+and hybrid indexing, typed metadata filtering, cosine and RRF retrieval,
+cross-encoder reranking, guarded generation, deterministic citations, and CLI
+integration. Provider calls use test doubles where appropriate; the local model
+path has also been verified end to end with MiniLM, Qdrant, the MS MARCO
+cross-encoder, and FLAN-T5.
 
 ## Project Layout
 
@@ -312,6 +369,7 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 |       |-- extraction.py
 |       |-- generation.py
 |       |-- ingestion.py
+|       |-- reranking.py
 |       |-- retrieval.py
 |       |-- sparse_embeddings.py
 |       `-- vector_store.py
@@ -324,6 +382,7 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 |   |-- test_generation.py
 |   |-- test_ingestion.py
 |   |-- test_package.py
+|   |-- test_reranking.py
 |   |-- test_retrieval.py
 |   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
@@ -336,8 +395,11 @@ verified end to end with MiniLM, Qdrant, and FLAN-T5.
 
 ## Current Limitations
 
-- Hybrid retrieval currently uses fixed unweighted RRF; fusion tuning, learned
-  sparse retrieval, and reranking remain roadmap items.
+- Hybrid retrieval currently uses fixed unweighted RRF; fusion tuning and
+  learned sparse retrieval remain roadmap items.
+- The default reranker is a small English MS MARCO baseline; candidate width,
+  latency, domain fit, multilingual quality, and score calibration still need
+  evaluation on representative business queries.
 - Metadata filters currently support exact scalar AND conditions; range, OR,
   list-membership, and policy-composition support are future extensions.
 - The default retrieval threshold is a conservative safety baseline pending

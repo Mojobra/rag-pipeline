@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from rag_pipeline import __version__
 from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
+from rag_pipeline.reranking import (
+    DEFAULT_LOCAL_RERANKER_MODEL,
+    DEFAULT_RERANKER_CACHE_DIR,
+)
 from rag_pipeline.sparse_embeddings import (
     DEFAULT_FASTEMBED_CACHE_DIR,
     DEFAULT_LOCAL_SPARSE_MODEL,
 )
+
+if TYPE_CHECKING:
+    from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
+    from rag_pipeline.retrieval import RetrievalResult
 
 
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
@@ -100,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_vector_store_location_arguments(retrieve_parser)
     _add_hybrid_search_arguments(retrieve_parser)
     _add_retrieval_arguments(retrieve_parser)
+    _add_reranking_arguments(retrieve_parser)
 
     answer_parser = subparsers.add_parser(
         "answer",
@@ -116,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
         answer_parser,
         default_score_threshold=DEFAULT_ANSWER_SCORE_THRESHOLD,
     )
+    _add_reranking_arguments(answer_parser)
     _add_generation_arguments(answer_parser)
     return parser
 
@@ -189,6 +200,57 @@ def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> Non
         "--sparse-threads",
         type=int,
         help="Optional FastEmbed CPU thread count.",
+    )
+
+
+def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Rerank a wider candidate set with a local cross-encoder.",
+    )
+    command_parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=20,
+        help="Chunks retrieved before optional reranking (default: 20).",
+    )
+    command_parser.add_argument(
+        "--reranker-model",
+        default=DEFAULT_LOCAL_RERANKER_MODEL,
+        help=(
+            "Local cross-encoder model used for reranking "
+            f"(default: {DEFAULT_LOCAL_RERANKER_MODEL})."
+        ),
+    )
+    command_parser.add_argument(
+        "--reranker-model-revision",
+        help="Optional reranker model commit or tag for reproducibility.",
+    )
+    command_parser.add_argument(
+        "--reranker-device",
+        default="cpu",
+        help="Sentence Transformers reranker device (default: cpu).",
+    )
+    command_parser.add_argument(
+        "--reranker-cache-dir",
+        default=str(DEFAULT_RERANKER_CACHE_DIR),
+        help=(
+            "Reranker model cache directory "
+            f"(default: {DEFAULT_RERANKER_CACHE_DIR})."
+        ),
+    )
+    command_parser.add_argument(
+        "--reranker-batch-size",
+        type=int,
+        default=16,
+        help="Query-chunk pairs scored per batch (default: 16).",
+    )
+    command_parser.add_argument(
+        "--reranker-max-length",
+        type=int,
+        default=512,
+        help="Maximum tokenized query-chunk length (default: 512).",
     )
 
 
@@ -514,6 +576,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             create_local_embedding_service,
         )
         from rag_pipeline.exceptions import (
+            InvalidRerankingConfigurationError,
             InvalidRetrievalConfigurationError,
             InvalidVectorStoreConfigurationError,
         )
@@ -555,8 +618,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if search_mode == SearchMode.HYBRID
                 else None
             )
+            (
+                local_reranker_config,
+                reranking_config,
+                retrieval_top_k,
+            ) = _build_reranking_configs(args)
             retrieval_config = RetrievalConfig(
-                top_k=args.top_k,
+                top_k=retrieval_top_k,
                 score_threshold=args.score_threshold,
                 metadata_filters=tuple(
                     parse_metadata_filter(value)
@@ -567,6 +635,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             InvalidEmbeddingConfigurationError,
             InvalidVectorStoreConfigurationError,
             InvalidRetrievalConfigurationError,
+            InvalidRerankingConfigurationError,
         ) as exc:
             parser.error(str(exc))
 
@@ -583,6 +652,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sparse_embedding_service,
             ).retrieve(args.query, config=retrieval_config)
 
+        results = _rerank_results(
+            args.query,
+            results,
+            local_config=local_reranker_config,
+            config=reranking_config,
+        )
+
         if not results:
             print("No chunks met the retrieval criteria.")
             return 0
@@ -597,9 +673,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             if isinstance(chunk_index, int) and not isinstance(chunk_index, bool):
                 location += f" chunk={chunk_index}"
 
+            ranking_details = f"score_kind={result.score_kind}"
+            if result.retrieval_rank is not None:
+                ranking_details += (
+                    f" retrieval_rank={result.retrieval_rank}"
+                    f" retrieval_score={result.retrieval_score:.4f}"
+                    f" retrieval_score_kind={result.retrieval_score_kind}"
+                    f" reranker_model={result.reranker_model}"
+                )
             print(
                 f"{result.rank}. score={result.score:.4f} {location} "
-                f"score_kind={result.score_kind}"
+                f"{ranking_details}"
             )
             print(f"   {_content_preview(result.document.page_content)}")
         return 0
@@ -613,6 +697,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         from rag_pipeline.exceptions import (
             InvalidGenerationConfigurationError,
+            InvalidRerankingConfigurationError,
             InvalidRetrievalConfigurationError,
             InvalidVectorStoreConfigurationError,
         )
@@ -660,8 +745,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if search_mode == SearchMode.HYBRID
                 else None
             )
+            (
+                local_reranker_config,
+                reranking_config,
+                retrieval_top_k,
+            ) = _build_reranking_configs(args)
             retrieval_config = RetrievalConfig(
-                top_k=args.top_k,
+                top_k=retrieval_top_k,
                 score_threshold=args.score_threshold,
                 metadata_filters=tuple(
                     parse_metadata_filter(value)
@@ -683,6 +773,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             InvalidEmbeddingConfigurationError,
             InvalidVectorStoreConfigurationError,
             InvalidRetrievalConfigurationError,
+            InvalidRerankingConfigurationError,
             InvalidGenerationConfigurationError,
         ) as exc:
             parser.error(str(exc))
@@ -699,6 +790,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 vector_store,
                 sparse_embedding_service,
             ).retrieve(args.query, config=retrieval_config)
+
+        retrieval_results = _rerank_results(
+            args.query,
+            retrieval_results,
+            local_config=local_reranker_config,
+            config=reranking_config,
+        )
 
         if not retrieval_results:
             print("Answer:")
@@ -722,6 +820,53 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print("RAG Pipeline skeleton is ready.")
     return 0
+
+
+def _build_reranking_configs(
+    args: argparse.Namespace,
+) -> tuple[
+    LocalRerankerConfig | None,
+    RerankingConfig | None,
+    int,
+]:
+    from rag_pipeline.exceptions import InvalidRerankingConfigurationError
+    from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
+
+    if not args.rerank:
+        return None, None, args.top_k
+
+    reranking_config = RerankingConfig(top_n=args.top_k)
+    if args.candidate_k < reranking_config.top_n:
+        raise InvalidRerankingConfigurationError(
+            "candidate_k must be greater than or equal to top_k."
+        )
+    local_config = LocalRerankerConfig(
+        model_name=args.reranker_model,
+        model_revision=args.reranker_model_revision,
+        device=args.reranker_device,
+        cache_dir=args.reranker_cache_dir,
+        batch_size=args.reranker_batch_size,
+        max_length=args.reranker_max_length,
+    )
+    return local_config, reranking_config, args.candidate_k
+
+
+def _rerank_results(
+    query: str,
+    results: list[RetrievalResult],
+    *,
+    local_config: LocalRerankerConfig | None,
+    config: RerankingConfig | None,
+) -> list[RetrievalResult]:
+    if not results or config is None:
+        return results
+    if local_config is None:
+        raise RuntimeError("Reranking config has no local model configuration.")
+
+    from rag_pipeline.reranking import create_local_reranker_service
+
+    reranker = create_local_reranker_service(local_config)
+    return reranker.rerank(query, results, config=config)
 
 
 def _content_preview(content: str, *, max_length: int = 240) -> str:
