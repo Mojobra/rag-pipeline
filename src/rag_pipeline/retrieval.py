@@ -169,12 +169,16 @@ class RetrievalConfig:
 
 @dataclass(frozen=True, slots=True)
 class RetrievalResult:
-    """One ranked document returned by semantic retrieval."""
+    """One ranked document with optional second-stage score provenance."""
 
     document: Document
     score: float
     rank: int
-    score_kind: Literal["cosine", "rrf"] = "cosine"
+    score_kind: Literal["cosine", "rrf", "cross_encoder"] = "cosine"
+    retrieval_score: float | None = None
+    retrieval_rank: int | None = None
+    retrieval_score_kind: Literal["cosine", "rrf"] | None = None
+    reranker_model: str | None = None
 
 
 class RetrieverService:

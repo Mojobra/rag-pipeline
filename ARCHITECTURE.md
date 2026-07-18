@@ -9,7 +9,7 @@
 5. Embedding Generation
 6. Vector Database
 7. Hybrid Retrieval Layer (dense + BM25 sparse with RRF)
-8. Reranking Layer
+8. Local Cross-Encoder Reranking Layer
 9. Prompt Construction
 10. LLM Generation
 11. Citation System
