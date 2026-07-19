@@ -10,7 +10,7 @@
 6. Vector Database
 7. Hybrid Retrieval Layer (dense + BM25 sparse with RRF)
 8. Local Cross-Encoder Reranking Layer
-9. Prompt Construction
+9. Versioned Prompt Construction and Token-Aware Evidence Packing
 10. LLM Generation
 11. Citation System
 12. Evaluation Framework
@@ -27,7 +27,7 @@ Phase 1:
 Local prototype
 
 Phase 2:
-Improved retrieval quality
+Improved retrieval and prompt quality
 
 Phase 3:
 Evaluation framework
@@ -37,6 +37,23 @@ Production hardening
 
 Phase 5:
 Enterprise integrations
+
+---
+
+## Current Generation Contract
+
+- LangChain composes the `grounded-v2` prompt with the configured language model
+  and string output parser.
+- Ranked chunks are packed into numbered evidence blocks under exact character
+  and tokenizer limits.
+- Retrieved text is explicitly treated as untrusted data, and unsupported or
+  conflicting evidence maps to one deterministic abstention response.
+- The answer result records both model and prompt identifiers; source citations
+  are constructed outside the language model from validated chunk provenance.
+
+Evidence delimiters are prompt structure, not a security or authorization
+boundary. Answer faithfulness and abstention still require dataset-based
+evaluation before production use.
 
 ---
 

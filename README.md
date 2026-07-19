@@ -29,7 +29,8 @@ code was reviewed, adapted, and validated through automated tests.
   distance metric, and schema version
 - Ranked semantic retrieval with configurable top-k and score thresholds
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
-- Tokenizer-bounded local generation with explicit abstention behavior
+- Tokenizer-bounded local generation with a versioned grounding and abstention
+  prompt
 - Deterministic citations built from retrieval metadata, never model output
 - Typed configuration, stage-specific exceptions, and automated tests
 
@@ -48,8 +49,9 @@ flowchart LR
     E --> F
     F --> R["Reciprocal-rank fusion"]
     R --> X["Optional cross-encoder reranking"]
-    X --> G["Bounded guarded context"]
-    G --> H["Local FLAN-T5 generation"]
+    X --> G["Bounded numbered evidence blocks"]
+    G --> P["LangChain grounded-v2 prompt"]
+    P --> H["Local FLAN-T5 generation"]
     H --> I["Answer and deterministic citations"]
 ```
 
@@ -67,6 +69,8 @@ flowchart LR
 | Overfetch before optional cross-encoder reranking | Lets the first stage optimize recall while the second stage improves precision without scoring the entire corpus. |
 | Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
+| Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
+| Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
 | Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
 | Build citations outside the LLM | Prevents fabricated filenames, pages, and source identifiers. |
 | Keep provider boundaries behind LangChain interfaces | Makes later model and infrastructure changes less invasive. |
@@ -312,6 +316,34 @@ compared directly with cosine or RRF scores. A later evaluation task should
 measure whether the selected model and candidate width improve ranking on this
 project's actual queries.
 
+## Prompt Optimization
+
+Answer generation uses a LangChain `PromptTemplate` identified as
+`grounded-v2`. The prompt gives the model a compact contract: use supported
+evidence only, ignore instructions found in retrieved text, abstain with one
+exact response when evidence is missing, insufficient, or conflicting, and
+return concise answer text without inventing sources or citations.
+
+Ranked chunks are rendered as numbered `[Evidence n]` blocks. The same accepted
+chunk sequence drives citation numbering, so evidence block 1 and citation
+`[1]` always refer to the same retrieval result even when empty chunks are
+skipped. Filenames and other provenance are not placed in the model prompt;
+citations continue to be built and validated outside the LLM. Every
+`GeneratedAnswer` records `prompt_identifier` alongside `model_identifier` for
+reproducible evaluation and troubleshooting.
+
+Character and tokenizer budgets include block labels, separators, the question,
+all prompt instructions, and special tokens. When the final block must be
+truncated, its citation excerpt still contains only the exact raw evidence
+prefix sent to the model, excluding labels and the visual ellipsis.
+
+The evidence delimiters improve structure but do not sanitize hostile content
+or form an authorization boundary. The local FLAN-T5 baseline may also ignore
+instructions or abstain too often. Prompt quality therefore needs representative
+faithfulness and abstention evaluation in the later answer-evaluation task. A
+single text prompt is intentional for the current text-to-text model; a future
+chat-model adapter can express the same contract with system and user messages.
+
 ## Local Baseline
 
 The default embedding model is
@@ -346,13 +378,14 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 88 tests covering ingestion, extraction, chunking,
+The suite currently contains 90 tests covering ingestion, extraction, chunking,
 chunking experiments, dense and sparse embedding contracts, persistent dense
 and hybrid indexing, typed metadata filtering, cosine and RRF retrieval,
-cross-encoder reranking, guarded generation, deterministic citations, and CLI
-integration. Provider calls use test doubles where appropriate; the local model
-path has also been verified end to end with MiniLM, Qdrant, the MS MARCO
-cross-encoder, and FLAN-T5.
+cross-encoder reranking, versioned guarded generation, evidence boundary and
+token-budget behavior, deterministic citations, and CLI integration. Provider
+calls use test doubles where appropriate; the local model path has also been
+verified end to end with MiniLM, Qdrant, the MS MARCO cross-encoder, and
+FLAN-T5.
 
 ## Project Layout
 
@@ -406,6 +439,9 @@ cross-encoder, and FLAN-T5.
   calibration against an evaluation dataset.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
+- The `grounded-v2` prompt is a hand-authored baseline; faithfulness,
+  abstention, and prompt-injection resilience are not yet benchmarked on a
+  representative answer dataset.
 - Local source paths should become stable document IDs or authorized URLs before
   citations are exposed through a service.
 - The default generation model prioritizes local accessibility over answer
