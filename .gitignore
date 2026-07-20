@@ -19,6 +19,9 @@ dist/
 # Local model and vector-store data
 .rag_data/
 
+# Local architecture working notes
+/ARCHITECTURE-DECISIONS.md
+
 # Editors and operating systems
 .idea/
 .vscode/
