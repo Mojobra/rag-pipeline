@@ -1,8 +1,7 @@
 """Generate grounded answers from bounded, ranked retrieval evidence.
 
-The module owns the versioned LangChain prompt, local tokenizer and conservative
-hosted budgeting, evidence/citation alignment, model construction, and safe
-abstention paths.
+The module owns the versioned LangChain prompt, exact tokenizer budgeting,
+evidence/citation alignment, local model construction, and safe abstention paths.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from typing import Protocol
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
-from pydantic import SecretStr
 
 from rag_pipeline.citations import Citation, build_citation
 from rag_pipeline.exceptions import (
@@ -24,16 +22,10 @@ from rag_pipeline.exceptions import (
     GenerationProviderError,
     InvalidGenerationConfigurationError,
 )
-from rag_pipeline.model_profiles import (
-    ModelProvider,
-    ProviderGenerationProfile,
-    ProviderModelProfile,
-)
 from rag_pipeline.retrieval import RetrievalResult
 
 
 DEFAULT_LOCAL_GENERATION_MODEL = "google/flan-t5-small"
-DEFAULT_HOSTED_MODEL_INPUT_TOKENS = 8192
 DEFAULT_TOKEN_SAFETY_MARGIN = 8
 _MAX_FINITE_MODEL_INPUT_TOKENS = 1_000_000
 GROUNDED_ANSWER_PROMPT_ID = "grounded-v2"
@@ -45,10 +37,10 @@ INSUFFICIENT_CONTEXT_ANSWER = (
 
 
 class PromptTokenizer(Protocol):
-    """Tokenizer behavior required for prompt-budget enforcement.
+    """Tokenizer behavior required for exact prompt-budget enforcement.
 
-    Local tokenizers and conservative hosted adapters expose a finite model
-    limit plus an encode-shaped operation that never truncates input silently.
+    Local and future model adapters must expose a finite model limit or callers
+    must configure one explicitly, plus an encode operation without truncation.
     """
 
     model_max_length: int
@@ -63,44 +55,6 @@ class PromptTokenizer(Protocol):
     ) -> list[int]:
         """Tokenize prompt text without silently removing over-limit input."""
         ...
-
-
-class _ConservativeHostedTokenizer:
-    """Estimate hosted prompt size without extra provider requests.
-
-    Each UTF-8 byte is counted as one token plus fixed chat framing overhead.
-    This intentionally overbudgets typical text and avoids relying on a model
-    ID-specific local tokenizer or invoking a paid token-count endpoint during
-    the context-packing binary search.
-    """
-
-    _CHAT_MESSAGE_OVERHEAD = 8
-
-    def __init__(self, *, model_max_length: int) -> None:
-        self.model_max_length = model_max_length
-
-    def encode(
-        self,
-        text: str,
-        *,
-        add_special_tokens: bool = True,
-        truncation: bool = False,
-        verbose: bool = False,
-    ) -> list[int]:
-        """Return placeholder IDs representing a conservative prompt estimate.
-
-        The compatibility parameters mirror Hugging Face tokenizers; prompt
-        assembly always requests special-token-aware, non-truncated counting.
-        The operation is local, deterministic, and performs no provider I/O.
-        """
-        del verbose
-        if truncation:
-            raise ValueError("Hosted prompt token counting cannot truncate input.")
-        framing_tokens = (
-            self._CHAT_MESSAGE_OVERHEAD if add_special_tokens else 0
-        )
-        token_count = len(text.encode("utf-8")) + framing_tokens
-        return [0] * token_count
 
 
 GROUNDED_ANSWER_PROMPT = PromptTemplate.from_template(
@@ -181,42 +135,6 @@ class LocalGenerationConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class HostedGenerationConfig:
-    """Validated hosted decoding settings paired with a generation profile.
-
-    The CLI builds this before retrieval so malformed limits fail without vector
-    or provider I/O. The profile supplies model identity and credentials; the
-    common input cap keeps prompt packing independent of changing model IDs.
-    Complete provider profiles remain supported for compatibility callers.
-    """
-
-    profile: ProviderGenerationProfile | ProviderModelProfile
-    max_new_tokens: int = 128
-    temperature: float | None = None
-    input_token_limit: int = DEFAULT_HOSTED_MODEL_INPUT_TOKENS
-
-    def __post_init__(self) -> None:
-        """Validate profile type, output controls, and hosted prompt capacity."""
-        if not isinstance(
-            self.profile,
-            (ProviderGenerationProfile, ProviderModelProfile),
-        ):
-            raise TypeError(
-                "profile must be a ProviderGenerationProfile or "
-                "ProviderModelProfile."
-            )
-        _validate_hosted_generation_settings(
-            max_new_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-            input_token_limit=self.input_token_limit,
-        )
-
-    @property
-    def model_identifier(self) -> str:
-        return self.profile.generation_model
-
-
-@dataclass(frozen=True, slots=True)
 class GenerationConfig:
     """Validated input-budget policy for one answer-generation request.
 
@@ -277,8 +195,7 @@ class GeneratedAnswer:
 
     The record identifies model and prompt versions, accepted retrieval records,
     prefix-aligned citations, budget usage, truncation, and whether a model was
-    invoked or the no-evidence fallback was returned. ``prompt_tokens`` is exact
-    for local models and a conservative estimate for hosted profiles.
+    invoked or the no-evidence fallback was returned.
     """
 
     answer: str
@@ -308,7 +225,7 @@ class _PromptContext:
 class AnswerGenerator:
     """Coordinate guarded prompt construction and one LangChain language model.
 
-    The service packs ranked evidence under configured prompt limits, creates
+    The service packs ranked evidence under exact tokenizer limits, creates
     citations from the same accepted prefixes, invokes the model only when
     evidence remains, and normalizes provider failures for the application.
     """
@@ -499,130 +416,6 @@ def create_local_answer_generator(
     )
 
 
-def create_profile_answer_generator(
-    config: HostedGenerationConfig,
-) -> AnswerGenerator:
-    """Initialize a hosted LangChain chat model for one provider profile.
-
-    The factory passes credentials directly to the selected integration instead
-    of mutating environment variables. Client construction may initialize
-    network resources; generation occurs when ``AnswerGenerator.generate`` is
-    called. Hosted prompt size uses a conservative local estimate, and the input
-    limit caps all configurable models at a common application budget.
-
-    Args:
-        config: Validated provider profile, output controls, and application
-            prompt cap. A ``None`` temperature preserves provider defaults,
-            including Gemini 3's recommended default.
-
-    Returns:
-        The common guarded answer generator used by the CLI.
-
-    Raises:
-        GenerationProviderError: If the integration cannot be imported or its
-            model client cannot be initialized.
-    """
-    if not isinstance(config, HostedGenerationConfig):
-        raise TypeError("config must be a HostedGenerationConfig.")
-    profile = config.profile
-
-    model_kwargs: dict[str, object] = {
-        "model": profile.generation_model,
-        "api_key": SecretStr(profile.api_key),
-    }
-    if config.temperature is not None:
-        model_kwargs["temperature"] = float(config.temperature)
-
-    try:
-        if profile.provider == ModelProvider.GEMINI:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-
-            language_model = ChatGoogleGenerativeAI(
-                **model_kwargs,
-                max_tokens=config.max_new_tokens,
-            )
-        elif profile.provider == ModelProvider.OPENAI:
-            from langchain_openai import ChatOpenAI
-
-            language_model = ChatOpenAI(
-                **model_kwargs,
-                max_completion_tokens=config.max_new_tokens,
-            )
-        elif profile.provider == ModelProvider.CLAUDE:
-            from langchain_anthropic import ChatAnthropic
-
-            language_model = ChatAnthropic(
-                **model_kwargs,
-                max_tokens=config.max_new_tokens,
-            )
-        else:  # Defensive guard if the provider enum grows without an adapter.
-            raise GenerationProviderError(
-                f"No generation adapter is configured for {profile.provider.value}."
-            )
-    except ImportError as exc:
-        raise GenerationProviderError(
-            f"The LangChain {profile.provider.value} generation integration is "
-            "not installed."
-        ) from exc
-    except GenerationProviderError:
-        raise
-    except Exception as exc:
-        raise GenerationProviderError(
-            f"Failed to initialize {profile.provider.value} generation model "
-            f"{profile.generation_model}."
-        ) from exc
-
-    tokenizer = _ConservativeHostedTokenizer(
-        model_max_length=config.input_token_limit,
-    )
-    return AnswerGenerator(
-        language_model,
-        model_identifier=config.model_identifier,
-        tokenizer=tokenizer,
-    )
-
-
-def _validate_hosted_generation_settings(
-    *,
-    max_new_tokens: object,
-    temperature: object,
-    input_token_limit: object,
-) -> None:
-    """Validate provider-neutral hosted decoding and prompt-budget settings."""
-    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int):
-        raise InvalidGenerationConfigurationError(
-            "max_new_tokens must be an integer."
-        )
-    if max_new_tokens <= 0:
-        raise InvalidGenerationConfigurationError(
-            "max_new_tokens must be greater than zero."
-        )
-    if temperature is not None:
-        if isinstance(temperature, bool) or not isinstance(temperature, Real):
-            raise InvalidGenerationConfigurationError(
-                "temperature must be a number."
-            )
-        numeric_temperature = float(temperature)
-        if not isfinite(numeric_temperature):
-            raise InvalidGenerationConfigurationError(
-                "temperature must be finite."
-            )
-        if not 0.0 <= numeric_temperature <= 2.0:
-            raise InvalidGenerationConfigurationError(
-                "temperature must be between 0 and 2."
-            )
-    if isinstance(input_token_limit, bool) or not isinstance(
-        input_token_limit, int
-    ):
-        raise InvalidGenerationConfigurationError(
-            "input_token_limit must be an integer."
-        )
-    if input_token_limit <= DEFAULT_TOKEN_SAFETY_MARGIN:
-        raise InvalidGenerationConfigurationError(
-            "input_token_limit must be greater than the default safety margin."
-        )
-
-
 def _build_context(
     question: str,
     retrieval_results: Iterable[RetrievalResult],
@@ -792,11 +585,10 @@ def _render_prompt(*, question: str, context: str) -> str:
 
 
 def _prompt_token_count(tokenizer: PromptTokenizer, prompt: str) -> int:
-    """Count or conservatively estimate the complete untruncated prompt.
+    """Count the complete prompt with special tokens and no truncation.
 
-    Local tokenizers include special tokens; hosted adapters include conservative
-    framing overhead. Failures and empty sequences are provider errors because
-    safe context assembly cannot proceed without a trustworthy budget value.
+    Tokenizer failures and empty token sequences are provider errors because
+    safe context assembly cannot proceed without a trustworthy count.
     """
     try:
         token_ids = tokenizer.encode(

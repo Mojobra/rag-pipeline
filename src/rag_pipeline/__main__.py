@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 from rag_pipeline import __version__
 from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
-from rag_pipeline.exceptions import InvalidModelProviderConfigurationError
 from rag_pipeline.reranking import (
     DEFAULT_LOCAL_RERANKER_MODEL,
     DEFAULT_RERANKER_CACHE_DIR,
@@ -24,13 +23,6 @@ from rag_pipeline.sparse_embeddings import (
 )
 
 if TYPE_CHECKING:
-    from rag_pipeline.embeddings import EmbeddingService, LocalEmbeddingConfig
-    from rag_pipeline.generation import (
-        AnswerGenerator,
-        HostedGenerationConfig,
-        LocalGenerationConfig,
-    )
-    from rag_pipeline.model_profiles import ProviderEmbeddingProfile
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
     from rag_pipeline.retrieval import RetrievalResult
 
@@ -47,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="rag_pipeline",
-        description="Run the production-minded RAG pipeline.",
+        description="Run the local RAG pipeline prototype.",
     )
     parser.add_argument(
         "--version",
@@ -131,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     answer_parser = subparsers.add_parser(
         "answer",
-        help="Retrieve context and generate a grounded answer.",
+        help="Retrieve context and generate a grounded local answer.",
     )
     answer_parser.add_argument(
         "query",
@@ -288,36 +280,24 @@ def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
 
 
 def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
-    """Attach language-model decoding and prompt-budget settings for answers.
+    """Attach local language-model and prompt-budget settings for answers.
 
-    ``--model`` selects a hosted generation provider without changing retrieval
-    embeddings. Local selections use the explicit generation model/device flags.
+    These options are isolated to generation so retrieval diagnostics never
+    initialize or configure a language model.
     """
-    command_parser.add_argument(
-        "--model",
-        choices=("gemini", "openai", "claude"),
-        type=str.lower,
-        help=(
-            "Hosted generation provider loaded from .env; when omitted, use "
-            "the local generation model."
-        ),
-    )
     command_parser.add_argument(
         "--generation-model",
         default="google/flan-t5-small",
-        help=(
-            "Local Hugging Face generation model; ignored by hosted profiles "
-            "(default: google/flan-t5-small)."
-        ),
+        help="Local Hugging Face generation model (default: google/flan-t5-small).",
     )
     command_parser.add_argument(
         "--generation-model-revision",
-        help="Optional local generation-model commit or tag for reproducibility.",
+        help="Optional generation-model commit or tag for reproducibility.",
     )
     command_parser.add_argument(
         "--generation-device",
         default="cpu",
-        help="Local generation device: cpu, cuda, or cuda:<index> (default: cpu).",
+        help="Generation device: cpu, cuda, or cuda:<index> (default: cpu).",
     )
     command_parser.add_argument(
         "--max-new-tokens",
@@ -328,10 +308,8 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--temperature",
         type=float,
-        help=(
-            "Optional sampling temperature from 0 to 2; hosted providers use "
-            "their model default when omitted, while local generation uses 0."
-        ),
+        default=0.0,
+        help="Sampling temperature from 0 to 2 (default: 0).",
     )
     command_parser.add_argument(
         "--max-context-characters",
@@ -342,39 +320,29 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--max-input-tokens",
         type=int,
-        help=(
-            "Optional prompt cap; defaults to the local tokenizer limit or the "
-            "hosted profile's conservative application limit."
-        ),
+        help="Optional prompt-token cap; defaults to the tokenizer model limit.",
     )
 
 
 def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
-    """Attach independent hosted or local dense embedding options.
+    """Attach the dense model identity, device, and batching options.
 
     Indexing and retrieval share this group because they must use a compatible
-    embedding contract. Device, revision, and batching settings affect local
-    embeddings, including the Claude profile's local embedding model.
+    embedding contract.
     """
     command_parser.add_argument(
-        "--embed-model",
+        "--model",
         default=DEFAULT_LOCAL_EMBEDDING_MODEL,
-        help=(
-            "Embedding provider alias (gemini, openai, or claude) loaded from "
-            ".env, or a local Hugging Face embedding model "
-            f"(default: {DEFAULT_LOCAL_EMBEDDING_MODEL})."
-        ),
+        help=f"Hugging Face embedding model (default: {DEFAULT_LOCAL_EMBEDDING_MODEL}).",
     )
     command_parser.add_argument(
-        "--embed-model-revision",
         "--model-revision",
-        dest="embed_model_revision",
-        help="Optional local embedding-model commit or tag for reproducibility.",
+        help="Optional Hugging Face model commit or tag for reproducibility.",
     )
     command_parser.add_argument(
         "--device",
         default="cpu",
-        help="Local sentence-transformers device (default: cpu).",
+        help="Inference device understood by sentence-transformers (default: cpu).",
     )
     command_parser.add_argument(
         "--batch-size",
@@ -429,11 +397,10 @@ def _add_document_input_arguments(command_parser: argparse.ArgumentParser) -> No
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse and execute one pipeline command.
+    """Parse and execute one local pipeline command.
 
     Depending on the command, execution may read documents, download/cache and
-    run local models, call hosted providers, mutate or query local Qdrant, and
-    print results to stdout.
+    run models, mutate or query local Qdrant, and print results to stdout.
     Invalid command configuration is reported through ``argparse`` and may raise
     ``SystemExit``; successful commands return zero.
     """
@@ -513,6 +480,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
+            LocalEmbeddingConfig,
+            create_local_embedding_service,
         )
         from rag_pipeline.ingestion import load_documents
 
@@ -521,17 +490,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 chunk_size=args.chunk_size,
                 chunk_overlap=args.chunk_overlap,
             )
-            embedding_model_config = _build_embedding_model_config(args)
+            embedding_config = LocalEmbeddingConfig(
+                model_name=args.model,
+                model_revision=args.model_revision,
+                device=args.device,
+                batch_size=args.batch_size,
+            )
         except (
             InvalidChunkingConfigurationError,
             InvalidEmbeddingConfigurationError,
-            InvalidModelProviderConfigurationError,
         ) as exc:
             parser.error(str(exc))
 
         documents = load_documents(args.paths, recursive=args.recursive)
         chunks = chunk_documents(documents, config=chunking_config)
-        service = _create_embedding_service(embedding_model_config, args)
+        service = create_local_embedding_service(embedding_config)
         embedded_documents = service.embed_documents(chunks)
 
         if not embedded_documents:
@@ -553,6 +526,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
+            LocalEmbeddingConfig,
+            create_local_embedding_service,
         )
         from rag_pipeline.exceptions import InvalidVectorStoreConfigurationError
         from rag_pipeline.ingestion import load_documents
@@ -571,7 +546,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 chunk_size=args.chunk_size,
                 chunk_overlap=args.chunk_overlap,
             )
-            embedding_model_config = _build_embedding_model_config(args)
+            embedding_config = LocalEmbeddingConfig(
+                model_name=args.model,
+                model_revision=args.model_revision,
+                device=args.device,
+                batch_size=args.batch_size,
+            )
             search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
@@ -592,17 +572,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (
             InvalidChunkingConfigurationError,
             InvalidEmbeddingConfigurationError,
-            InvalidModelProviderConfigurationError,
             InvalidVectorStoreConfigurationError,
         ) as exc:
             parser.error(str(exc))
 
         documents = load_documents(args.paths, recursive=args.recursive)
         chunks = chunk_documents(documents, config=chunking_config)
-        embedding_service = _create_embedding_service(
-            embedding_model_config,
-            args,
-        )
+        embedding_service = create_local_embedding_service(embedding_config)
         embedded_documents = embedding_service.embed_documents(chunks)
         sparse_embedding_service = (
             create_local_sparse_embedding_service(sparse_embedding_config)
@@ -637,6 +613,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "retrieve":
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
+            LocalEmbeddingConfig,
+            create_local_embedding_service,
         )
         from rag_pipeline.exceptions import (
             InvalidRerankingConfigurationError,
@@ -659,7 +637,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         try:
-            embedding_model_config = _build_embedding_model_config(args)
+            embedding_config = LocalEmbeddingConfig(
+                model_name=args.model,
+                model_revision=args.model_revision,
+                device=args.device,
+                batch_size=args.batch_size,
+            )
             search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
@@ -691,17 +674,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except (
             InvalidEmbeddingConfigurationError,
-            InvalidModelProviderConfigurationError,
             InvalidVectorStoreConfigurationError,
             InvalidRetrievalConfigurationError,
             InvalidRerankingConfigurationError,
         ) as exc:
             parser.error(str(exc))
 
-        embedding_service = _create_embedding_service(
-            embedding_model_config,
-            args,
-        )
+        embedding_service = create_local_embedding_service(embedding_config)
         sparse_embedding_service = (
             create_local_sparse_embedding_service(sparse_embedding_config)
             if sparse_embedding_config is not None
@@ -754,6 +733,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from rag_pipeline.citations import format_citation
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
+            LocalEmbeddingConfig,
+            create_local_embedding_service,
         )
         from rag_pipeline.exceptions import (
             InvalidGenerationConfigurationError,
@@ -764,6 +745,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from rag_pipeline.generation import (
             INSUFFICIENT_CONTEXT_ANSWER,
             GenerationConfig,
+            LocalGenerationConfig,
+            create_local_answer_generator,
         )
         from rag_pipeline.retrieval import (
             RetrievalConfig,
@@ -781,7 +764,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         try:
-            embedding_model_config = _build_embedding_model_config(args)
+            embedding_config = LocalEmbeddingConfig(
+                model_name=args.model,
+                model_revision=args.model_revision,
+                device=args.device,
+                batch_size=args.batch_size,
+            )
             search_mode = SearchMode(args.search_mode)
             vector_store_config = VectorStoreConfig(
                 path=args.store_path,
@@ -811,14 +799,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     for value in (args.metadata_filters or ())
                 ),
             )
-            generation_model_config = _build_generation_model_config(args)
+            local_generation_config = LocalGenerationConfig(
+                model_name=args.generation_model,
+                model_revision=args.generation_model_revision,
+                device=args.generation_device,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+            )
             generation_config = GenerationConfig(
                 max_context_characters=args.max_context_characters,
                 max_input_tokens=args.max_input_tokens,
             )
         except (
             InvalidEmbeddingConfigurationError,
-            InvalidModelProviderConfigurationError,
             InvalidVectorStoreConfigurationError,
             InvalidRetrievalConfigurationError,
             InvalidRerankingConfigurationError,
@@ -826,10 +819,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as exc:
             parser.error(str(exc))
 
-        embedding_service = _create_embedding_service(
-            embedding_model_config,
-            args,
-        )
+        embedding_service = create_local_embedding_service(embedding_config)
         sparse_embedding_service = (
             create_local_sparse_embedding_service(sparse_embedding_config)
             if sparse_embedding_config is not None
@@ -854,7 +844,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(INSUFFICIENT_CONTEXT_ANSWER)
             return 0
 
-        answer_generator = _create_answer_generator(generation_model_config)
+        answer_generator = create_local_answer_generator(local_generation_config)
         generated_answer = answer_generator.generate(
             args.query,
             retrieval_results,
@@ -871,128 +861,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print("RAG Pipeline skeleton is ready.")
     return 0
-
-
-def _build_embedding_model_config(
-    args: argparse.Namespace,
-) -> LocalEmbeddingConfig | ProviderEmbeddingProfile:
-    """Resolve ``--embed-model`` independently of answer generation.
-
-    Provider aliases load only settings needed by their embedding adapter. Any
-    other value is interpreted as a local Hugging Face model name; omitting the
-    flag selects ``DEFAULT_LOCAL_EMBEDDING_MODEL``.
-    """
-    from rag_pipeline.embeddings import LocalEmbeddingConfig
-    from rag_pipeline.model_profiles import (
-        is_provider_alias,
-        load_provider_embedding_profile,
-    )
-
-    if is_provider_alias(args.embed_model):
-        return load_provider_embedding_profile(args.embed_model)
-    return LocalEmbeddingConfig(
-        model_name=args.embed_model,
-        model_revision=args.embed_model_revision,
-        device=args.device,
-        batch_size=args.batch_size,
-    )
-
-
-def _create_embedding_service(
-    model_config: LocalEmbeddingConfig | ProviderEmbeddingProfile,
-    args: argparse.Namespace,
-) -> EmbeddingService:
-    """Construct the local or hosted embedding boundary selected by the CLI.
-
-    Provider-client or local-model initialization can allocate resources,
-    access caches, or prepare network clients. Claude profiles pass their
-    embedding model through the local factory because Anthropic has no native
-    embeddings endpoint.
-    """
-    from rag_pipeline.embeddings import (
-        LocalEmbeddingConfig,
-        create_local_embedding_service,
-        create_profile_embedding_service,
-    )
-    from rag_pipeline.model_profiles import ProviderEmbeddingProfile
-
-    if isinstance(model_config, ProviderEmbeddingProfile):
-        return create_profile_embedding_service(
-            model_config,
-            local_device=args.device,
-            local_batch_size=args.batch_size,
-            local_model_revision=args.embed_model_revision,
-        )
-    if isinstance(model_config, LocalEmbeddingConfig):
-        return create_local_embedding_service(model_config)
-    raise TypeError(
-        "model_config must contain local settings or an embedding profile."
-    )
-
-
-def _build_generation_model_config(
-    args: argparse.Namespace,
-) -> LocalGenerationConfig | HostedGenerationConfig:
-    """Resolve answer generation without consulting embedding configuration.
-
-    ``--model`` loads the selected hosted generation settings. With no provider
-    alias, the existing local generation flags remain authoritative regardless
-    of the embedding model chosen for retrieval.
-    """
-    from rag_pipeline.exceptions import InvalidGenerationConfigurationError
-    from rag_pipeline.generation import (
-        DEFAULT_HOSTED_MODEL_INPUT_TOKENS,
-        HostedGenerationConfig,
-        LocalGenerationConfig,
-    )
-    from rag_pipeline.model_profiles import load_provider_generation_profile
-
-    if args.model is not None:
-        if (
-            args.max_input_tokens is not None
-            and args.max_input_tokens > DEFAULT_HOSTED_MODEL_INPUT_TOKENS
-        ):
-            raise InvalidGenerationConfigurationError(
-                "Hosted model profiles use a conservative maximum input limit "
-                f"of {DEFAULT_HOSTED_MODEL_INPUT_TOKENS} tokens; "
-                "--max-input-tokens may only lower it."
-            )
-        profile = load_provider_generation_profile(args.model)
-        return HostedGenerationConfig(
-            profile=profile,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-        )
-    return LocalGenerationConfig(
-        model_name=args.generation_model,
-        model_revision=args.generation_model_revision,
-        device=args.generation_device,
-        max_new_tokens=args.max_new_tokens,
-        temperature=0.0 if args.temperature is None else args.temperature,
-    )
-
-
-def _create_answer_generator(
-    model_config: LocalGenerationConfig | HostedGenerationConfig,
-) -> AnswerGenerator:
-    """Construct the local or hosted guarded generation service.
-
-    Hosted client initialization receives the secret from the in-memory profile
-    and never writes it back to process environment state. Actual provider I/O
-    occurs later when the answer generator invokes generation from evidence.
-    """
-    from rag_pipeline.generation import (
-        HostedGenerationConfig,
-        LocalGenerationConfig,
-        create_local_answer_generator,
-        create_profile_answer_generator,
-    )
-
-    if isinstance(model_config, HostedGenerationConfig):
-        return create_profile_answer_generator(model_config)
-    if isinstance(model_config, LocalGenerationConfig):
-        return create_local_answer_generator(model_config)
-    raise TypeError("model_config must contain local settings or a provider profile.")
 
 
 def _build_reranking_configs(
