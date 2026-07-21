@@ -1,4 +1,8 @@
-"""Validated local sparse embeddings for lexical retrieval."""
+"""Generate validated sparse vectors for optional lexical retrieval.
+
+The service adapts LangChain Qdrant sparse embeddings to immutable, sorted
+index/value tuples used by hybrid indexing and query fusion.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +28,11 @@ DEFAULT_FASTEMBED_CACHE_DIR = Path(".rag_data/fastembed")
 
 @dataclass(frozen=True, slots=True)
 class LocalSparseEmbeddingConfig:
-    """Settings for the local FastEmbed sparse backend."""
+    """Validated runtime settings for the local FastEmbed sparse model.
+
+    The configuration controls model identity, cache location, batch size, and
+    optional CPU threading before any model artifacts are initialized.
+    """
 
     model_name: str = DEFAULT_LOCAL_SPARSE_MODEL
     cache_dir: str | Path | None = DEFAULT_FASTEMBED_CACHE_DIR
@@ -32,6 +40,7 @@ class LocalSparseEmbeddingConfig:
     threads: int | None = None
 
     def __post_init__(self) -> None:
+        """Validate sparse model, cache, batching, and thread settings eagerly."""
         _validate_non_empty_string("model_name", self.model_name)
         if self.cache_dir is not None:
             if not isinstance(self.cache_dir, (str, Path)):
@@ -55,7 +64,12 @@ class LocalSparseEmbeddingConfig:
 
 @dataclass(frozen=True, slots=True)
 class SparseEmbeddingVector:
-    """An immutable validated sparse vector."""
+    """Immutable sparse indices and weights for one document or query.
+
+    Service-produced instances have aligned, unique, sorted indices; the vector
+    store revalidates externally constructed records. An empty service-produced
+    vector is valid and triggers dense-only query fallback.
+    """
 
     indices: tuple[int, ...]
     values: tuple[float, ...]
@@ -66,7 +80,11 @@ class SparseEmbeddingVector:
 
 
 class SparseEmbeddingService:
-    """Validate and coordinate a LangChain sparse embedding provider."""
+    """Coordinate one sparse provider for hybrid indexing and retrieval.
+
+    The service enforces input ordering and validates each provider vector before
+    it reaches Qdrant. It is used only when a collection has hybrid schema.
+    """
 
     def __init__(
         self,
@@ -90,7 +108,12 @@ class SparseEmbeddingService:
         self,
         documents: Iterable[Document],
     ) -> list[SparseEmbeddingVector]:
-        """Embed documents in input order and validate sparse provider output."""
+        """Embed non-empty documents into sparse vectors in input order.
+
+        The provider performs local model inference. Output cardinality and each
+        index/value sequence are validated so vectors stay aligned with the
+        dense embeddings passed to hybrid indexing.
+        """
         source_documents = list(documents)
         if not source_documents:
             return []
@@ -128,7 +151,12 @@ class SparseEmbeddingService:
         ]
 
     def embed_query(self, query: str) -> SparseEmbeddingVector:
-        """Embed one query and validate the sparse provider output."""
+        """Embed one non-empty query for the sparse hybrid-search branch.
+
+        Provider inference may legitimately return an empty vector; retrieval
+        handles that edge case by falling back to dense search. Malformed sparse
+        output raises ``EmbeddingProviderError``.
+        """
         if not isinstance(query, str):
             raise TypeError("query must be a string.")
         if not query.strip():
@@ -146,7 +174,12 @@ class SparseEmbeddingService:
 def create_local_sparse_embedding_service(
     config: LocalSparseEmbeddingConfig | None = None,
 ) -> SparseEmbeddingService:
-    """Create LangChain's local FastEmbed BM25 sparse service."""
+    """Initialize the local FastEmbed BM25 service through LangChain.
+
+    Construction may populate the configured model cache and allocate inference
+    resources. Import and provider initialization failures are normalized to
+    ``EmbeddingProviderError``.
+    """
     settings = config or LocalSparseEmbeddingConfig()
 
     try:
@@ -177,6 +210,12 @@ def _normalize_sparse_vector(
     *,
     context: str,
 ) -> SparseEmbeddingVector:
+    """Validate and sort one provider sparse vector.
+
+    Index/value lengths must match; indices must be unique non-negative integers;
+    weights must be finite numbers. Empty vectors are retained because retrieval
+    has an explicit dense fallback for them.
+    """
     if not isinstance(raw_vector, SparseVector):
         raise EmbeddingProviderError(
             f"Sparse {context} is not a LangChain SparseVector."

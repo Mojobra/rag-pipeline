@@ -1,4 +1,8 @@
-"""Model-safe semantic retrieval from the local LangChain vector store."""
+"""Retrieve validated dense or hybrid evidence from local Qdrant.
+
+The module owns typed metadata filters, collection compatibility checks, score
+provenance, and adapters that reuse precomputed query vectors through LangChain.
+"""
 
 from __future__ import annotations
 
@@ -44,12 +48,17 @@ _MAX_QDRANT_INTEGER = 2**63 - 1
 
 @dataclass(frozen=True, slots=True)
 class MetadataFilter:
-    """One exact-match condition against indexed document metadata."""
+    """One validated exact-match condition on indexed document metadata.
+
+    Filters carry scalar string, integer, or boolean values and are combined by
+    ``RetrievalConfig`` using AND semantics before Qdrant top-k selection.
+    """
 
     field: str
     value: MetadataFilterValue
 
     def __post_init__(self) -> None:
+        """Normalize the field and validate a Qdrant-compatible scalar value."""
         if not isinstance(self.field, str):
             raise InvalidRetrievalConfigurationError(
                 "metadata filter field must be a string."
@@ -84,7 +93,12 @@ class MetadataFilter:
 
 
 def parse_metadata_filter(expression: str) -> MetadataFilter:
-    """Parse a CLI ``KEY=VALUE`` expression into a typed exact-match filter."""
+    """Parse a CLI ``KEY=VALUE`` expression into a typed filter.
+
+    JSON scalar syntax preserves integers, booleans, and explicitly quoted
+    strings; unquoted non-JSON values remain text. The resulting object performs
+    field and value validation.
+    """
     if not isinstance(expression, str):
         raise TypeError("metadata filter expression must be a string.")
 
@@ -104,13 +118,18 @@ def parse_metadata_filter(expression: str) -> MetadataFilter:
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
-    """Controls accepted dense or fused retrieval results."""
+    """Validated selection policy for dense or fused retrieval results.
+
+    The configuration defines result width, an optional provider-score gate, and
+    exact metadata conditions that Qdrant applies before top-k selection.
+    """
 
     top_k: int = 4
     score_threshold: float | None = None
     metadata_filters: tuple[MetadataFilter, ...] = ()
 
     def __post_init__(self) -> None:
+        """Validate result limits, score gate, and unique typed filter objects."""
         if isinstance(self.top_k, bool) or not isinstance(self.top_k, int):
             raise InvalidRetrievalConfigurationError("top_k must be an integer.")
         if self.top_k <= 0:
@@ -169,7 +188,12 @@ class RetrievalConfig:
 
 @dataclass(frozen=True, slots=True)
 class RetrievalResult:
-    """One ranked document with optional second-stage score provenance."""
+    """One ranked evidence document with explicit score provenance.
+
+    First-stage results carry cosine or RRF scores. Reranked records replace the
+    active score while retaining the original rank, score, and score kind plus
+    the reranker model identity for diagnostics, citations, and generation.
+    """
 
     document: Document
     score: float
@@ -182,7 +206,12 @@ class RetrievalResult:
 
 
 class RetrieverService:
-    """Embed queries and retrieve compatible chunks through LangChain."""
+    """Coordinate query embedding and compatible Qdrant retrieval.
+
+    The service validates collection/model compatibility, applies metadata
+    filters inside Qdrant, selects dense or hybrid search, and normalizes provider
+    responses to ranked ``RetrievalResult`` records.
+    """
 
     def __init__(
         self,
@@ -219,7 +248,13 @@ class RetrieverService:
         *,
         config: RetrievalConfig | None = None,
     ) -> list[RetrievalResult]:
-        """Return chunks ordered by descending dense or fused retrieval score."""
+        """Retrieve eligible chunks ordered by dense or fused provider score.
+
+        The method performs dense and optional sparse model inference, reads the
+        Qdrant collection, and applies filters before top-k selection. Empty
+        sparse queries fall back to dense search. Provider response shape and
+        numeric scores are validated before returning results.
+        """
         if not isinstance(query, str):
             raise TypeError("query must be a string.")
         if not query.strip():
@@ -322,6 +357,11 @@ class RetrieverService:
         return results
 
     def _embed_sparse_query(self, query: str) -> SparseEmbeddingVector | None:
+        """Create the sparse branch vector only for hybrid collections.
+
+        Dense mode returns ``None`` without sparse inference. Hybrid mode requires
+        the service invariant established by the constructor.
+        """
         if self._vector_store.config.search_mode == SearchMode.DENSE:
             return None
         if self._sparse_embedding_service is None:
@@ -332,31 +372,42 @@ class RetrieverService:
 
 
 class _PrecomputedDenseQueryEmbeddings(Embeddings):
-    """Expose one validated dense query vector through LangChain's interface."""
+    """Expose one validated dense query vector through LangChain's interface.
+
+    The adapter prevents the hybrid vector store from embedding the same query
+    twice and rejects any unexpected text or document-embedding request.
+    """
 
     def __init__(self, query: str, vector: tuple[float, ...]) -> None:
         self._query = query
         self._vector = list(vector)
 
     def embed_query(self, text: str) -> list[float]:
+        """Return a copy of the precomputed vector for the exact original query."""
         if text != self._query:
             raise RetrievalProviderError("Dense query adapter received new text.")
         return self._vector.copy()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Reject document embedding because this adapter is query-only."""
         raise RetrievalProviderError(
             "Dense query adapter cannot embed documents during retrieval."
         )
 
 
 class _PrecomputedSparseQueryEmbeddings(SparseEmbeddings):
-    """Expose one validated sparse query vector through LangChain's interface."""
+    """Expose one validated sparse query vector through LangChain's interface.
+
+    It preserves the single query/vector association used during hybrid search
+    and refuses any indexing operation.
+    """
 
     def __init__(self, query: str, vector: SparseEmbeddingVector) -> None:
         self._query = query
         self._vector = vector
 
     def embed_query(self, text: str) -> SparseVector:
+        """Return the precomputed sparse vector for the exact original query."""
         if text != self._query:
             raise RetrievalProviderError("Sparse query adapter received new text.")
         return SparseVector(
@@ -365,6 +416,7 @@ class _PrecomputedSparseQueryEmbeddings(SparseEmbeddings):
         )
 
     def embed_documents(self, texts: list[str]) -> list[SparseVector]:
+        """Reject document embedding because this adapter is query-only."""
         raise RetrievalProviderError(
             "Sparse query adapter cannot embed documents during retrieval."
         )
@@ -373,6 +425,12 @@ class _PrecomputedSparseQueryEmbeddings(SparseEmbeddings):
 def _build_qdrant_metadata_filter(
     metadata_filters: tuple[MetadataFilter, ...],
 ) -> models.Filter | None:
+    """Translate validated conditions into Qdrant payload filter objects.
+
+    Conditions target LangChain's nested metadata payload and use Qdrant ``must``
+    semantics. No conditions return ``None`` so the provider performs an
+    unfiltered search.
+    """
     if not metadata_filters:
         return None
     return models.Filter(

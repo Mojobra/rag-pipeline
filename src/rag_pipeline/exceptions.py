@@ -1,4 +1,9 @@
-"""Shared exceptions for the RAG pipeline."""
+"""Define stage-specific failure categories shared across the RAG pipeline.
+
+The hierarchy separates invalid configuration and input from provider or
+compatibility failures so command and future service boundaries can respond
+without parsing error messages.
+"""
 
 from __future__ import annotations
 

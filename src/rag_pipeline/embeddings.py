@@ -1,4 +1,8 @@
-"""LangChain-based embedding generation for document chunks and queries."""
+"""Generate and validate dense embeddings for chunks and search queries.
+
+The module isolates LangChain embedding providers behind a service that enforces
+input, vector-count, numeric, finiteness, and dimension contracts.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +26,11 @@ DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 @dataclass(frozen=True, slots=True)
 class LocalEmbeddingConfig:
-    """Settings for the local Hugging Face embedding backend."""
+    """Validated runtime settings for the local Hugging Face embedder.
+
+    The configuration selects model identity, reproducibility revision, device,
+    batching, and normalization before model initialization can perform work.
+    """
 
     model_name: str = DEFAULT_LOCAL_EMBEDDING_MODEL
     model_revision: str | None = None
@@ -31,6 +39,7 @@ class LocalEmbeddingConfig:
     normalize_embeddings: bool = True
 
     def __post_init__(self) -> None:
+        """Validate model and inference settings before provider construction."""
         _validate_non_empty_string("model_name", self.model_name)
         _validate_non_empty_string("device", self.device)
 
@@ -52,7 +61,12 @@ class LocalEmbeddingConfig:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddedDocument:
-    """A source document paired with its immutable embedding vector."""
+    """Pair one LangChain document with an immutable dense vector.
+
+    The embedding service emits validated instances as its handoff to indexing;
+    the vector store revalidates records constructed by other callers before
+    persistence.
+    """
 
     document: Document
     embedding: tuple[float, ...]
@@ -64,7 +78,12 @@ class EmbeddedDocument:
 
 
 class EmbeddingService:
-    """Validate and coordinate a LangChain embedding model."""
+    """Coordinate one LangChain embedding provider under a stable contract.
+
+    The service validates provider responses and remembers the first observed
+    vector dimension so later document and query calls cannot silently drift.
+    It forms the shared embedding boundary for indexing and retrieval.
+    """
 
     def __init__(
         self,
@@ -105,7 +124,13 @@ class EmbeddingService:
     def embed_documents(
         self, documents: Iterable[Document]
     ) -> list[EmbeddedDocument]:
-        """Embed non-empty documents in input order and validate the response."""
+        """Embed non-empty documents and preserve their input order.
+
+        The input iterable is materialized and sent to the configured provider
+        in one logical call. Provider output count, values, and dimensions are
+        validated before immutable records are returned. The call performs
+        model inference and initializes the service dimension on first use.
+        """
         source_documents = list(documents)
         if not source_documents:
             return []
@@ -158,7 +183,12 @@ class EmbeddingService:
         ]
 
     def embed_query(self, query: str) -> tuple[float, ...]:
-        """Embed one non-empty query with the same model and dimension contract."""
+        """Embed one query under the document-vector dimension contract.
+
+        Blank input is rejected before provider inference. The returned vector
+        is normalized to finite floats and must match any dimension previously
+        established by document or query embedding calls.
+        """
         if not isinstance(query, str):
             raise TypeError("query must be a string.")
         if not query.strip():
@@ -176,6 +206,11 @@ class EmbeddingService:
         return vector
 
     def _set_or_validate_dimension(self, dimension: int) -> None:
+        """Record the first vector dimension or reject later provider drift.
+
+        This mutates service state only on the first successful embedding call;
+        all subsequent calls must match that established contract.
+        """
         if self._dimension is None:
             self._dimension = dimension
             return
@@ -188,7 +223,12 @@ class EmbeddingService:
 def create_local_embedding_service(
     config: LocalEmbeddingConfig | None = None,
 ) -> EmbeddingService:
-    """Create the default local LangChain Hugging Face embedding service."""
+    """Initialize the local LangChain Hugging Face embedding boundary.
+
+    Model construction may read or download Hugging Face artifacts and allocate
+    CPU/GPU resources. Adapter and initialization failures are wrapped as
+    ``EmbeddingProviderError``; no document inference occurs in this factory.
+    """
     settings = config or LocalEmbeddingConfig()
 
     try:
@@ -232,6 +272,11 @@ def _normalize_vector(
     *,
     context: str,
 ) -> tuple[float, ...]:
+    """Convert one provider vector to finite immutable floats.
+
+    Empty, non-iterable, boolean, non-numeric, NaN, and infinite values are
+    rejected with context identifying which provider response was malformed.
+    """
     try:
         values = list(raw_vector)
     except TypeError as exc:

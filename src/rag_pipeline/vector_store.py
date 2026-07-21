@@ -1,4 +1,8 @@
-"""Persistent local vector storage backed by Qdrant and LangChain."""
+"""Persist validated dense or hybrid document vectors in local Qdrant.
+
+The module owns schema-versioned collection creation, compatibility checks,
+deterministic point identity, idempotent batched writes, and LangChain adapters.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +51,11 @@ _POINT_ID_NAMESPACE = uuid5(
 
 
 class SearchMode(str, Enum):
-    """Vector representations available in one Qdrant collection."""
+    """Vector representations supported by a versioned Qdrant collection.
+
+    Dense and hybrid modes use intentionally different schemas so retrieval
+    cannot assume sparse vectors exist in a legacy collection.
+    """
 
     DENSE = "dense"
     HYBRID = "hybrid"
@@ -55,7 +63,12 @@ class SearchMode(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class VectorStoreConfig:
-    """Settings for the embedded Qdrant database."""
+    """Validated location, collection, batching, and schema settings for Qdrant.
+
+    A ``None`` path selects an in-memory database for tests; any filesystem path
+    is resolved before the client is opened. Search mode determines the expected
+    collection schema.
+    """
 
     path: str | Path | None = DEFAULT_VECTOR_STORE_PATH
     collection_name: str = DEFAULT_COLLECTION_NAME
@@ -63,6 +76,7 @@ class VectorStoreConfig:
     search_mode: SearchMode | str = SearchMode.DENSE
 
     def __post_init__(self) -> None:
+        """Validate storage settings and normalize search mode to its enum."""
         if self.path is not None:
             if not isinstance(self.path, (str, Path)):
                 raise InvalidVectorStoreConfigurationError(
@@ -104,7 +118,11 @@ class VectorStoreConfig:
 
 @dataclass(frozen=True, slots=True)
 class IndexingResult:
-    """Summary of one idempotent vector-store upsert."""
+    """Immutable summary of one vector-store indexing operation.
+
+    The result exposes affected point IDs, collection totals, and dense/sparse
+    model contracts so command and future service layers can report what changed.
+    """
 
     collection_name: str
     indexed_count: int
@@ -117,9 +135,20 @@ class IndexingResult:
 
 
 class LocalVectorStore:
-    """Manage a local Qdrant collection containing validated chunk vectors."""
+    """Own an embedded Qdrant client and one configured collection contract.
+
+    The service validates all records before writes, creates compatible dense or
+    hybrid collections, rejects schema/model drift, and exposes a LangChain view
+    for retrieval. It should be closed to release database files and locks.
+    """
 
     def __init__(self, config: VectorStoreConfig | None = None) -> None:
+        """Open an in-memory or persistent Qdrant client for one configuration.
+
+        Persistent mode creates the database directory when needed and acquires
+        provider resources that remain open until ``close`` or context-manager
+        exit. Initialization failures are wrapped as vector-store provider errors.
+        """
         self.config = config or VectorStoreConfig()
         path = self.config.resolved_path
 
@@ -145,7 +174,11 @@ class LocalVectorStore:
         self.close()
 
     def close(self) -> None:
-        """Release local database resources and file locks."""
+        """Close the Qdrant client and release local database file locks.
+
+        LangChain views created from this instance share the same client and must
+        not be used after closure.
+        """
         self._client.close()
 
     def index(
@@ -156,7 +189,13 @@ class LocalVectorStore:
         sparse_vectors: Iterable[SparseEmbeddingVector] | None = None,
         sparse_model_identifier: str | None = None,
     ) -> IndexingResult:
-        """Upsert precomputed embeddings using deterministic chunk IDs."""
+        """Validate and idempotently upsert precomputed chunk vectors.
+
+        The method materializes dense and optional sparse records, creates a
+        compatible collection when absent, and writes deterministic point IDs in
+        configured batches with synchronous completion. Empty input performs no
+        write but still reports the current collection count.
+        """
         _validate_model_identifier(model_identifier)
         records = list(embedded_documents)
         prepared_sparse_vectors = self._prepare_sparse_inputs(
@@ -213,7 +252,11 @@ class LocalVectorStore:
         )
 
     def count(self) -> int:
-        """Return the number of points in the configured collection."""
+        """Read the exact point count for the configured collection.
+
+        A missing collection is treated as empty. Provider inspection failures
+        are wrapped without creating or mutating collection state.
+        """
         try:
             if not self._client.collection_exists(self.config.collection_name):
                 return 0
@@ -236,7 +279,13 @@ class LocalVectorStore:
         retrieval_mode: RetrievalMode = RetrievalMode.DENSE,
         validate: bool | None = None,
     ) -> QdrantVectorStore:
-        """Expose the collection through LangChain's Qdrant integration."""
+        """Create a LangChain view over the already-open Qdrant collection.
+
+        The adapter shares this instance's client and therefore its lifecycle.
+        Dense collections reject hybrid access; optional provider validation is
+        enabled when an embedding implementation is supplied unless overridden.
+        No points are written by this method.
+        """
         try:
             if not self._client.collection_exists(self.config.collection_name):
                 raise VectorStoreCollectionNotFoundError(
@@ -284,7 +333,13 @@ class LocalVectorStore:
         dimension: int,
         sparse_model_identifier: str | None = None,
     ) -> None:
-        """Validate an existing collection without creating or mutating it."""
+        """Verify that an existing collection matches the active model contract.
+
+        The method reads Qdrant schema and metadata, then checks schema version,
+        vector names, dimensions, distance, sparse IDF settings, model IDs, and
+        fusion metadata. It never creates or mutates a collection and fails
+        closed when anything differs.
+        """
         _validate_model_identifier(model_identifier)
         _validate_dimension(dimension)
         if self.config.search_mode == SearchMode.HYBRID:
@@ -322,6 +377,12 @@ class LocalVectorStore:
         sparse_vectors: Iterable[SparseEmbeddingVector] | None,
         sparse_model_identifier: str | None,
     ) -> list[SparseEmbeddingVector] | None:
+        """Validate sparse inputs against dense or hybrid collection mode.
+
+        Dense mode forbids all sparse arguments. Hybrid mode requires a model ID
+        and exactly one validated sparse vector per dense document, preserving
+        positional alignment before point construction.
+        """
         if self.config.search_mode == SearchMode.DENSE:
             if sparse_vectors is not None or sparse_model_identifier is not None:
                 raise VectorStoreInputError(
@@ -358,6 +419,12 @@ class LocalVectorStore:
         sparse_vectors: list[SparseEmbeddingVector] | None,
         sparse_model_identifier: str | None,
     ) -> tuple[int, list[models.PointStruct], list[str]]:
+        """Convert aligned embeddings into validated Qdrant point structures.
+
+        The method enforces one dense dimension, unique deterministic IDs,
+        non-empty content, and JSON-safe metadata. It prepares named dense/sparse
+        vectors for hybrid mode but performs no database writes itself.
+        """
         points = []
         point_ids = []
         seen_ids: set[str] = set()
@@ -437,6 +504,12 @@ class LocalVectorStore:
         dimension: int,
         sparse_model_identifier: str | None,
     ) -> None:
+        """Create the expected collection schema or validate the existing one.
+
+        Creation is the only side effect and records the model/schema contract in
+        Qdrant metadata. Existing collections are never altered to fit incoming
+        vectors; they must pass the same compatibility checks used by retrieval.
+        """
         try:
             if not self._client.collection_exists(self.config.collection_name):
                 if self.config.search_mode == SearchMode.DENSE:
@@ -502,6 +575,12 @@ class LocalVectorStore:
         dimension: int,
         sparse_model_identifier: str | None,
     ) -> None:
+        """Compare Qdrant collection metadata and vector layout to expectations.
+
+        Dense schema v1 requires one unnamed vector. Hybrid schema v2 requires
+        named dense/sparse vectors, IDF sparse weighting, and matching fusion and
+        model metadata. Any mismatch raises a compatibility error.
+        """
         vectors_config = info.config.params.vectors
         if self.config.search_mode == SearchMode.DENSE:
             if not isinstance(vectors_config, models.VectorParams):
@@ -579,7 +658,12 @@ class LocalVectorStore:
 
 
 def build_chunk_point_id(document: Document) -> str:
-    """Build a stable UUID for a chunk's logical source location."""
+    """Build a deterministic UUID5 for a chunk's logical source location.
+
+    Source, page, and chunk index identify normal pipeline chunks so changed
+    content updates the same point. When source or chunk index is unavailable, a
+    content hash prevents unrelated unlocated chunks from sharing an identity.
+    """
     if not isinstance(document, Document):
         raise TypeError("document must be a LangChain Document object.")
 
@@ -609,6 +693,11 @@ def build_chunk_point_id(document: Document) -> str:
 
 
 def _validate_vector(vector: Iterable[Real], *, index: int) -> list[float]:
+    """Normalize one dense vector to finite floats for Qdrant persistence.
+
+    Empty vectors, booleans, non-numeric values, NaN, and infinity are rejected
+    with the originating document index in the error message.
+    """
     values = list(vector)
     if not values:
         raise VectorStoreInputError(
@@ -637,6 +726,12 @@ def _validate_sparse_vector(
     *,
     index: int,
 ) -> SparseEmbeddingVector:
+    """Validate, sort, and preserve one sparse vector for Qdrant.
+
+    Indices and values must align; indices must be unique non-negative integers;
+    weights must be finite numbers. Empty sparse vectors remain valid and are
+    omitted from the individual hybrid point representation.
+    """
     if len(vector.indices) != len(vector.values):
         raise VectorStoreInputError(
             f"sparse_vectors[{index}] has different index and value counts."
@@ -683,6 +778,11 @@ def _validate_sparse_vector(
 
 
 def _json_safe_metadata(metadata: dict[str, Any], *, index: int) -> dict[str, Any]:
+    """Round-trip metadata through strict JSON before provider persistence.
+
+    This rejects unsupported objects and non-finite numbers while returning a
+    detached dictionary of JSON primitives for the Qdrant payload.
+    """
     try:
         serialized = json.dumps(metadata, ensure_ascii=True, allow_nan=False)
         normalized = json.loads(serialized)

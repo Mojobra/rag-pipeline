@@ -1,4 +1,8 @@
-"""Deterministic comparisons of character-based chunking configurations."""
+"""Compare character-based chunking policies on one document snapshot.
+
+The experiment layer reports structural size and duplication metrics without
+embedding, indexing, retrieval, or model calls, keeping comparisons reproducible.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +28,11 @@ DEFAULT_CHUNKING_CANDIDATES = (
 
 @dataclass(frozen=True, slots=True)
 class ChunkingMetrics:
-    """Structural and duplication measurements for one candidate."""
+    """Structural cost and size measurements for one chunking candidate.
+
+    Metrics describe emitted chunk lengths and duplicated source characters.
+    They are diagnostic signals, not retrieval or answer-quality scores.
+    """
 
     chunk_count: int
     total_chunk_characters: int
@@ -38,7 +46,10 @@ class ChunkingMetrics:
 
 @dataclass(frozen=True, slots=True)
 class ChunkingExperimentResult:
-    """One candidate configuration and its measurements."""
+    """Pair one validated chunking policy with its measured output.
+
+    Results form the per-candidate rows in both human-readable and JSON reports.
+    """
 
     config: ChunkingConfig
     metrics: ChunkingMetrics
@@ -46,7 +57,11 @@ class ChunkingExperimentResult:
 
 @dataclass(frozen=True, slots=True)
 class ChunkingExperimentReport:
-    """Comparable results produced from one immutable document snapshot."""
+    """Complete comparison produced from one materialized document snapshot.
+
+    Sharing one input snapshot prevents document iteration or input variance
+    from being mistaken for a difference between chunking configurations.
+    """
 
     input_document_count: int
     chunked_document_count: int
@@ -55,7 +70,12 @@ class ChunkingExperimentReport:
 
 
 def parse_chunking_candidate(value: str) -> ChunkingConfig:
-    """Parse a CLI-friendly ``SIZE:OVERLAP`` chunking candidate."""
+    """Convert a CLI ``SIZE:OVERLAP`` value into validated settings.
+
+    Syntax and configuration errors are normalized to
+    ``InvalidChunkingExperimentError`` so the command layer can report one
+    consistent user-facing failure category.
+    """
     if not isinstance(value, str):
         raise TypeError("chunking candidate must be a string.")
 
@@ -88,7 +108,12 @@ def run_chunking_experiment(
     *,
     candidates: Iterable[ChunkingConfig] = DEFAULT_CHUNKING_CANDIDATES,
 ) -> ChunkingExperimentReport:
-    """Run each candidate against the same materialized document snapshot."""
+    """Measure every candidate against the same in-memory document snapshot.
+
+    Input iterables are consumed once, validated, and reused for every policy.
+    The function is deterministic and side-effect free beyond CPU and memory
+    use; it does not call model providers or mutate persistent state.
+    """
     document_snapshot = tuple(documents)
     _validate_documents(document_snapshot)
     candidate_snapshot = _validate_candidates(tuple(candidates))
@@ -117,7 +142,11 @@ def run_chunking_experiment(
 def chunking_experiment_to_dict(
     report: ChunkingExperimentReport,
 ) -> dict[str, object]:
-    """Convert a report into stable JSON-compatible primitives."""
+    """Serialize an experiment report to stable JSON-compatible primitives.
+
+    Field names intentionally form a machine-readable reporting contract for
+    recording or comparing experiment runs outside the terminal table.
+    """
     return {
         "input_document_count": report.input_document_count,
         "chunked_document_count": report.chunked_document_count,
@@ -141,7 +170,11 @@ def chunking_experiment_to_dict(
 
 
 def format_chunking_experiment_table(report: ChunkingExperimentReport) -> str:
-    """Render a report as a compact terminal table."""
+    """Render an experiment report as a width-aligned terminal table.
+
+    Formatting has no I/O side effect; the caller decides where to print or
+    persist the returned text.
+    """
     headers = (
         "Size",
         "Overlap",
@@ -207,6 +240,10 @@ def _validate_documents(documents: tuple[Document, ...]) -> None:
 def _validate_candidates(
     candidates: tuple[ChunkingConfig, ...],
 ) -> tuple[ChunkingConfig, ...]:
+    """Require at least one unique, validated chunking configuration.
+
+    Returning the original tuple preserves caller order in the final report.
+    """
     if not candidates:
         raise InvalidChunkingExperimentError(
             "at least one chunking candidate is required."
@@ -229,6 +266,11 @@ def _measure_candidate(
     documents: tuple[Document, ...],
     config: ChunkingConfig,
 ) -> ChunkingExperimentResult:
+    """Chunk all documents and calculate one candidate's aggregate metrics.
+
+    Covered source intervals are measured per input document so equal character
+    offsets from different files are never merged. No input document is mutated.
+    """
     chunk_lengths: list[int] = []
     covered_character_count = 0
 
@@ -264,6 +306,12 @@ def _measure_candidate(
 
 
 def _count_covered_characters(chunks: Sequence[Document]) -> int:
+    """Return the union length of provenance intervals for one source document.
+
+    Overlapping and touching chunk ranges are merged before counting, allowing
+    duplicated characters to be derived from actual emitted chunks rather than
+    the configured target overlap. Invalid provenance fails the experiment.
+    """
     intervals: list[tuple[int, int]] = []
     for chunk in chunks:
         start_index = chunk.metadata.get("start_index")
@@ -297,6 +345,11 @@ def _count_covered_characters(chunks: Sequence[Document]) -> int:
 
 
 def _nearest_rank_percentile(sorted_values: Sequence[int], percentile: float) -> int:
+    """Select a nearest-rank percentile from an already sorted sequence.
+
+    Empty inputs return zero, matching the report's representation of a corpus
+    that produced no chunks.
+    """
     if not sorted_values:
         return 0
     index = math.ceil(percentile * len(sorted_values)) - 1

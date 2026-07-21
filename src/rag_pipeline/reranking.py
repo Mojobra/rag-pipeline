@@ -1,4 +1,8 @@
-"""Validated second-stage reranking for retrieved LangChain documents."""
+"""Rerank first-stage retrieval candidates with a local cross-encoder.
+
+This module validates query/chunk pairs, adapts Sentence Transformers to a small
+scoring contract, and preserves first-stage score provenance after reordering.
+"""
 
 from __future__ import annotations
 
@@ -24,13 +28,23 @@ DEFAULT_RERANKER_CACHE_DIR = Path(".rag_data/rerankers")
 
 
 class CrossEncoderScorer(Protocol):
-    """LangChain-style cross-encoder behavior required by the service."""
+    """Scoring behavior required by the provider-independent reranker.
 
-    def score(self, text_pairs: list[tuple[str, str]]) -> object: ...
+    Implementations jointly score ordered query/document pairs and may use local
+    inference or a remote provider behind this narrow boundary.
+    """
+
+    def score(self, text_pairs: list[tuple[str, str]]) -> object:
+        """Return one provider-specific scalar score per ordered text pair."""
+        ...
 
 
 class CrossEncoderPredictor(Protocol):
-    """Subset of Sentence Transformers used by the local adapter."""
+    """Sentence Transformers prediction surface used by the local adapter.
+
+    Restricting the protocol to one operation keeps the surrounding reranking
+    service testable without constructing a real model.
+    """
 
     def predict(
         self,
@@ -39,12 +53,18 @@ class CrossEncoderPredictor(Protocol):
         batch_size: int,
         show_progress_bar: bool,
         convert_to_numpy: bool,
-    ) -> object: ...
+    ) -> object:
+        """Run batched pair inference and return raw provider scores."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
 class LocalRerankerConfig:
-    """Settings for the local Sentence Transformers cross-encoder."""
+    """Validated settings for the local Sentence Transformers cross-encoder.
+
+    The configuration controls reproducible model identity, inference device,
+    artifact cache, batching, and maximum tokenized pair length.
+    """
 
     model_name: str = DEFAULT_LOCAL_RERANKER_MODEL
     model_revision: str | None = None
@@ -54,6 +74,7 @@ class LocalRerankerConfig:
     max_length: int = 512
 
     def __post_init__(self) -> None:
+        """Validate model, cache, batching, and pair-length settings eagerly."""
         _validate_non_empty_string("reranker model_name", self.model_name)
         _validate_non_empty_string("reranker device", self.device)
         if self.model_revision is not None:
@@ -88,16 +109,26 @@ class LocalRerankerConfig:
 
 @dataclass(frozen=True, slots=True)
 class RerankingConfig:
-    """Controls how many scored candidates survive reranking."""
+    """Validated limit for candidates retained after cross-encoder scoring.
+
+    First-stage candidate width is configured by the caller; this value controls
+    only the final ordered result count.
+    """
 
     top_n: int = 4
 
     def __post_init__(self) -> None:
+        """Require a positive final result count before model scoring."""
         _validate_positive_integer("top_n", self.top_n)
 
 
 class RerankerService:
-    """Score retrieved chunks jointly with the query and reorder them."""
+    """Apply one cross-encoder scorer to validated retrieval candidates.
+
+    The service converts provider output to finite scalar scores, orders results
+    deterministically, and retains first-stage rank and score provenance for
+    diagnostics and later generation.
+    """
 
     def __init__(
         self,
@@ -122,7 +153,12 @@ class RerankerService:
         *,
         config: RerankingConfig | None = None,
     ) -> list[RetrievalResult]:
-        """Return the strongest candidates ordered by cross-encoder score."""
+        """Score and reorder a bounded first-stage candidate sequence.
+
+        Empty candidates return without invoking the model. Non-empty input is
+        validated before one provider scoring call; results use descending score
+        with original rank and input order as deterministic tie-breakers.
+        """
         if not isinstance(query, str):
             raise TypeError("query must be a string.")
         normalized_query = query.strip()
@@ -178,7 +214,12 @@ class RerankerService:
 def create_local_reranker_service(
     config: LocalRerankerConfig | None = None,
 ) -> RerankerService:
-    """Create the local cross-encoder scorer without an external API."""
+    """Initialize the local Sentence Transformers reranking service.
+
+    Construction creates the cache directory when configured, may download model
+    artifacts, and allocates inference resources. Import and initialization
+    failures are wrapped as ``RerankingProviderError``.
+    """
     settings = config or LocalRerankerConfig()
 
     try:
@@ -216,7 +257,11 @@ def create_local_reranker_service(
 
 
 class _SentenceTransformersScorer:
-    """Adapt Sentence Transformers to LangChain's cross-encoder score shape."""
+    """Adapt a Sentence Transformers predictor to the scorer contract.
+
+    The adapter centralizes fixed batching and disables progress output so the
+    service receives only provider scores.
+    """
 
     def __init__(
         self,
@@ -228,6 +273,7 @@ class _SentenceTransformersScorer:
         self._batch_size = batch_size
 
     def score(self, text_pairs: list[tuple[str, str]]) -> object:
+        """Run local batched cross-encoder inference for ordered text pairs."""
         return self._predictor.predict(
             text_pairs,
             batch_size=self._batch_size,
@@ -240,6 +286,12 @@ def _prepare_text_pairs(
     query: str,
     candidates: list[RetrievalResult],
 ) -> list[tuple[str, str]]:
+    """Validate first-stage candidates and build ordered model input pairs.
+
+    Candidates must have unique positive ranks, finite scores, non-empty
+    LangChain documents, and an unreranked cosine or RRF score kind. Validation
+    prevents accidental recursive reranking and preserves pair/result alignment.
+    """
     text_pairs = []
     seen_ranks: set[int] = set()
     for index, candidate in enumerate(candidates):
@@ -289,6 +341,11 @@ def _prepare_text_pairs(
 
 
 def _normalize_scores(raw_scores: object, *, expected_count: int) -> list[float]:
+    """Convert provider output to the expected finite scalar score list.
+
+    Text, non-iterable output, cardinality mismatches, booleans, and non-finite
+    values are rejected before result ordering.
+    """
     if isinstance(raw_scores, (str, bytes)):
         raise RerankingProviderError(
             "Reranking provider returned scores as text."
