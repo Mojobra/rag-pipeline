@@ -17,8 +17,12 @@ from rag_pipeline.exceptions import (  # noqa: E402
 )
 from rag_pipeline.model_profiles import (  # noqa: E402
     ModelProvider,
+    ProviderEmbeddingProfile,
+    ProviderGenerationProfile,
     ProviderModelProfile,
     is_provider_alias,
+    load_provider_embedding_profile,
+    load_provider_generation_profile,
     load_provider_model_profile,
 )
 
@@ -53,6 +57,48 @@ class ModelProfileTests(unittest.TestCase):
         self.assertEqual(profile.api_key, "file-secret")
         self.assertEqual(profile.generation_model, "gemini-from-environment")
         self.assertEqual(profile.embedding_model, "embedding-from-file")
+
+    def test_generation_profile_does_not_require_embedding_configuration(
+        self,
+    ) -> None:
+        profile = load_provider_generation_profile(
+            ModelProvider.GEMINI,
+            env_file=None,
+            environ={
+                "GOOGLE_API_KEY": "private-secret",
+                "GEMINI": "gemini-generation-model",
+            },
+        )
+
+        self.assertEqual(profile.provider, ModelProvider.GEMINI)
+        self.assertEqual(profile.generation_model, "gemini-generation-model")
+        self.assertNotIn("private-secret", repr(profile))
+
+    def test_embedding_profile_does_not_require_generation_configuration(
+        self,
+    ) -> None:
+        profile = load_provider_embedding_profile(
+            ModelProvider.OPENAI,
+            env_file=None,
+            environ={
+                "OPENAI_API_KEY": "private-secret",
+                "OPENAI_EMBED": "text-embedding-model",
+            },
+        )
+
+        self.assertEqual(profile.provider, ModelProvider.OPENAI)
+        self.assertEqual(profile.embedding_model, "text-embedding-model")
+        self.assertNotIn("private-secret", repr(profile))
+
+    def test_claude_embedding_profile_requires_no_anthropic_key(self) -> None:
+        profile = load_provider_embedding_profile(
+            ModelProvider.CLAUDE,
+            env_file=None,
+            environ={"CLAUDE_EMBED": "sentence-transformers/test-model"},
+        )
+
+        self.assertTrue(profile.uses_local_embeddings)
+        self.assertIsNone(profile.api_key)
 
     def test_reports_missing_variable_names_without_exposing_secrets(self) -> None:
         with self.assertRaisesRegex(
@@ -113,6 +159,26 @@ class ModelProfileTests(unittest.TestCase):
                 provider=ModelProvider.GEMINI,
                 api_key="secret",
                 generation_model=" ",
+                embedding_model="embedding-model",
+            )
+
+        with self.assertRaisesRegex(
+            InvalidModelProviderConfigurationError,
+            "generation_model must be a non-empty string",
+        ):
+            ProviderGenerationProfile(
+                provider=ModelProvider.GEMINI,
+                api_key="secret",
+                generation_model=" ",
+            )
+
+        with self.assertRaisesRegex(
+            InvalidModelProviderConfigurationError,
+            "api_key must be a non-empty string",
+        ):
+            ProviderEmbeddingProfile(
+                provider=ModelProvider.OPENAI,
+                api_key=None,
                 embedding_model="embedding-model",
             )
 

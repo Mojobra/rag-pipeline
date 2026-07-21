@@ -61,18 +61,22 @@ evaluation before production use.
 
 ## Current Model Provider Contract
 
-- `--model gemini`, `--model openai`, and `--model claude` select stable
-  profiles whose credentials and model IDs come from `.env` or process
-  environment variables.
+- `--model gemini|openai|claude` selects only hosted answer generation;
+  omitting it preserves the local generation path.
+- `--embed-model gemini|openai|claude` selects configured embeddings, while a
+  raw Hugging Face model ID selects local embeddings. Omitting it uses
+  `DEFAULT_LOCAL_EMBEDDING_MODEL`.
+- Each selector loads and validates only its role-specific model setting and
+  credential, so generation experiments cannot implicitly change retrieval.
 - Process environment values override `.env`; API keys are passed directly to
   LangChain integrations and excluded from profile representations and errors.
-- Gemini and OpenAI profiles use hosted embeddings and generation. Claude uses
-  hosted Anthropic generation and the local Hugging Face model named by
-  `CLAUDE_EMBED`, because Anthropic exposes no embeddings API.
-- Indexing and query commands must use the same embedding profile. Existing
+- Gemini and OpenAI offer hosted embedding adapters. `--embed-model claude`
+  uses the local Hugging Face model named by `CLAUDE_EMBED`, because Anthropic
+  exposes no embeddings API.
+- Indexing and query commands must use the same embedding selection. Existing
   Qdrant compatibility checks reject changed model identities or dimensions.
-- Raw Hugging Face model names passed through `--model` preserve the local
-  baseline and continue to use the independent local generation options.
+- Generation providers may be changed without rebuilding a compatible vector
+  collection; changing the embedding selection requires reindexing.
 
 Hosted profiles introduce data egress, usage cost, network latency, rate
 limits, and provider availability risk. Timeout, retry, cost-control, and
