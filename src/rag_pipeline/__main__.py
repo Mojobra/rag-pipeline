@@ -39,31 +39,48 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="rag_pipeline",
-        description="Run the local RAG pipeline prototype.",
+        description=(
+            "Run individual stages of the local RAG pipeline, from document "
+            "inspection through grounded answer generation."
+        ),
     )
     parser.add_argument(
         "--version",
         action="version",
         version=f"rag-pipeline {__version__}",
+        help="Print the installed rag-pipeline version and exit.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
     ingest_parser = subparsers.add_parser(
         "ingest",
-        help="Load supported local files into LangChain Document objects.",
+        help="Discover and extract supported local documents.",
+        description=(
+            "Discover supported local files and extract LangChain documents. "
+            "Prints loaded sources without chunking, model inference, or storage."
+        ),
     )
     _add_document_input_arguments(ingest_parser)
 
     chunk_parser = subparsers.add_parser(
         "chunk",
-        help="Load and split local documents into retrieval-sized chunks.",
+        help="Preview retrieval chunks without running models or indexing.",
+        description=(
+            "Extract and split local documents, then report the resulting chunk "
+            "count. This diagnostic command performs no model inference or writes."
+        ),
     )
     _add_document_input_arguments(chunk_parser)
     _add_chunking_arguments(chunk_parser)
 
     chunk_experiment_parser = subparsers.add_parser(
         "chunk-experiment",
-        help="Compare chunking candidates against the same documents.",
+        help="Compare structural costs of several chunking policies.",
+        description=(
+            "Apply multiple character-based chunking policies to one document "
+            "snapshot. Reports size and duplication metrics without evaluating "
+            "retrieval quality, calling models, or writing an index."
+        ),
     )
     _add_document_input_arguments(chunk_experiment_parser)
     chunk_experiment_parser.add_argument(
@@ -72,20 +89,28 @@ def build_parser() -> argparse.ArgumentParser:
         dest="chunking_candidates",
         metavar="SIZE:OVERLAP",
         help=(
-            "Candidate to evaluate; repeat for multiple settings "
-            "(defaults: 500:100, 1000:200, 1500:300)."
+            "Chunk size and overlap in characters, formatted SIZE:OVERLAP. "
+            "Repeat to compare policies; overlap must be smaller than size. "
+            "If omitted, compares 500:100, 1000:200, and 1500:300."
         ),
     )
     chunk_experiment_parser.add_argument(
         "--output-format",
         choices=("table", "json"),
         default="table",
-        help="Report format (default: table).",
+        help=(
+            "Render identical metrics as a readable table or structured JSON. "
+            "Use JSON for scripts and saved comparisons (default: table)."
+        ),
     )
 
     embed_parser = subparsers.add_parser(
         "embed",
-        help="Load, chunk, and locally embed supported documents.",
+        help="Inspect local dense embedding output without indexing.",
+        description=(
+            "Extract, chunk, and embed local documents, then report vector count "
+            "and dimension. Models may be downloaded, but no Qdrant data is written."
+        ),
     )
     _add_document_input_arguments(embed_parser)
     _add_chunking_arguments(embed_parser)
@@ -93,7 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     index_parser = subparsers.add_parser(
         "index",
-        help="Load, chunk, embed, and persist documents in local Qdrant.",
+        help="Build or update a persistent local Qdrant collection.",
+        description=(
+            "Extract, chunk, and embed documents, then upsert deterministic points "
+            "into local Qdrant. Model and search-mode settings become part of the "
+            "collection compatibility contract."
+        ),
     )
     _add_document_input_arguments(index_parser)
     _add_chunking_arguments(index_parser)
@@ -104,16 +134,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-batch-size",
         type=int,
         default=64,
-        help="Vectors per Qdrant upsert batch (default: 64).",
+        help=(
+            "Number of chunk vectors sent in each synchronous Qdrant upsert. "
+            "Larger batches reduce write calls but use more memory; reduce after "
+            "memory-related write failures (default: 64)."
+        ),
     )
 
     retrieve_parser = subparsers.add_parser(
         "retrieve",
-        help="Find semantically similar chunks in an indexed collection.",
+        help="Inspect ranked chunks from an existing Qdrant collection.",
+        description=(
+            "Embed a query, search a compatible Qdrant collection, and print ranked "
+            "evidence. Optional filtering, hybrid search, and reranking apply before "
+            "output; no answer model is loaded."
+        ),
     )
     retrieve_parser.add_argument(
         "query",
-        help="Natural-language question or search query.",
+        help=(
+            "Text to embed and match against indexed chunks. Specific wording and "
+            "keywords can materially change dense and hybrid retrieval results."
+        ),
     )
     _add_embedding_arguments(retrieve_parser)
     _add_vector_store_location_arguments(retrieve_parser)
@@ -123,11 +165,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     answer_parser = subparsers.add_parser(
         "answer",
-        help="Retrieve context and generate a grounded local answer.",
+        help="Generate a cited local answer from retrieved evidence.",
+        description=(
+            "Retrieve eligible chunks from Qdrant, optionally rerank them, and pass "
+            "bounded evidence to a local generation model. Returns a deterministic "
+            "abstention when no chunk passes retrieval criteria."
+        ),
     )
     answer_parser.add_argument(
         "query",
-        help="Natural-language question to answer.",
+        help=(
+            "Question used for both retrieval and grounded generation. Clear, "
+            "specific wording generally yields more focused evidence and answers."
+        ),
     )
     _add_embedding_arguments(answer_parser)
     _add_vector_store_location_arguments(answer_parser)
@@ -155,16 +205,22 @@ def _add_retrieval_arguments(
         "--top-k",
         type=int,
         default=4,
-        help="Maximum number of chunks to return (default: 4).",
+        help=(
+            "Maximum final chunks printed or offered to answer generation. "
+            "Higher values can improve recall but increase output and prompt "
+            "work; with --rerank, must not exceed --candidate-k (default: 4)."
+        ),
     )
     command_parser.add_argument(
         "--score-threshold",
         type=float,
         default=default_score_threshold,
         help=(
-            "Minimum retrieval score from -1 to 1"
+            "Minimum first-stage Qdrant score in [-1, 1]; scales differ between "
+            "dense and hybrid modes. Raise it to reject weak matches before "
+            "reranking, at the risk of returning no context"
             + (
-                "."
+                " (default: disabled)."
                 if default_score_threshold is None
                 else f" (default: {default_score_threshold})."
             )
@@ -176,8 +232,9 @@ def _add_retrieval_arguments(
         dest="metadata_filters",
         metavar="KEY=VALUE",
         help=(
-            "Exact metadata condition; repeat for AND semantics "
-            "(integers and booleans are typed automatically)."
+            "Exact Qdrant metadata condition applied before top-k selection. "
+            "Repeat for AND semantics; unquoted integers and JSON booleans are "
+            "typed automatically. Example: --filter file_extension=.pdf."
         ),
     )
 
@@ -192,34 +249,48 @@ def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> Non
         "--search-mode",
         choices=("dense", "hybrid"),
         default="dense",
-        help="Collection and retrieval mode (default: dense).",
+        help=(
+            "Qdrant schema and retrieval strategy. Hybrid adds local sparse "
+            "vectors and RRF fusion for keyword recall, with extra CPU, storage, "
+            "and latency; must match the existing collection (default: dense)."
+        ),
     )
     command_parser.add_argument(
         "--sparse-model",
         default=DEFAULT_LOCAL_SPARSE_MODEL,
         help=(
-            "FastEmbed sparse model used in hybrid mode "
-            f"(default: {DEFAULT_LOCAL_SPARSE_MODEL})."
+            "FastEmbed sparse model used only in hybrid indexing and queries. "
+            "Changing it alters retrieval and requires a new or rebuilt hybrid "
+            f"collection (default: {DEFAULT_LOCAL_SPARSE_MODEL})."
         ),
     )
     command_parser.add_argument(
         "--sparse-cache-dir",
         default=str(DEFAULT_FASTEMBED_CACHE_DIR),
         help=(
-            "Sparse model cache directory "
-            f"(default: {DEFAULT_FASTEMBED_CACHE_DIR})."
+            "Directory for downloaded FastEmbed sparse-model files, used only in "
+            "hybrid mode. Changing it relocates disk use and may trigger another "
+            f"download (default: {DEFAULT_FASTEMBED_CACHE_DIR})."
         ),
     )
     command_parser.add_argument(
         "--sparse-batch-size",
         type=int,
         default=256,
-        help="Texts encoded per sparse batch (default: 256).",
+        help=(
+            "Texts processed per FastEmbed sparse inference batch in hybrid mode. "
+            "This mainly affects indexing; larger values can improve throughput "
+            "but use more RAM (default: 256)."
+        ),
     )
     command_parser.add_argument(
         "--sparse-threads",
         type=int,
-        help="Optional FastEmbed CPU thread count.",
+        help=(
+            "Positive CPU thread count passed to FastEmbed in hybrid mode. More "
+            "threads can improve throughput but increase CPU contention; omit to "
+            "use the provider default."
+        ),
     )
 
 
@@ -232,50 +303,74 @@ def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--rerank",
         action="store_true",
-        help="Rerank a wider candidate set with a local cross-encoder.",
+        help=(
+            "Score the first --candidate-k results with a local cross-encoder, "
+            "then keep --top-k. This can improve ordering but adds a model "
+            "download, inference latency, and memory use."
+        ),
     )
     command_parser.add_argument(
         "--candidate-k",
         type=int,
         default=20,
-        help="Chunks retrieved before optional reranking (default: 20).",
+        help=(
+            "First-stage chunks retrieved when --rerank is enabled; ignored "
+            "otherwise. Larger pools give the reranker more recall but cost more "
+            "inference and must be at least --top-k (default: 20)."
+        ),
     )
     command_parser.add_argument(
         "--reranker-model",
         default=DEFAULT_LOCAL_RERANKER_MODEL,
         help=(
-            "Local cross-encoder model used for reranking "
-            f"(default: {DEFAULT_LOCAL_RERANKER_MODEL})."
+            "Sentence Transformers cross-encoder loaded only with --rerank. "
+            "Different models trade ranking quality against download size, memory, "
+            f"and latency (default: {DEFAULT_LOCAL_RERANKER_MODEL})."
         ),
     )
     command_parser.add_argument(
         "--reranker-model-revision",
-        help="Optional reranker model commit or tag for reproducibility.",
+        help=(
+            "Optional Hugging Face commit or tag for --reranker-model. Pin a "
+            "revision for reproducible scores; omitting it follows the model "
+            "repository default."
+        ),
     )
     command_parser.add_argument(
         "--reranker-device",
         default="cpu",
-        help="Sentence Transformers reranker device (default: cpu).",
+        help=(
+            "Device passed to the cross-encoder, such as cpu, cuda, or cuda:0. "
+            "A GPU can reduce reranking latency but consumes VRAM (default: cpu)."
+        ),
     )
     command_parser.add_argument(
         "--reranker-cache-dir",
         default=str(DEFAULT_RERANKER_CACHE_DIR),
         help=(
-            "Reranker model cache directory "
-            f"(default: {DEFAULT_RERANKER_CACHE_DIR})."
+            "Directory for downloaded cross-encoder files. Change it to control "
+            "disk placement; an empty cache causes a model download when reranking "
+            f"first runs (default: {DEFAULT_RERANKER_CACHE_DIR})."
         ),
     )
     command_parser.add_argument(
         "--reranker-batch-size",
         type=int,
         default=16,
-        help="Query-chunk pairs scored per batch (default: 16).",
+        help=(
+            "Query-chunk pairs scored per cross-encoder inference batch. Larger "
+            "values can improve throughput but use more RAM or VRAM (default: 16)."
+        ),
     )
     command_parser.add_argument(
         "--reranker-max-length",
         type=int,
         default=512,
-        help="Maximum tokenized query-chunk length (default: 512).",
+        help=(
+            "Maximum tokens retained for each query-chunk pair by the cross-encoder. "
+            "Larger values preserve more text but increase compute and memory "
+            "use (default: 512)."
+        ),
     )
 
 
@@ -288,39 +383,67 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--generation-model",
         default="google/flan-t5-small",
-        help="Local Hugging Face generation model (default: google/flan-t5-small).",
+        help=(
+            "Hugging Face model loaded with the text2text-generation pipeline "
+            "after answer retrieval succeeds. Model choice affects answer quality, "
+            "download size, memory, and latency (default: google/flan-t5-small)."
+        ),
     )
     command_parser.add_argument(
         "--generation-model-revision",
-        help="Optional generation-model commit or tag for reproducibility.",
+        help=(
+            "Optional Hugging Face commit or tag for --generation-model. Pin it "
+            "for reproducible generation; omitting it follows the repository "
+            "default."
+        ),
     )
     command_parser.add_argument(
         "--generation-device",
         default="cpu",
-        help="Generation device: cpu, cuda, or cuda:<index> (default: cpu).",
+        help=(
+            "Generation device: cpu, cuda, or cuda:<index>. CUDA can reduce "
+            "latency but requires a compatible GPU and sufficient VRAM "
+            "(default: cpu)."
+        ),
     )
     command_parser.add_argument(
         "--max-new-tokens",
         type=int,
         default=128,
-        help="Maximum generated tokens (default: 128).",
+        help=(
+            "Maximum tokens the answer model may generate. Higher limits allow "
+            "longer answers but increase inference time and memory use "
+            "(default: 128)."
+        ),
     )
     command_parser.add_argument(
         "--temperature",
         type=float,
         default=0.0,
-        help="Sampling temperature from 0 to 2 (default: 0).",
+        help=(
+            "Sampling temperature in [0, 2]. Zero disables sampling for more "
+            "repeatable answers; higher values increase variation and may reduce "
+            "groundedness (default: 0)."
+        ),
     )
     command_parser.add_argument(
         "--max-context-characters",
         type=int,
         default=1200,
-        help="Secondary context character cap (default: 1200).",
+        help=(
+            "Maximum characters of formatted retrieved evidence considered for "
+            "the prompt, before the token limit is enforced. Lower values reduce "
+            "work but can omit useful evidence (default: 1200)."
+        ),
     )
     command_parser.add_argument(
         "--max-input-tokens",
         type=int,
-        help="Optional prompt-token cap; defaults to the tokenizer model limit.",
+        help=(
+            "Optional cap on tokenized instructions, question, and evidence before "
+            "an internal safety margin. It cannot exceed the tokenizer limit; lower "
+            "values truncate evidence sooner. Required when that limit is unknown."
+        ),
     )
 
 
@@ -333,22 +456,39 @@ def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
         "--model",
         default=DEFAULT_LOCAL_EMBEDDING_MODEL,
-        help=f"Hugging Face embedding model (default: {DEFAULT_LOCAL_EMBEDDING_MODEL}).",
+        help=(
+            "Sentence Transformers-compatible Hugging Face model for document and "
+            "query dense vectors. Index and query with the same model; changing it "
+            "requires a new or rebuilt collection. "
+            f"Default: {DEFAULT_LOCAL_EMBEDDING_MODEL}."
+        ),
     )
     command_parser.add_argument(
         "--model-revision",
-        help="Optional Hugging Face model commit or tag for reproducibility.",
+        help=(
+            "Optional Hugging Face commit or tag for --model. Use the same pinned "
+            "revision for indexing and queries to reproduce vectors; omitting it "
+            "follows the repository default."
+        ),
     )
     command_parser.add_argument(
         "--device",
         default="cpu",
-        help="Inference device understood by sentence-transformers (default: cpu).",
+        help=(
+            "Dense-embedding device understood by Sentence Transformers, such as "
+            "cpu, cuda, or cuda:0. A GPU can improve throughput but consumes VRAM "
+            "(default: cpu)."
+        ),
     )
     command_parser.add_argument(
         "--batch-size",
         type=int,
         default=32,
-        help="Texts embedded per local inference batch (default: 32).",
+        help=(
+            "Document chunks processed per dense-embedding inference batch. Larger "
+            "values can improve embed/index throughput but use more RAM or VRAM; "
+            "single-query embedding is unaffected (default: 32)."
+        ),
     )
 
 
@@ -358,12 +498,20 @@ def _add_vector_store_location_arguments(
     command_parser.add_argument(
         "--store-path",
         default=".rag_data/qdrant",
-        help="Directory for the local Qdrant database (default: .rag_data/qdrant).",
+        help=(
+            "Directory containing the persistent local Qdrant database. Use the "
+            "same path for index, retrieve, and answer; different paths isolate "
+            "stored collections (default: .rag_data/qdrant)."
+        ),
     )
     command_parser.add_argument(
         "--collection-name",
         default="rag_documents",
-        help="Qdrant collection to open (default: rag_documents).",
+        help=(
+            "Qdrant collection within --store-path. Use separate names for corpora "
+            "or incompatible embedding/search settings, and reuse the name when "
+            "querying (default: rag_documents)."
+        ),
     )
 
 
@@ -372,13 +520,21 @@ def _add_chunking_arguments(command_parser: argparse.ArgumentParser) -> None:
         "--chunk-size",
         type=int,
         default=1000,
-        help="Maximum chunk size in characters (default: 1000).",
+        help=(
+            "Maximum characters per retrieval chunk. Smaller chunks can sharpen "
+            "matches but create more vectors; larger chunks retain context but may "
+            "dilute relevance. Must exceed --chunk-overlap (default: 1000)."
+        ),
     )
     command_parser.add_argument(
         "--chunk-overlap",
         type=int,
         default=200,
-        help="Target overlap in characters (default: 200).",
+        help=(
+            "Target characters repeated between adjacent chunks. More overlap "
+            "preserves boundary context but increases embedding work and storage; "
+            "must be non-negative and below --chunk-size (default: 200)."
+        ),
     )
 
 
@@ -386,13 +542,21 @@ def _add_document_input_arguments(command_parser: argparse.ArgumentParser) -> No
     command_parser.add_argument(
         "paths",
         nargs="+",
-        help="Files or directories to ingest.",
+        help=(
+            "One or more files or directories containing .txt, .md, .markdown, "
+            ".html, .htm, .pdf, or .docx documents. Directories are scanned "
+            "recursively by default; discovered files are deduplicated and sorted."
+        ),
     )
     command_parser.add_argument(
         "--no-recursive",
         action="store_false",
         dest="recursive",
-        help="Only scan the top level of provided directories.",
+        help=(
+            "Scan only direct files inside each directory instead of its full tree. "
+            "Use for large directory trees or deliberate scope control; explicitly "
+            "listed files are still processed."
+        ),
     )
 
 
