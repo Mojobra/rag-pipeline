@@ -1,8 +1,8 @@
-"""Load secure provider-specific model profiles from environment settings.
+"""Load secure, role-specific model profiles from environment settings.
 
-The module maps stable CLI aliases to API credentials plus generation and
-embedding model names. It performs no provider initialization and keeps secret
-values out of dataclass representations and validation messages.
+The module maps stable CLI aliases to generation or embedding configuration.
+It performs no provider initialization, validates only the selected role's
+settings, and keeps secret values out of representations and error messages.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ DEFAULT_ENV_FILE = Path(".env")
 
 
 class ModelProvider(str, Enum):
-    """Identify a hosted generation provider selectable from the CLI.
+    """Identify a hosted model provider selectable for a CLI model role.
 
     The enum values are deliberately stable user-facing aliases. Provider model
     IDs remain external configuration so upgrades do not require code changes.
@@ -35,12 +35,61 @@ class ModelProvider(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderModelProfile:
-    """Represent one provider's credential and paired RAG model choices.
+class ProviderGenerationProfile:
+    """Represent one hosted provider's generation model and credential.
 
-    The profile is the configuration handoff to embedding and generation
-    factories. Its API key is excluded from ``repr`` so logs and tracebacks do
-    not reveal secrets; provider clients receive the key explicitly later.
+    Answer generation consumes this narrow profile so changing the LLM does
+    not select or require an embedding model. The API key is omitted from the
+    dataclass representation to reduce accidental secret disclosure.
+    """
+
+    provider: ModelProvider
+    api_key: str = field(repr=False)
+    generation_model: str
+
+    def __post_init__(self) -> None:
+        """Reject incomplete generation settings before client construction."""
+        _validate_provider(self.provider)
+        _validate_profile_value("api_key", self.api_key)
+        _validate_profile_value("generation_model", self.generation_model)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderEmbeddingProfile:
+    """Represent one provider-backed embedding selection.
+
+    Gemini and OpenAI use the credential with hosted embedding APIs. Claude's
+    configured embedding model is local because Anthropic has no embedding
+    endpoint, so its profile intentionally carries no API key.
+    """
+
+    provider: ModelProvider
+    api_key: str | None = field(repr=False)
+    embedding_model: str
+
+    def __post_init__(self) -> None:
+        """Require a model and credentials only for hosted embeddings."""
+        _validate_provider(self.provider)
+        _validate_profile_value("embedding_model", self.embedding_model)
+        if self.uses_local_embeddings:
+            if self.api_key is not None:
+                _validate_profile_value("api_key", self.api_key)
+        else:
+            _validate_profile_value("api_key", self.api_key)
+
+    @property
+    def uses_local_embeddings(self) -> bool:
+        """Return whether the configured model runs through the local adapter."""
+        return self.provider == ModelProvider.CLAUDE
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderModelProfile:
+    """Represent a complete provider profile for compatibility integrations.
+
+    New CLI paths use the narrower generation and embedding profiles so each
+    selection is independent. This complete form remains available to callers
+    that deliberately need both model roles from one provider.
     """
 
     provider: ModelProvider
@@ -50,19 +99,13 @@ class ProviderModelProfile:
 
     def __post_init__(self) -> None:
         """Reject incomplete profiles before any provider client is created."""
-        if not isinstance(self.provider, ModelProvider):
-            raise InvalidModelProviderConfigurationError(
-                "provider must be a ModelProvider."
-            )
+        _validate_provider(self.provider)
         for name, value in (
             ("api_key", self.api_key),
             ("generation_model", self.generation_model),
             ("embedding_model", self.embedding_model),
         ):
-            if not isinstance(value, str) or not value.strip():
-                raise InvalidModelProviderConfigurationError(
-                    f"{name} must be a non-empty string."
-                )
+            _validate_profile_value(name, value)
 
     @property
     def uses_local_embeddings(self) -> bool:
@@ -117,15 +160,123 @@ def load_provider_model_profile(
             placeholder.
     """
     selected_provider = _parse_provider(provider)
-    values: dict[str, str | None] = {}
-    if env_file is not None:
-        values.update(dotenv_values(Path(env_file)))
-    values.update(os.environ if environ is None else environ)
-
+    values = _load_configuration_values(env_file=env_file, environ=environ)
     key_name, generation_name, embedding_name = _PROFILE_VARIABLES[
         selected_provider
     ]
     required_names = (key_name, generation_name, embedding_name)
+    _require_configured_values(selected_provider, required_names, values)
+
+    return ProviderModelProfile(
+        provider=selected_provider,
+        api_key=_configured_value(values, key_name),
+        generation_model=_configured_value(values, generation_name),
+        embedding_model=_configured_value(values, embedding_name),
+    )
+
+
+def load_provider_generation_profile(
+    provider: ModelProvider | str,
+    *,
+    env_file: str | Path | None = DEFAULT_ENV_FILE,
+    environ: Mapping[str, str] | None = None,
+) -> ProviderGenerationProfile:
+    """Load only the credential and model required for hosted generation.
+
+    Environment variables override the optional dotenv file. Embedding model
+    configuration is deliberately ignored, allowing ``--model`` to change the
+    LLM without changing or validating the retrieval embedding selection.
+
+    Args:
+        provider: Stable provider alias or enum value.
+        env_file: Dotenv file to read, or ``None`` to disable file loading.
+        environ: Environment overrides; defaults to the current process.
+
+    Returns:
+        A secret-safe profile for the hosted generation factory.
+
+    Raises:
+        InvalidModelProviderConfigurationError: If the alias, API key, or
+            generation model setting is invalid.
+    """
+    selected_provider = _parse_provider(provider)
+    values = _load_configuration_values(env_file=env_file, environ=environ)
+    key_name, generation_name, _ = _PROFILE_VARIABLES[selected_provider]
+    _require_configured_values(
+        selected_provider,
+        (key_name, generation_name),
+        values,
+    )
+    return ProviderGenerationProfile(
+        provider=selected_provider,
+        api_key=_configured_value(values, key_name),
+        generation_model=_configured_value(values, generation_name),
+    )
+
+
+def load_provider_embedding_profile(
+    provider: ModelProvider | str,
+    *,
+    env_file: str | Path | None = DEFAULT_ENV_FILE,
+    environ: Mapping[str, str] | None = None,
+) -> ProviderEmbeddingProfile:
+    """Load only the settings required by the selected embedding adapter.
+
+    Gemini and OpenAI require their API key plus the configured embedding model.
+    Claude embeddings are local, so only ``CLAUDE_EMBED`` is required and the
+    Anthropic generation credential is not loaded into the profile.
+
+    Args:
+        provider: Stable provider alias or enum value.
+        env_file: Dotenv file to read, or ``None`` to disable file loading.
+        environ: Environment overrides; defaults to the current process.
+
+    Returns:
+        A profile for either the hosted or configured local embedding factory.
+
+    Raises:
+        InvalidModelProviderConfigurationError: If the alias or a setting used
+            by the selected embedding adapter is invalid.
+    """
+    selected_provider = _parse_provider(provider)
+    values = _load_configuration_values(env_file=env_file, environ=environ)
+    key_name, _, embedding_name = _PROFILE_VARIABLES[selected_provider]
+    required_names = (
+        (embedding_name,)
+        if selected_provider == ModelProvider.CLAUDE
+        else (key_name, embedding_name)
+    )
+    _require_configured_values(selected_provider, required_names, values)
+    return ProviderEmbeddingProfile(
+        provider=selected_provider,
+        api_key=(
+            None
+            if selected_provider == ModelProvider.CLAUDE
+            else _configured_value(values, key_name)
+        ),
+        embedding_model=_configured_value(values, embedding_name),
+    )
+
+
+def _load_configuration_values(
+    *,
+    env_file: str | Path | None,
+    environ: Mapping[str, str] | None,
+) -> dict[str, str | None]:
+    """Read dotenv values and overlay environment-provided configuration."""
+    values: dict[str, str | None] = {}
+    if env_file is not None:
+        values.update(dotenv_values(Path(env_file)))
+    values.update(os.environ if environ is None else environ)
+    return values
+
+
+def _require_configured_values(
+    provider: ModelProvider,
+    required_names: tuple[str, ...],
+    values: Mapping[str, str | None],
+) -> None:
+    """Raise a secret-safe error listing missing provider variable names."""
     missing_names = [
         name
         for name in required_names
@@ -134,16 +285,14 @@ def load_provider_model_profile(
     if missing_names:
         missing = ", ".join(missing_names)
         raise InvalidModelProviderConfigurationError(
-            f"Model profile '{selected_provider.value}' requires configured "
+            f"Model profile '{provider.value}' requires configured "
             f"environment variable(s): {missing}."
         )
 
-    return ProviderModelProfile(
-        provider=selected_provider,
-        api_key=cast("str", values[key_name]).strip(),
-        generation_model=cast("str", values[generation_name]).strip(),
-        embedding_model=cast("str", values[embedding_name]).strip(),
-    )
+
+def _configured_value(values: Mapping[str, str | None], name: str) -> str:
+    """Return a value already checked by ``_require_configured_values``."""
+    return cast("str", values[name]).strip()
 
 
 def _parse_provider(provider: ModelProvider | str) -> ModelProvider:
@@ -160,6 +309,20 @@ def _parse_provider(provider: ModelProvider | str) -> ModelProvider:
             f"Unsupported model provider {provider!r}; choose gemini, openai, or "
             "claude."
         ) from exc
+
+
+def _validate_provider(provider: object) -> None:
+    if not isinstance(provider, ModelProvider):
+        raise InvalidModelProviderConfigurationError(
+            "provider must be a ModelProvider."
+        )
+
+
+def _validate_profile_value(name: str, value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidModelProviderConfigurationError(
+            f"{name} must be a non-empty string."
+        )
 
 
 def _is_unconfigured_value(name: str, value: object) -> bool:

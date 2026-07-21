@@ -117,11 +117,11 @@ Ask a question against the persisted collection:
 uv run python -m rag_pipeline answer "Which vector database does this project use?"
 ```
 
-Select one configured hosted profile with the same alias for indexing and
-answering:
+Select Gemini for answer generation while retaining the default local
+embedding model:
 
 ```powershell
-uv run python -m rag_pipeline index path/to/documents --model gemini
+uv run python -m rag_pipeline index path/to/documents
 uv run python -m rag_pipeline answer "What is the policy?" --model gemini
 ```
 
@@ -152,29 +152,37 @@ CLAUDE=claude-sonnet-4-6
 CLAUDE_EMBED=sentence-transformers/all-MiniLM-L6-v2
 ```
 
-`GEMINI`, `OPENAI`, and `CLAUDE` are generation model IDs. Their `_EMBED`
-partners select the embedding model used for both indexing and queries. Model
-IDs are passed directly to the provider integration, so they can be changed in
-`.env` without editing Python. Process environment variables override `.env`,
-which lets deployment systems inject secrets without writing a file.
+`GEMINI`, `OPENAI`, and `CLAUDE` are generation model IDs selected by
+`--model`. Their `_EMBED` partners are independent embedding model IDs selected
+by `--embed-model`. Model IDs are passed directly to the provider integration,
+so they can be changed in `.env` without editing Python. Process environment
+variables override `.env`, which lets deployment systems inject secrets
+without writing a file.
 
-Use `--model gemini`, `--model openai`, or `--model claude` on every command
-that embeds or queries content. The `answer` command reuses that profile for
-generation automatically:
+Omitting `--embed-model` always uses
+`sentence-transformers/all-MiniLM-L6-v2`, the
+`DEFAULT_LOCAL_EMBEDDING_MODEL`. Therefore, `--model gemini` changes only
+generation and does not use `GEMINI_EMBED`:
 
 ```powershell
-# Google Gemini generation and embeddings
-uv run python -m rag_pipeline index path/to/documents --model gemini
+# Gemini generation with default local embeddings
+uv run python -m rag_pipeline index path/to/documents
 uv run python -m rag_pipeline answer "What is required?" --model gemini
 
-# OpenAI generation and embeddings
-uv run python -m rag_pipeline index path/to/documents --model openai
-uv run python -m rag_pipeline answer "What is required?" --model openai
+# Gemini generation and Gemini embeddings
+uv run python -m rag_pipeline index path/to/documents --embed-model gemini
+uv run python -m rag_pipeline answer "What is required?" --model gemini --embed-model gemini
 
-# Anthropic generation with the configured local embedding model
-uv run python -m rag_pipeline index path/to/documents --model claude
-uv run python -m rag_pipeline answer "What is required?" --model claude
+# Claude generation with OpenAI embeddings
+uv run python -m rag_pipeline index path/to/documents --embed-model openai
+uv run python -m rag_pipeline answer "What is required?" --model claude --embed-model openai
 ```
+
+Use the same `--embed-model` value for indexing and every later `retrieve` or
+`answer` command against that collection. Generation may be changed with
+`--model` without reindexing. A raw Hugging Face model ID is also accepted by
+`--embed-model`; when `--model` is omitted, generation uses the local model
+selected by `--generation-model`.
 
 An OpenAI API key and API billing are separate from a ChatGPT subscription.
 Anthropic currently [does not provide an embedding model](https://platform.claude.com/docs/en/build-with-claude/embeddings),
@@ -183,8 +191,10 @@ A future hosted Voyage integration would require its own API key and billing
 contract rather than reusing `ANTHROPIC_API_KEY` incorrectly.
 
 Embedding model identity and vector dimension are recorded in Qdrant. After
-changing any `_EMBED` value, reindex into a new collection or rebuild the old
-one before retrieval; vectors from different embedding spaces cannot be mixed.
+changing `--embed-model` or its configured `_EMBED` value, reindex into a new
+collection or rebuild the old one before retrieval; vectors from different
+embedding spaces cannot be mixed. Changing only `--model` does not require
+reindexing.
 Hosted embedding sends chunk and query text to the selected provider, and
 hosted generation sends the bounded retrieved evidence. That introduces usage
 cost, network latency, provider rate limits, and external data-processing
@@ -244,9 +254,11 @@ uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
 
 Useful options include:
 
-- `--model gemini|openai|claude` for an environment-backed provider profile, or
-  `--model MODEL_ID` for a local Hugging Face embedding model
-- `--model-revision` for local embeddings, including `CLAUDE_EMBED`
+- `--model gemini|openai|claude` for hosted answer generation
+- `--embed-model gemini|openai|claude` for configured embeddings, or
+  `--embed-model MODEL_ID` for a local Hugging Face embedding model
+- `--embed-model-revision` for local embeddings, including `CLAUDE_EMBED`;
+  `--model-revision` remains a compatibility alias
 - `--generation-model` and `--generation-model-revision` for the local LLM path
 - `--device` and `--generation-device` for CPU or CUDA placement
 - `--temperature` for an explicit generation temperature; hosted profiles use

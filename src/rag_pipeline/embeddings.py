@@ -22,6 +22,7 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.model_profiles import (
     ModelProvider,
+    ProviderEmbeddingProfile,
     ProviderModelProfile,
 )
 
@@ -273,7 +274,7 @@ def create_local_embedding_service(
 
 
 def create_profile_embedding_service(
-    profile: ProviderModelProfile,
+    profile: ProviderEmbeddingProfile | ProviderModelProfile,
     *,
     local_device: str = "cpu",
     local_batch_size: int = 32,
@@ -288,7 +289,8 @@ def create_profile_embedding_service(
     Face factory and honors the CLI's local device, batch, and revision values.
 
     Args:
-        profile: Validated credential and embedding-model selection.
+        profile: Validated credential and embedding-model selection. Complete
+            provider profiles remain accepted for compatibility.
         local_device: Hugging Face device used only by the Claude profile.
         local_batch_size: Local embedding batch size used only by Claude.
         local_model_revision: Optional local revision used only by Claude.
@@ -301,8 +303,13 @@ def create_profile_embedding_service(
             client construction fails. API-call failures are wrapped later by
             ``EmbeddingService``.
     """
-    if not isinstance(profile, ProviderModelProfile):
-        raise TypeError("profile must be a ProviderModelProfile.")
+    if not isinstance(
+        profile,
+        (ProviderEmbeddingProfile, ProviderModelProfile),
+    ):
+        raise TypeError(
+            "profile must be a ProviderEmbeddingProfile or ProviderModelProfile."
+        )
 
     if profile.uses_local_embeddings:
         return create_local_embedding_service(
@@ -318,6 +325,10 @@ def create_profile_embedding_service(
         if profile.provider == ModelProvider.GEMINI:
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+            # Keep the adapter boundary defensive if another profile type is
+            # introduced without preserving the hosted-key invariant.
+            if profile.api_key is None:
+                raise EmbeddingProviderError("Gemini embeddings require an API key.")
             embeddings = GoogleGenerativeAIEmbeddings(
                 model=profile.embedding_model,
                 api_key=SecretStr(profile.api_key),
@@ -325,6 +336,8 @@ def create_profile_embedding_service(
         elif profile.provider == ModelProvider.OPENAI:
             from langchain_openai import OpenAIEmbeddings
 
+            if profile.api_key is None:
+                raise EmbeddingProviderError("OpenAI embeddings require an API key.")
             embeddings = OpenAIEmbeddings(
                 model=profile.embedding_model,
                 api_key=SecretStr(profile.api_key),

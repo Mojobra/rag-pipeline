@@ -27,7 +27,7 @@ from rag_pipeline.exceptions import (  # noqa: E402
 )
 from rag_pipeline.model_profiles import (  # noqa: E402
     ModelProvider,
-    ProviderModelProfile,
+    ProviderEmbeddingProfile,
 )
 
 
@@ -215,10 +215,9 @@ class EmbeddingServiceTests(unittest.TestCase):
 
                 fake_module = ModuleType(module_name)
                 setattr(fake_module, class_name, FakeProviderEmbeddings)
-                profile = ProviderModelProfile(
+                profile = ProviderEmbeddingProfile(
                     provider=provider,
                     api_key="private-key",
-                    generation_model="generation-model",
                     embedding_model="embedding-model",
                 )
 
@@ -233,10 +232,9 @@ class EmbeddingServiceTests(unittest.TestCase):
                 )
 
     def test_claude_profile_uses_configured_local_embedding_model(self) -> None:
-        profile = ProviderModelProfile(
+        profile = ProviderEmbeddingProfile(
             provider=ModelProvider.CLAUDE,
-            api_key="anthropic-key",
-            generation_model="claude-model",
+            api_key=None,
             embedding_model="organization/local-embedding-model",
         )
         expected_service = EmbeddingService(

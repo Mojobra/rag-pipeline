@@ -24,7 +24,11 @@ from rag_pipeline.exceptions import (
     GenerationProviderError,
     InvalidGenerationConfigurationError,
 )
-from rag_pipeline.model_profiles import ModelProvider, ProviderModelProfile
+from rag_pipeline.model_profiles import (
+    ModelProvider,
+    ProviderGenerationProfile,
+    ProviderModelProfile,
+)
 from rag_pipeline.retrieval import RetrievalResult
 
 
@@ -178,22 +182,29 @@ class LocalGenerationConfig:
 
 @dataclass(frozen=True, slots=True)
 class HostedGenerationConfig:
-    """Validated hosted decoding settings paired with one provider profile.
+    """Validated hosted decoding settings paired with a generation profile.
 
     The CLI builds this before retrieval so malformed limits fail without vector
     or provider I/O. The profile supplies model identity and credentials; the
     common input cap keeps prompt packing independent of changing model IDs.
+    Complete provider profiles remain supported for compatibility callers.
     """
 
-    profile: ProviderModelProfile
+    profile: ProviderGenerationProfile | ProviderModelProfile
     max_new_tokens: int = 128
     temperature: float | None = None
     input_token_limit: int = DEFAULT_HOSTED_MODEL_INPUT_TOKENS
 
     def __post_init__(self) -> None:
         """Validate profile type, output controls, and hosted prompt capacity."""
-        if not isinstance(self.profile, ProviderModelProfile):
-            raise TypeError("profile must be a ProviderModelProfile.")
+        if not isinstance(
+            self.profile,
+            (ProviderGenerationProfile, ProviderModelProfile),
+        ):
+            raise TypeError(
+                "profile must be a ProviderGenerationProfile or "
+                "ProviderModelProfile."
+            )
         _validate_hosted_generation_settings(
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
