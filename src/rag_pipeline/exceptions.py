@@ -12,6 +12,10 @@ class RagPipelineError(Exception):
     """Base error for pipeline failures."""
 
 
+class InvalidModelProviderConfigurationError(RagPipelineError, ValueError):
+    """Raised when a hosted model profile is unknown or incomplete."""
+
+
 class IngestionError(RagPipelineError):
     """Base error for document ingestion failures."""
 
@@ -45,7 +49,7 @@ class EmbeddingError(RagPipelineError):
 
 
 class InvalidEmbeddingConfigurationError(EmbeddingError, ValueError):
-    """Raised when local embedding settings are invalid."""
+    """Raised when embedding model or inference settings are invalid."""
 
 
 class EmbeddingInputError(EmbeddingError, ValueError):
@@ -117,7 +121,7 @@ class GenerationError(RagPipelineError):
 
 
 class InvalidGenerationConfigurationError(GenerationError, ValueError):
-    """Raised when local model or context settings are invalid."""
+    """Raised when generation model, decoding, or context settings are invalid."""
 
 
 class GenerationInputError(GenerationError, ValueError):
