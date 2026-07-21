@@ -30,7 +30,7 @@ if TYPE_CHECKING:
         HostedGenerationConfig,
         LocalGenerationConfig,
     )
-    from rag_pipeline.model_profiles import ProviderModelProfile
+    from rag_pipeline.model_profiles import ProviderEmbeddingProfile
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
     from rag_pipeline.retrieval import RetrievalResult
 
@@ -290,9 +290,18 @@ def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
 def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
     """Attach language-model decoding and prompt-budget settings for answers.
 
-    Local selections use all model/device flags. Hosted profiles take model IDs
-    from environment configuration while sharing output and prompt limits.
+    ``--model`` selects a hosted generation provider without changing retrieval
+    embeddings. Local selections use the explicit generation model/device flags.
     """
+    command_parser.add_argument(
+        "--model",
+        choices=("gemini", "openai", "claude"),
+        type=str.lower,
+        help=(
+            "Hosted generation provider loaded from .env; when omitted, use "
+            "the local generation model."
+        ),
+    )
     command_parser.add_argument(
         "--generation-model",
         default="google/flan-t5-small",
@@ -341,23 +350,25 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
 
 
 def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
-    """Attach provider-profile or local dense embedding options.
+    """Attach independent hosted or local dense embedding options.
 
     Indexing and retrieval share this group because they must use a compatible
     embedding contract. Device, revision, and batching settings affect local
     embeddings, including the Claude profile's local embedding model.
     """
     command_parser.add_argument(
-        "--model",
+        "--embed-model",
         default=DEFAULT_LOCAL_EMBEDDING_MODEL,
         help=(
-            "Model profile alias (gemini, openai, or claude) loaded from .env, "
-            "or a local Hugging Face embedding model "
+            "Embedding provider alias (gemini, openai, or claude) loaded from "
+            ".env, or a local Hugging Face embedding model "
             f"(default: {DEFAULT_LOCAL_EMBEDDING_MODEL})."
         ),
     )
     command_parser.add_argument(
+        "--embed-model-revision",
         "--model-revision",
+        dest="embed_model_revision",
         help="Optional local embedding-model commit or tag for reproducibility.",
     )
     command_parser.add_argument(
@@ -800,10 +811,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     for value in (args.metadata_filters or ())
                 ),
             )
-            generation_model_config = _build_generation_model_config(
-                args,
-                embedding_model_config,
-            )
+            generation_model_config = _build_generation_model_config(args)
             generation_config = GenerationConfig(
                 max_context_characters=args.max_context_characters,
                 max_input_tokens=args.max_input_tokens,
@@ -867,39 +875,31 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _build_embedding_model_config(
     args: argparse.Namespace,
-) -> LocalEmbeddingConfig | ProviderModelProfile:
-    """Resolve ``--model`` into either local settings or one dotenv profile.
+) -> LocalEmbeddingConfig | ProviderEmbeddingProfile:
+    """Resolve ``--embed-model`` independently of answer generation.
 
-    Provider aliases load all three profile variables before document or model
-    I/O begins. Any other value remains a Hugging Face model name and preserves
-    the original local CLI behavior.
+    Provider aliases load only settings needed by their embedding adapter. Any
+    other value is interpreted as a local Hugging Face model name; omitting the
+    flag selects ``DEFAULT_LOCAL_EMBEDDING_MODEL``.
     """
     from rag_pipeline.embeddings import LocalEmbeddingConfig
     from rag_pipeline.model_profiles import (
         is_provider_alias,
-        load_provider_model_profile,
+        load_provider_embedding_profile,
     )
 
-    if is_provider_alias(args.model):
-        profile = load_provider_model_profile(args.model)
-        if profile.uses_local_embeddings:
-            LocalEmbeddingConfig(
-                model_name=profile.embedding_model,
-                model_revision=args.model_revision,
-                device=args.device,
-                batch_size=args.batch_size,
-            )
-        return profile
+    if is_provider_alias(args.embed_model):
+        return load_provider_embedding_profile(args.embed_model)
     return LocalEmbeddingConfig(
-        model_name=args.model,
-        model_revision=args.model_revision,
+        model_name=args.embed_model,
+        model_revision=args.embed_model_revision,
         device=args.device,
         batch_size=args.batch_size,
     )
 
 
 def _create_embedding_service(
-    model_config: LocalEmbeddingConfig | ProviderModelProfile,
+    model_config: LocalEmbeddingConfig | ProviderEmbeddingProfile,
     args: argparse.Namespace,
 ) -> EmbeddingService:
     """Construct the local or hosted embedding boundary selected by the CLI.
@@ -914,29 +914,30 @@ def _create_embedding_service(
         create_local_embedding_service,
         create_profile_embedding_service,
     )
-    from rag_pipeline.model_profiles import ProviderModelProfile
+    from rag_pipeline.model_profiles import ProviderEmbeddingProfile
 
-    if isinstance(model_config, ProviderModelProfile):
+    if isinstance(model_config, ProviderEmbeddingProfile):
         return create_profile_embedding_service(
             model_config,
             local_device=args.device,
             local_batch_size=args.batch_size,
-            local_model_revision=args.model_revision,
+            local_model_revision=args.embed_model_revision,
         )
     if isinstance(model_config, LocalEmbeddingConfig):
         return create_local_embedding_service(model_config)
-    raise TypeError("model_config must contain local settings or a provider profile.")
+    raise TypeError(
+        "model_config must contain local settings or an embedding profile."
+    )
 
 
 def _build_generation_model_config(
     args: argparse.Namespace,
-    embedding_model_config: LocalEmbeddingConfig | ProviderModelProfile,
 ) -> LocalGenerationConfig | HostedGenerationConfig:
-    """Pair answer generation with the embedding selection used for retrieval.
+    """Resolve answer generation without consulting embedding configuration.
 
-    A provider profile is reused unchanged so ``--model gemini|openai|claude``
-    cannot accidentally mix credentials or generation models. Local embedding
-    selections continue to use the independent local generation flags.
+    ``--model`` loads the selected hosted generation settings. With no provider
+    alias, the existing local generation flags remain authoritative regardless
+    of the embedding model chosen for retrieval.
     """
     from rag_pipeline.exceptions import InvalidGenerationConfigurationError
     from rag_pipeline.generation import (
@@ -944,9 +945,9 @@ def _build_generation_model_config(
         HostedGenerationConfig,
         LocalGenerationConfig,
     )
-    from rag_pipeline.model_profiles import ProviderModelProfile
+    from rag_pipeline.model_profiles import load_provider_generation_profile
 
-    if isinstance(embedding_model_config, ProviderModelProfile):
+    if args.model is not None:
         if (
             args.max_input_tokens is not None
             and args.max_input_tokens > DEFAULT_HOSTED_MODEL_INPUT_TOKENS
@@ -956,8 +957,9 @@ def _build_generation_model_config(
                 f"of {DEFAULT_HOSTED_MODEL_INPUT_TOKENS} tokens; "
                 "--max-input-tokens may only lower it."
             )
+        profile = load_provider_generation_profile(args.model)
         return HostedGenerationConfig(
-            profile=embedding_model_config,
+            profile=profile,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
         )

@@ -35,7 +35,7 @@ from rag_pipeline.generation import (  # noqa: E402
 )
 from rag_pipeline.model_profiles import (  # noqa: E402
     ModelProvider,
-    ProviderModelProfile,
+    ProviderGenerationProfile,
 )
 from rag_pipeline.retrieval import RetrievalResult  # noqa: E402
 
@@ -480,11 +480,10 @@ class GroundedGenerationTests(unittest.TestCase):
 
                 fake_module = ModuleType(module_name)
                 setattr(fake_module, class_name, FakeHostedChat)
-                profile = ProviderModelProfile(
+                profile = ProviderGenerationProfile(
                     provider=provider,
                     api_key="private-key",
                     generation_model="generation-model",
-                    embedding_model="embedding-model",
                 )
 
                 with patch.dict(sys.modules, {module_name: fake_module}):
@@ -514,11 +513,10 @@ class GroundedGenerationTests(unittest.TestCase):
 
         fake_module = ModuleType("langchain_openai")
         fake_module.ChatOpenAI = FakeChatOpenAI  # type: ignore[attr-defined]
-        profile = ProviderModelProfile(
+        profile = ProviderGenerationProfile(
             provider=ModelProvider.OPENAI,
             api_key="private-key",
             generation_model="generation-model",
-            embedding_model="embedding-model",
         )
 
         with patch.dict(sys.modules, {"langchain_openai": fake_module}):
@@ -540,11 +538,10 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(result.answer, "A hosted grounded answer.")
 
     def test_profile_factory_rejects_invalid_hosted_limits(self) -> None:
-        profile = ProviderModelProfile(
+        profile = ProviderGenerationProfile(
             provider=ModelProvider.OPENAI,
             api_key="private-key",
             generation_model="generation-model",
-            embedding_model="embedding-model",
         )
 
         with self.assertRaisesRegex(
