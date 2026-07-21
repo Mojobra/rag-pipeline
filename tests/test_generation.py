@@ -28,14 +28,8 @@ from rag_pipeline.generation import (  # noqa: E402
     INSUFFICIENT_CONTEXT_ANSWER,
     AnswerGenerator,
     GenerationConfig,
-    HostedGenerationConfig,
     LocalGenerationConfig,
     create_local_answer_generator,
-    create_profile_answer_generator,
-)
-from rag_pipeline.model_profiles import (  # noqa: E402
-    ModelProvider,
-    ProviderGenerationProfile,
 )
 from rag_pipeline.retrieval import RetrievalResult  # noqa: E402
 
@@ -446,109 +440,6 @@ class GroundedGenerationTests(unittest.TestCase):
                 "temperature": 0.3,
             },
         )
-
-    def test_profile_factory_configures_each_langchain_chat_model(self) -> None:
-        provider_cases = (
-            (
-                ModelProvider.GEMINI,
-                "langchain_google_genai",
-                "ChatGoogleGenerativeAI",
-                "max_tokens",
-            ),
-            (
-                ModelProvider.OPENAI,
-                "langchain_openai",
-                "ChatOpenAI",
-                "max_completion_tokens",
-            ),
-            (
-                ModelProvider.CLAUDE,
-                "langchain_anthropic",
-                "ChatAnthropic",
-                "max_tokens",
-            ),
-        )
-
-        for provider, module_name, class_name, output_limit_name in provider_cases:
-            with self.subTest(provider=provider.value):
-                captured: dict[str, object] = {}
-
-                class FakeHostedChat(RecordingLLM):
-                    def __init__(self, **kwargs: object) -> None:
-                        captured.update(kwargs)
-                        super().__init__(response="Hosted answer.")
-
-                fake_module = ModuleType(module_name)
-                setattr(fake_module, class_name, FakeHostedChat)
-                profile = ProviderGenerationProfile(
-                    provider=provider,
-                    api_key="private-key",
-                    generation_model="generation-model",
-                )
-
-                with patch.dict(sys.modules, {module_name: fake_module}):
-                    generator = create_profile_answer_generator(
-                        HostedGenerationConfig(
-                            profile=profile,
-                            max_new_tokens=64,
-                            temperature=0.25,
-                        )
-                    )
-
-                self.assertEqual(generator.model_identifier, "generation-model")
-                self.assertEqual(captured["model"], "generation-model")
-                self.assertEqual(
-                    captured["api_key"].get_secret_value(),  # type: ignore[union-attr]
-                    "private-key",
-                )
-                self.assertEqual(captured[output_limit_name], 64)
-                self.assertEqual(captured["temperature"], 0.25)
-
-    def test_hosted_generator_uses_local_conservative_prompt_budget(self) -> None:
-        captured_model = RecordingLLM(response="A hosted grounded answer.")
-
-        class FakeChatOpenAI:
-            def __new__(cls, **kwargs: object) -> RecordingLLM:
-                return captured_model
-
-        fake_module = ModuleType("langchain_openai")
-        fake_module.ChatOpenAI = FakeChatOpenAI  # type: ignore[attr-defined]
-        profile = ProviderGenerationProfile(
-            provider=ModelProvider.OPENAI,
-            api_key="private-key",
-            generation_model="generation-model",
-        )
-
-        with patch.dict(sys.modules, {"langchain_openai": fake_module}):
-            generator = create_profile_answer_generator(
-                HostedGenerationConfig(profile=profile)
-            )
-
-        result = generator.generate(
-            "What is required?",
-            [make_result("Expense claims require receipts.")],
-        )
-
-        rendered_prompt = captured_model.prompts[0]
-        self.assertEqual(
-            result.prompt_tokens,
-            len(rendered_prompt.encode("utf-8")) + 8,
-        )
-        self.assertEqual(result.prompt_token_limit, 8192)
-        self.assertEqual(result.answer, "A hosted grounded answer.")
-
-    def test_profile_factory_rejects_invalid_hosted_limits(self) -> None:
-        profile = ProviderGenerationProfile(
-            provider=ModelProvider.OPENAI,
-            api_key="private-key",
-            generation_model="generation-model",
-        )
-
-        with self.assertRaisesRegex(
-            InvalidGenerationConfigurationError,
-            "input_token_limit must be greater",
-        ):
-            HostedGenerationConfig(profile=profile, input_token_limit=8)
 
 
 if __name__ == "__main__":

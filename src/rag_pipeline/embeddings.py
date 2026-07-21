@@ -13,17 +13,11 @@ from numbers import Real
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from pydantic import SecretStr
 
 from rag_pipeline.exceptions import (
     EmbeddingInputError,
     EmbeddingProviderError,
     InvalidEmbeddingConfigurationError,
-)
-from rag_pipeline.model_profiles import (
-    ModelProvider,
-    ProviderEmbeddingProfile,
-    ProviderModelProfile,
 )
 
 
@@ -270,98 +264,6 @@ def create_local_embedding_service(
         embeddings,
         model_name=settings.model_name,
         model_revision=settings.model_revision,
-    )
-
-
-def create_profile_embedding_service(
-    profile: ProviderEmbeddingProfile | ProviderModelProfile,
-    *,
-    local_device: str = "cpu",
-    local_batch_size: int = 32,
-    local_model_revision: str | None = None,
-) -> EmbeddingService:
-    """Initialize the embedding service selected by a provider profile.
-
-    Gemini and OpenAI construct their hosted LangChain embedding adapters and
-    may perform network setup; actual embedding calls send document or query
-    text to the selected provider. Because Anthropic has no embedding API, a
-    Claude profile delegates ``CLAUDE_EMBED`` to the existing local Hugging
-    Face factory and honors the CLI's local device, batch, and revision values.
-
-    Args:
-        profile: Validated credential and embedding-model selection. Complete
-            provider profiles remain accepted for compatibility.
-        local_device: Hugging Face device used only by the Claude profile.
-        local_batch_size: Local embedding batch size used only by Claude.
-        local_model_revision: Optional local revision used only by Claude.
-
-    Returns:
-        The common validated embedding service consumed by indexing/retrieval.
-
-    Raises:
-        EmbeddingProviderError: If the integration is unavailable or provider
-            client construction fails. API-call failures are wrapped later by
-            ``EmbeddingService``.
-    """
-    if not isinstance(
-        profile,
-        (ProviderEmbeddingProfile, ProviderModelProfile),
-    ):
-        raise TypeError(
-            "profile must be a ProviderEmbeddingProfile or ProviderModelProfile."
-        )
-
-    if profile.uses_local_embeddings:
-        return create_local_embedding_service(
-            LocalEmbeddingConfig(
-                model_name=profile.embedding_model,
-                model_revision=local_model_revision,
-                device=local_device,
-                batch_size=local_batch_size,
-            )
-        )
-
-    try:
-        if profile.provider == ModelProvider.GEMINI:
-            from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-            # Keep the adapter boundary defensive if another profile type is
-            # introduced without preserving the hosted-key invariant.
-            if profile.api_key is None:
-                raise EmbeddingProviderError("Gemini embeddings require an API key.")
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model=profile.embedding_model,
-                api_key=SecretStr(profile.api_key),
-            )
-        elif profile.provider == ModelProvider.OPENAI:
-            from langchain_openai import OpenAIEmbeddings
-
-            if profile.api_key is None:
-                raise EmbeddingProviderError("OpenAI embeddings require an API key.")
-            embeddings = OpenAIEmbeddings(
-                model=profile.embedding_model,
-                api_key=SecretStr(profile.api_key),
-            )
-        else:  # Defensive guard if a new provider is added without an adapter.
-            raise EmbeddingProviderError(
-                f"No embedding adapter is configured for {profile.provider.value}."
-            )
-    except ImportError as exc:
-        raise EmbeddingProviderError(
-            f"The LangChain {profile.provider.value} embedding integration is "
-            "not installed."
-        ) from exc
-    except EmbeddingProviderError:
-        raise
-    except Exception as exc:
-        raise EmbeddingProviderError(
-            f"Failed to initialize {profile.provider.value} embedding model "
-            f"{profile.embedding_model}."
-        ) from exc
-
-    return EmbeddingService(
-        embeddings,
-        model_name=profile.embedding_model,
     )
 
 
