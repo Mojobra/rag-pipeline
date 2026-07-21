@@ -1,9 +1,10 @@
 # Production-Minded RAG Pipeline
 
 An end-to-end Retrieval-Augmented Generation pipeline for question answering
-over business documents. The project uses LangChain, Hugging Face models, and a
-persistent local Qdrant vector store to turn PDF, DOCX, Markdown, HTML, and text
-files into grounded answers with deterministic source citations.
+over business documents. The project uses LangChain, configurable local or
+hosted models, and a persistent local Qdrant vector store to turn PDF, DOCX,
+Markdown, HTML, and text files into grounded answers with deterministic source
+citations.
 
 The implementation starts with a local, reproducible baseline while preserving
 the contracts needed to evolve toward hosted models, production APIs,
@@ -22,6 +23,9 @@ code was reviewed, adapted, and validated through automated tests.
 - Configurable recursive chunking with page and character-level provenance
 - Reproducible chunking experiments with distribution and overlap-cost metrics
 - Local normalized MiniLM embeddings through LangChain
+- Environment-configured Gemini, OpenAI, and Claude model profiles
+- Hosted Gemini/OpenAI embeddings and Gemini/OpenAI/Claude generation through
+  dedicated LangChain integrations
 - Optional local BM25 sparse embeddings with native Qdrant RRF hybrid search
 - Optional local cross-encoder reranking with first-stage score provenance
 - Persistent Qdrant storage with deterministic IDs and idempotent upserts
@@ -29,7 +33,7 @@ code was reviewed, adapted, and validated through automated tests.
   distance metric, and schema version
 - Ranked semantic retrieval with configurable top-k and score thresholds
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
-- Tokenizer-bounded local generation with a versioned grounding and abstention
+- Bounded local or hosted generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
 - Typed configuration, stage-specific exceptions, and automated tests
@@ -40,7 +44,7 @@ code was reviewed, adapted, and validated through automated tests.
 flowchart LR
     A["PDF / DOCX / Markdown / HTML / Text"] --> B["Extraction"]
     B --> C["LangChain chunking"]
-    C --> D["MiniLM dense embeddings"]
+    C --> D["Selected dense embedding model"]
     C --> S["BM25 sparse embeddings"]
     D --> E["Persistent Qdrant index"]
     S --> E
@@ -51,7 +55,7 @@ flowchart LR
     R --> X["Optional cross-encoder reranking"]
     X --> G["Bounded numbered evidence blocks"]
     G --> P["LangChain grounded-v2 prompt"]
-    P --> H["Local FLAN-T5 generation"]
+    P --> H["Selected local or hosted LLM"]
     H --> I["Answer and deterministic citations"]
 ```
 
@@ -71,9 +75,12 @@ flowchart LR
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
-| Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
+| Budget the complete prompt before generation | Local tokenizer counts and conservative hosted estimates prevent input overflow while keeping citations aligned with the exact evidence sent. |
 | Build citations outside the LLM | Prevents fabricated filenames, pages, and source identifiers. |
 | Keep provider boundaries behind LangChain interfaces | Makes later model and infrastructure changes less invasive. |
+| Select provider profiles by stable CLI aliases | Keeps credentials and frequently changing model IDs out of commands and application code. |
+| Keep `.env` untracked and redact credentials from profiles | Reduces accidental secret disclosure through source control, logs, and error messages. |
+| Pair Claude with local embeddings | Anthropic does not expose an embeddings API, so this keeps the three-variable Claude profile functional without pretending its API supports embeddings. |
 
 ## Quick Start
 
@@ -88,6 +95,16 @@ Install the locked environment:
 uv sync
 ```
 
+The local baseline works without API keys. To use hosted providers, create a
+private `.env` from the committed skeleton and replace the relevant key:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The `.env` file is ignored by Git. Never commit it or paste real keys into
+`.env.example`.
+
 Index one file or an entire directory:
 
 ```powershell
@@ -100,6 +117,14 @@ Ask a question against the persisted collection:
 uv run python -m rag_pipeline answer "Which vector database does this project use?"
 ```
 
+Select one configured hosted profile with the same alias for indexing and
+answering:
+
+```powershell
+uv run python -m rag_pipeline index path/to/documents --model gemini
+uv run python -m rag_pipeline answer "What is the policy?" --model gemini
+```
+
 Use separate collection names for unrelated corpora. For example, index an
 expense-policy corpus with `--collection-name expense_policies` and pass the
 same option to `retrieve` and `answer`; local Qdrant collections persist across
@@ -108,6 +133,62 @@ commands.
 The first embedding, reranking, and generation runs download their configured
 Hugging Face model weights when those stages are enabled. Public local models
 do not require an API key.
+
+## Hosted Model Profiles
+
+`.env.example` defines three values for each selectable profile:
+
+```dotenv
+GOOGLE_API_KEY=<API-KEY>
+GEMINI=gemini-3.1-flash-lite
+GEMINI_EMBED=gemini-embedding-2
+
+OPENAI_API_KEY=<API-KEY>
+OPENAI=gpt-5-mini
+OPENAI_EMBED=text-embedding-3-small
+
+ANTHROPIC_API_KEY=<API-KEY>
+CLAUDE=claude-sonnet-4-6
+CLAUDE_EMBED=sentence-transformers/all-MiniLM-L6-v2
+```
+
+`GEMINI`, `OPENAI`, and `CLAUDE` are generation model IDs. Their `_EMBED`
+partners select the embedding model used for both indexing and queries. Model
+IDs are passed directly to the provider integration, so they can be changed in
+`.env` without editing Python. Process environment variables override `.env`,
+which lets deployment systems inject secrets without writing a file.
+
+Use `--model gemini`, `--model openai`, or `--model claude` on every command
+that embeds or queries content. The `answer` command reuses that profile for
+generation automatically:
+
+```powershell
+# Google Gemini generation and embeddings
+uv run python -m rag_pipeline index path/to/documents --model gemini
+uv run python -m rag_pipeline answer "What is required?" --model gemini
+
+# OpenAI generation and embeddings
+uv run python -m rag_pipeline index path/to/documents --model openai
+uv run python -m rag_pipeline answer "What is required?" --model openai
+
+# Anthropic generation with the configured local embedding model
+uv run python -m rag_pipeline index path/to/documents --model claude
+uv run python -m rag_pipeline answer "What is required?" --model claude
+```
+
+An OpenAI API key and API billing are separate from a ChatGPT subscription.
+Anthropic currently [does not provide an embedding model](https://platform.claude.com/docs/en/build-with-claude/embeddings),
+so `CLAUDE_EMBED` is intentionally interpreted as a local Hugging Face model.
+A future hosted Voyage integration would require its own API key and billing
+contract rather than reusing `ANTHROPIC_API_KEY` incorrectly.
+
+Embedding model identity and vector dimension are recorded in Qdrant. After
+changing any `_EMBED` value, reindex into a new collection or rebuild the old
+one before retrieval; vectors from different embedding spaces cannot be mixed.
+Hosted embedding sends chunk and query text to the selected provider, and
+hosted generation sends the bounded retrieved evidence. That introduces usage
+cost, network latency, provider rate limits, and external data-processing
+considerations that do not apply to the local baseline.
 
 ## Example Output
 
@@ -163,9 +244,13 @@ uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
 
 Useful options include:
 
-- `--model` and `--model-revision` for the embedding model
-- `--generation-model` and `--generation-model-revision` for the local LLM
+- `--model gemini|openai|claude` for an environment-backed provider profile, or
+  `--model MODEL_ID` for a local Hugging Face embedding model
+- `--model-revision` for local embeddings, including `CLAUDE_EMBED`
+- `--generation-model` and `--generation-model-revision` for the local LLM path
 - `--device` and `--generation-device` for CPU or CUDA placement
+- `--temperature` for an explicit generation temperature; hosted profiles use
+  their provider default when it is omitted
 - `--top-k` and `--score-threshold` for retrieval behavior
 - `--rerank` and `--candidate-k` for optional second-stage reranking
 - `--reranker-model`, `--reranker-model-revision`, `--reranker-device`,
@@ -337,6 +422,14 @@ all prompt instructions, and special tokens. When the final block must be
 truncated, its citation excerpt still contains only the exact raw evidence
 prefix sent to the model, excluding labels and the visual ellipsis.
 
+Local generation counts the rendered prompt with the Hugging Face model's exact
+tokenizer. Hosted profiles use a conservative UTF-8 byte estimate and an
+8,192-token application cap. This avoids hidden token-count API calls during
+binary-search packing and remains safely below the context windows of the
+example models, at the cost of sometimes admitting less evidence than the
+provider could accept. `--max-input-tokens` may lower, but not raise, that hosted
+cap.
+
 The evidence delimiters improve structure but do not sanitize hostile content
 or form an authorization boundary. The local FLAN-T5 baseline may also ignore
 instructions or abstain too often. Prompt quality therefore needs representative
@@ -358,7 +451,7 @@ Transformers is pinned below version 5 because the current LangChain T5 adapter
 uses the `text2text-generation` pipeline API. Model revisions can be pinned
 independently for reproducible indexing and generation.
 
-Generation counts the exact rendered prompt with the selected tokenizer,
+Local generation counts the exact rendered prompt with the selected tokenizer,
 including special tokens, and reserves an eight-token safety margin below the
 model limit. The Hugging Face pipeline also enables truncation as a final guard,
 although application-level budgeting remains authoritative so citation ranges
@@ -378,14 +471,14 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 90 tests covering ingestion, extraction, chunking,
+The suite currently contains 101 tests covering ingestion, extraction, chunking,
 chunking experiments, dense and sparse embedding contracts, persistent dense
 and hybrid indexing, typed metadata filtering, cosine and RRF retrieval,
 cross-encoder reranking, versioned guarded generation, evidence boundary and
-token-budget behavior, deterministic citations, and CLI integration. Provider
-calls use test doubles where appropriate; the local model path has also been
-verified end to end with MiniLM, Qdrant, the MS MARCO cross-encoder, and
-FLAN-T5.
+token-budget behavior, deterministic citations, provider-profile loading and
+secret redaction, hosted LangChain adapter configuration, and CLI integration.
+Provider calls use test doubles; the local model path has also been verified end
+to end with MiniLM, Qdrant, the MS MARCO cross-encoder, and FLAN-T5.
 
 ## Project Layout
 
@@ -402,6 +495,7 @@ FLAN-T5.
 |       |-- extraction.py
 |       |-- generation.py
 |       |-- ingestion.py
+|       |-- model_profiles.py
 |       |-- reranking.py
 |       |-- retrieval.py
 |       |-- sparse_embeddings.py
@@ -414,12 +508,14 @@ FLAN-T5.
 |   |-- test_extraction.py
 |   |-- test_generation.py
 |   |-- test_ingestion.py
+|   |-- test_model_profiles.py
 |   |-- test_package.py
 |   |-- test_reranking.py
 |   |-- test_retrieval.py
 |   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
 |-- ARCHITECTURE.md
+|-- .env.example
 |-- PROJECT_BRIEF.md
 |-- ROADMAP.md
 |-- pyproject.toml
@@ -446,6 +542,12 @@ FLAN-T5.
   citations are exposed through a service.
 - The default generation model prioritizes local accessibility over answer
   quality and throughput.
+- Hosted calls are synchronous and currently have no application-level retry,
+  timeout, rate-limit, or cost-budget policy beyond provider SDK defaults.
+- Hosted prompt budgeting is deliberately conservative and does not yet query
+  model metadata dynamically when a configured model ID changes.
+- Anthropic has no native embedding API; the Claude profile uses local
+  embeddings until a separately credentialed hosted embedding provider is added.
 
 ## Roadmap
 
