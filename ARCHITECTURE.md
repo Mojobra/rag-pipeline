@@ -13,7 +13,7 @@
 9. Versioned Prompt Construction and Token-Aware Evidence Packing
 10. LLM Generation
 11. Citation System
-12. Evaluation Framework
+12. Versioned Retrieval Evaluation Framework
 13. Monitoring & Observability
 14. API Layer
 15. Frontend/UI
@@ -57,11 +57,29 @@ evaluation before production use.
 
 ---
 
+## Current Retrieval Evaluation Contract
+
+- A strict schema-v1 JSON file supplies named query cases and one or more binary
+  relevance judgments expressed as exact document-metadata selectors.
+- Evaluation runs the same LangChain/Qdrant dense or hybrid retriever, metadata
+  filters, score gate, and optional cross-encoder reranker used by interactive
+  commands; it never invokes generation or mutates the collection.
+- Reports include per-case Hit@k, Precision@k, Recall@k, and reciprocal rank,
+  plus macro averages that give every query equal weight.
+- Table output supports local diagnosis and JSON output supports saved
+  comparisons. Representative datasets, answer evaluation, latency capture,
+  and benchmark manifests remain later Phase 3 work.
+
+Exact metadata selectors are transparent but depend on stable provenance.
+Portable business datasets should eventually use immutable document and chunk
+version identifiers instead of absolute local source paths.
+
+---
+
 ## Business Features To Add Later
 
 - User authentication
 - Role-based access control
-- Metadata filtering
 - Multi-tenancy
 - Audit logging
 - Cost monitoring

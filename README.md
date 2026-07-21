@@ -29,6 +29,7 @@ code was reviewed, adapted, and validated through automated tests.
   distance metric, and schema version
 - Ranked semantic retrieval with configurable top-k and score thresholds
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
+- Versioned retrieval evaluation datasets with per-query and macro top-k metrics
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -49,6 +50,8 @@ flowchart LR
     E --> F
     F --> R["Reciprocal-rank fusion"]
     R --> X["Optional cross-encoder reranking"]
+    J["Labeled retrieval queries"] --> V["Hit, precision, recall, and MRR at k"]
+    X --> V
     X --> G["Bounded numbered evidence blocks"]
     G --> P["LangChain grounded-v2 prompt"]
     P --> H["Local FLAN-T5 generation"]
@@ -68,6 +71,7 @@ flowchart LR
 | Push metadata filters into Qdrant | Selects top-k only from eligible chunks and avoids leaking excluded candidates into application code. |
 | Overfetch before optional cross-encoder reranking | Lets the first stage optimize recall while the second stage improves precision without scoring the entire corpus. |
 | Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
+| Evaluate exact metadata relevance labels at a fixed cutoff | Makes retrieval regressions measurable without involving nondeterministic answer generation. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -157,6 +161,9 @@ uv run python -m rag_pipeline retrieve "What is the policy?" --rerank --candidat
 # Restrict retrieval before semantic top-k selection
 uv run python -m rag_pipeline retrieve "What is the policy?" --filter file_extension=.pdf
 
+# Evaluate ranked retrieval against labeled queries without generation
+uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json --top-k 5
+
 # Retrieve evidence and generate a cited answer
 uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
 ```
@@ -176,7 +183,8 @@ Useful options include:
   `--sparse-threads` for local hybrid indexing and queries
 - repeatable `--filter KEY=VALUE` for exact metadata filters with AND semantics
 - repeatable `--candidate SIZE:OVERLAP` for chunking experiments
-- `--output-format table|json` for human or machine-readable experiment reports
+- `--output-format table|json` for human or machine-readable experiment and
+  evaluation reports
 - `--max-input-tokens` for an optional limit below the tokenizer model maximum
 - `--max-context-characters` as a secondary generation context guard
 - `--collection-name` and `--store-path` for Qdrant persistence
@@ -202,10 +210,69 @@ uv run python -m rag_pipeline chunk-experiment path/to/documents --output-format
 ```
 
 These are structural diagnostics, not retrieval-quality scores. A candidate
-with fewer chunks or less duplication is not automatically better. Production
-selection should combine these measurements with representative queries,
-relevance labels, latency, and cost; that benchmark is introduced in the later
-retrieval-evaluation task.
+with fewer chunks or less duplication is not automatically better. Use the
+retrieval evaluator below to compare candidates with representative queries and
+relevance labels; Task 18 will add latency and broader benchmark reporting.
+
+## Retrieval Evaluation
+
+The `evaluate-retrieval` command measures an existing collection without
+calling the generation model or modifying the index. It reuses the same dense
+or hybrid retrieval, exact metadata filters, score threshold, and optional
+cross-encoder reranking as `retrieve` and `answer`.
+
+Evaluation datasets are UTF-8 JSON with a strict, versioned schema:
+
+```json
+{
+  "schema_version": 1,
+  "name": "expense-policies-v1",
+  "cases": [
+    {
+      "id": "itemized-receipts",
+      "query": "What evidence is required for an expense claim?",
+      "relevant": [
+        {
+          "file_name": "expense-policy.pdf",
+          "page": 2,
+          "chunk_index": 0
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each object under `relevant` is an exact metadata selector: every listed field
+and value must match a returned LangChain document. `page` and `chunk_index`
+use the zero-based values stored in Qdrant. Use an application-level stable
+`document_id` when datasets must survive file renames or path changes; the
+current `chunk_id` remains stable only while source provenance is unchanged.
+Each selector should identify one distinct relevant chunk as narrowly as
+possible. Broad selectors can match several chunks and make precision look more
+optimistic than the underlying evidence quality.
+
+```powershell
+uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json `
+  --collection-name expense_policies `
+  --top-k 5 `
+  --output-format json
+```
+
+The report includes these binary metrics at the selected cutoff:
+
+- **Hit@k:** `1` when at least one relevant chunk is returned, otherwise `0`.
+- **Precision@k:** relevant returned chunks divided by `k`; missing result slots
+  caused by filtering or thresholds count as misses.
+- **Recall@k:** relevance selectors matched by at least one returned chunk,
+  divided by all selectors for that query.
+- **RR@k / MRR@k:** reciprocal rank of the first relevant chunk for each query,
+  or `0` for a miss; MRR is the macro average across queries.
+
+Aggregate values are macro averages, so every query has equal weight. The JSON
+format is suitable for saving results; Task 17 will add representative project
+datasets and Task 18 will add reproducible benchmark comparisons and runtime
+measurements.
 
 ## Metadata Filters
 
@@ -404,6 +471,7 @@ FLAN-T5.
 |       |-- ingestion.py
 |       |-- reranking.py
 |       |-- retrieval.py
+|       |-- retrieval_evaluation.py
 |       |-- sparse_embeddings.py
 |       `-- vector_store.py
 |-- tests/
@@ -417,6 +485,7 @@ FLAN-T5.
 |   |-- test_package.py
 |   |-- test_reranking.py
 |   |-- test_retrieval.py
+|   |-- test_retrieval_evaluation.py
 |   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
 |-- ARCHITECTURE.md
@@ -437,6 +506,9 @@ FLAN-T5.
   list-membership, and policy-composition support are future extensions.
 - The default retrieval threshold is a conservative safety baseline pending
   calibration against an evaluation dataset.
+- Retrieval evaluation currently uses binary exact-match labels and macro
+  averages; graded relevance, confidence intervals, and saved run manifests are
+  deferred to the later dataset and benchmarking tasks.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
 - The `grounded-v2` prompt is a hand-authored baseline; faithfulness,

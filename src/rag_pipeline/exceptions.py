@@ -96,6 +96,21 @@ class RetrievalProviderError(RetrievalError):
     """Raised when a vector search fails or returns an invalid response."""
 
 
+class RetrievalEvaluationError(RagPipelineError):
+    """Base error for offline retrieval-quality evaluation failures."""
+
+
+class InvalidRetrievalEvaluationDatasetError(
+    RetrievalEvaluationError,
+    ValueError,
+):
+    """Raised when a retrieval evaluation dataset violates its schema."""
+
+
+class RetrievalEvaluationInputError(RetrievalEvaluationError, ValueError):
+    """Raised when an evaluator receives invalid ranked results or limits."""
+
+
 class RerankingError(RagPipelineError):
     """Base error for second-stage reranking failures."""
 

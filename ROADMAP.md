@@ -27,6 +27,11 @@ Task 16 - Answer evaluation
 Task 17 - Test datasets
 Task 18 - Benchmarking
 
+Planned quality follow-up - Semantic chunking experiment
+
+Compare semantic and structure-aware chunking with the recursive baseline only
+after Tasks 15-18 provide labeled retrieval metrics and reproducible benchmarks.
+
 ## Phase 4: Production
 
 Task 19 - FastAPI service

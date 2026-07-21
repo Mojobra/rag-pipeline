@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rag_pipeline import __version__
@@ -23,11 +24,31 @@ from rag_pipeline.sparse_embeddings import (
 )
 
 if TYPE_CHECKING:
+    from rag_pipeline.embeddings import LocalEmbeddingConfig
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
-    from rag_pipeline.retrieval import RetrievalResult
+    from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
+    from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
+    from rag_pipeline.vector_store import VectorStoreConfig
 
 
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
+
+
+@dataclass(frozen=True, slots=True)
+class _RetrievalRuntimeConfig:
+    """Validated service settings shared by all retrieval-based commands.
+
+    Keeping one assembled contract prevents interactive retrieval, evaluation,
+    and answer generation from interpreting common CLI options differently.
+    Model and provider resources are still initialized lazily by each command.
+    """
+
+    embedding: LocalEmbeddingConfig
+    vector_store: VectorStoreConfig
+    sparse_embedding: LocalSparseEmbeddingConfig | None
+    retrieval: RetrievalConfig
+    local_reranker: LocalRerankerConfig | None
+    reranking: RerankingConfig | None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -163,6 +184,40 @@ def build_parser() -> argparse.ArgumentParser:
     _add_retrieval_arguments(retrieve_parser)
     _add_reranking_arguments(retrieve_parser)
 
+    evaluation_parser = subparsers.add_parser(
+        "evaluate-retrieval",
+        help="Measure retrieval quality on a labeled query dataset.",
+        description=(
+            "Run every query in a versioned JSON dataset through the configured "
+            "Qdrant retrieval path and report binary top-k metrics. Optional "
+            "filters, hybrid search, and reranking are included; generation is "
+            "never invoked and the index is not modified."
+        ),
+    )
+    evaluation_parser.add_argument(
+        "dataset",
+        help=(
+            "UTF-8 JSON file containing schema_version, name, and labeled query "
+            "cases with exact metadata selectors under relevant. Change it to "
+            "evaluate a different corpus or relevance-judgment snapshot."
+        ),
+    )
+    _add_embedding_arguments(evaluation_parser)
+    _add_vector_store_location_arguments(evaluation_parser)
+    _add_hybrid_search_arguments(evaluation_parser)
+    _add_retrieval_arguments(evaluation_parser)
+    _add_reranking_arguments(evaluation_parser)
+    evaluation_parser.add_argument(
+        "--output-format",
+        choices=("table", "json"),
+        default="table",
+        help=(
+            "Render the same per-case and macro metrics as an aligned terminal "
+            "table or structured JSON. Use JSON when saving or comparing runs "
+            "programmatically (default: table)."
+        ),
+    )
+
     answer_parser = subparsers.add_parser(
         "answer",
         help="Generate a cited local answer from retrieved evidence.",
@@ -206,9 +261,10 @@ def _add_retrieval_arguments(
         type=int,
         default=4,
         help=(
-            "Maximum final chunks printed or offered to answer generation. "
-            "Higher values can improve recall but increase output and prompt "
-            "work; with --rerank, must not exceed --candidate-k (default: 4)."
+            "Maximum final chunks retained for each query and the evaluation "
+            "metric cutoff. Higher values can improve recall but increase output, "
+            "evaluation, or prompt work; with --rerank, must not exceed "
+            "--candidate-k (default: 4)."
         ),
     )
     command_parser.add_argument(
@@ -777,7 +833,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "retrieve":
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
-            LocalEmbeddingConfig,
             create_local_embedding_service,
         )
         from rag_pipeline.exceptions import (
@@ -785,57 +840,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             InvalidRetrievalConfigurationError,
             InvalidVectorStoreConfigurationError,
         )
-        from rag_pipeline.retrieval import (
-            RetrievalConfig,
-            RetrieverService,
-            parse_metadata_filter,
-        )
+        from rag_pipeline.retrieval import RetrieverService
         from rag_pipeline.sparse_embeddings import (
-            LocalSparseEmbeddingConfig,
             create_local_sparse_embedding_service,
         )
-        from rag_pipeline.vector_store import (
-            LocalVectorStore,
-            SearchMode,
-            VectorStoreConfig,
-        )
+        from rag_pipeline.vector_store import LocalVectorStore
 
         try:
-            embedding_config = LocalEmbeddingConfig(
-                model_name=args.model,
-                model_revision=args.model_revision,
-                device=args.device,
-                batch_size=args.batch_size,
-            )
-            search_mode = SearchMode(args.search_mode)
-            vector_store_config = VectorStoreConfig(
-                path=args.store_path,
-                collection_name=args.collection_name,
-                search_mode=search_mode,
-            )
-            sparse_embedding_config = (
-                LocalSparseEmbeddingConfig(
-                    model_name=args.sparse_model,
-                    cache_dir=args.sparse_cache_dir,
-                    batch_size=args.sparse_batch_size,
-                    threads=args.sparse_threads,
-                )
-                if search_mode == SearchMode.HYBRID
-                else None
-            )
-            (
-                local_reranker_config,
-                reranking_config,
-                retrieval_top_k,
-            ) = _build_reranking_configs(args)
-            retrieval_config = RetrievalConfig(
-                top_k=retrieval_top_k,
-                score_threshold=args.score_threshold,
-                metadata_filters=tuple(
-                    parse_metadata_filter(value)
-                    for value in (args.metadata_filters or ())
-                ),
-            )
+            runtime_config = _build_retrieval_runtime_config(args)
         except (
             InvalidEmbeddingConfigurationError,
             InvalidVectorStoreConfigurationError,
@@ -844,24 +856,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as exc:
             parser.error(str(exc))
 
-        embedding_service = create_local_embedding_service(embedding_config)
+        embedding_service = create_local_embedding_service(
+            runtime_config.embedding
+        )
         sparse_embedding_service = (
-            create_local_sparse_embedding_service(sparse_embedding_config)
-            if sparse_embedding_config is not None
+            create_local_sparse_embedding_service(
+                runtime_config.sparse_embedding
+            )
+            if runtime_config.sparse_embedding is not None
             else None
         )
-        with LocalVectorStore(vector_store_config) as vector_store:
+        with LocalVectorStore(runtime_config.vector_store) as vector_store:
             results = RetrieverService(
                 embedding_service,
                 vector_store,
                 sparse_embedding_service,
-            ).retrieve(args.query, config=retrieval_config)
+            ).retrieve(args.query, config=runtime_config.retrieval)
 
         results = _rerank_results(
             args.query,
             results,
-            local_config=local_reranker_config,
-            config=reranking_config,
+            local_config=runtime_config.local_reranker,
+            config=runtime_config.reranking,
         )
 
         if not results:
@@ -893,11 +909,101 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"   {_content_preview(result.document.page_content)}")
         return 0
 
+    if args.command == "evaluate-retrieval":
+        import json
+
+        from rag_pipeline.embeddings import (
+            InvalidEmbeddingConfigurationError,
+            create_local_embedding_service,
+        )
+        from rag_pipeline.exceptions import (
+            InvalidRerankingConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidRetrievalEvaluationDatasetError,
+            InvalidVectorStoreConfigurationError,
+        )
+        from rag_pipeline.reranking import create_local_reranker_service
+        from rag_pipeline.retrieval import RetrieverService
+        from rag_pipeline.retrieval_evaluation import (
+            evaluate_retrieval,
+            format_retrieval_evaluation_table,
+            load_retrieval_evaluation_dataset,
+            retrieval_evaluation_to_dict,
+        )
+        from rag_pipeline.sparse_embeddings import (
+            create_local_sparse_embedding_service,
+        )
+        from rag_pipeline.vector_store import LocalVectorStore
+
+        try:
+            dataset = load_retrieval_evaluation_dataset(args.dataset)
+            runtime_config = _build_retrieval_runtime_config(args)
+        except (
+            InvalidEmbeddingConfigurationError,
+            InvalidVectorStoreConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidRerankingConfigurationError,
+            InvalidRetrievalEvaluationDatasetError,
+        ) as exc:
+            parser.error(str(exc))
+
+        embedding_service = create_local_embedding_service(
+            runtime_config.embedding
+        )
+        sparse_embedding_service = (
+            create_local_sparse_embedding_service(
+                runtime_config.sparse_embedding
+            )
+            if runtime_config.sparse_embedding is not None
+            else None
+        )
+        reranker = (
+            create_local_reranker_service(runtime_config.local_reranker)
+            if runtime_config.local_reranker is not None
+            else None
+        )
+
+        with LocalVectorStore(runtime_config.vector_store) as vector_store:
+            retriever = RetrieverService(
+                embedding_service,
+                vector_store,
+                sparse_embedding_service,
+            )
+
+            def retrieve_for_evaluation(query: str) -> list[RetrievalResult]:
+                """Run one query through the shared retriever and reranker."""
+                results = retriever.retrieve(
+                    query,
+                    config=runtime_config.retrieval,
+                )
+                if reranker is None:
+                    return results
+                if runtime_config.reranking is None:
+                    raise RuntimeError(
+                        "Reranker service has no result-limit configuration."
+                    )
+                return reranker.rerank(
+                    query,
+                    results,
+                    config=runtime_config.reranking,
+                )
+
+            report = evaluate_retrieval(
+                dataset,
+                retrieve_for_evaluation,
+                top_k=args.top_k,
+            )
+
+        if args.output_format == "json":
+            print(json.dumps(retrieval_evaluation_to_dict(report), indent=2))
+        else:
+            print(format_retrieval_evaluation_table(report))
+        return 0
+
     if args.command == "answer":
         from rag_pipeline.citations import format_citation
         from rag_pipeline.embeddings import (
             InvalidEmbeddingConfigurationError,
-            LocalEmbeddingConfig,
             create_local_embedding_service,
         )
         from rag_pipeline.exceptions import (
@@ -912,57 +1018,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             LocalGenerationConfig,
             create_local_answer_generator,
         )
-        from rag_pipeline.retrieval import (
-            RetrievalConfig,
-            RetrieverService,
-            parse_metadata_filter,
-        )
+        from rag_pipeline.retrieval import RetrieverService
         from rag_pipeline.sparse_embeddings import (
-            LocalSparseEmbeddingConfig,
             create_local_sparse_embedding_service,
         )
-        from rag_pipeline.vector_store import (
-            LocalVectorStore,
-            SearchMode,
-            VectorStoreConfig,
-        )
+        from rag_pipeline.vector_store import LocalVectorStore
 
         try:
-            embedding_config = LocalEmbeddingConfig(
-                model_name=args.model,
-                model_revision=args.model_revision,
-                device=args.device,
-                batch_size=args.batch_size,
-            )
-            search_mode = SearchMode(args.search_mode)
-            vector_store_config = VectorStoreConfig(
-                path=args.store_path,
-                collection_name=args.collection_name,
-                search_mode=search_mode,
-            )
-            sparse_embedding_config = (
-                LocalSparseEmbeddingConfig(
-                    model_name=args.sparse_model,
-                    cache_dir=args.sparse_cache_dir,
-                    batch_size=args.sparse_batch_size,
-                    threads=args.sparse_threads,
-                )
-                if search_mode == SearchMode.HYBRID
-                else None
-            )
-            (
-                local_reranker_config,
-                reranking_config,
-                retrieval_top_k,
-            ) = _build_reranking_configs(args)
-            retrieval_config = RetrievalConfig(
-                top_k=retrieval_top_k,
-                score_threshold=args.score_threshold,
-                metadata_filters=tuple(
-                    parse_metadata_filter(value)
-                    for value in (args.metadata_filters or ())
-                ),
-            )
+            runtime_config = _build_retrieval_runtime_config(args)
             local_generation_config = LocalGenerationConfig(
                 model_name=args.generation_model,
                 model_revision=args.generation_model_revision,
@@ -983,24 +1046,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as exc:
             parser.error(str(exc))
 
-        embedding_service = create_local_embedding_service(embedding_config)
+        embedding_service = create_local_embedding_service(
+            runtime_config.embedding
+        )
         sparse_embedding_service = (
-            create_local_sparse_embedding_service(sparse_embedding_config)
-            if sparse_embedding_config is not None
+            create_local_sparse_embedding_service(
+                runtime_config.sparse_embedding
+            )
+            if runtime_config.sparse_embedding is not None
             else None
         )
-        with LocalVectorStore(vector_store_config) as vector_store:
+        with LocalVectorStore(runtime_config.vector_store) as vector_store:
             retrieval_results = RetrieverService(
                 embedding_service,
                 vector_store,
                 sparse_embedding_service,
-            ).retrieve(args.query, config=retrieval_config)
+            ).retrieve(args.query, config=runtime_config.retrieval)
 
         retrieval_results = _rerank_results(
             args.query,
             retrieval_results,
-            local_config=local_reranker_config,
-            config=reranking_config,
+            local_config=runtime_config.local_reranker,
+            config=runtime_config.reranking,
         )
 
         if not retrieval_results:
@@ -1025,6 +1092,65 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print("RAG Pipeline skeleton is ready.")
     return 0
+
+
+def _build_retrieval_runtime_config(
+    args: argparse.Namespace,
+) -> _RetrievalRuntimeConfig:
+    """Translate shared CLI fields into one validated retrieval contract.
+
+    The function validates dense and optional sparse models, Qdrant location,
+    result limits, metadata filters, and optional reranking settings. It performs
+    no model initialization, downloads, vector-store I/O, or inference.
+    """
+    from rag_pipeline.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.retrieval import RetrievalConfig, parse_metadata_filter
+    from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
+    from rag_pipeline.vector_store import SearchMode, VectorStoreConfig
+
+    embedding_config = LocalEmbeddingConfig(
+        model_name=args.model,
+        model_revision=args.model_revision,
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    search_mode = SearchMode(args.search_mode)
+    vector_store_config = VectorStoreConfig(
+        path=args.store_path,
+        collection_name=args.collection_name,
+        search_mode=search_mode,
+    )
+    sparse_embedding_config = (
+        LocalSparseEmbeddingConfig(
+            model_name=args.sparse_model,
+            cache_dir=args.sparse_cache_dir,
+            batch_size=args.sparse_batch_size,
+            threads=args.sparse_threads,
+        )
+        if search_mode == SearchMode.HYBRID
+        else None
+    )
+    (
+        local_reranker_config,
+        reranking_config,
+        retrieval_top_k,
+    ) = _build_reranking_configs(args)
+    retrieval_config = RetrievalConfig(
+        top_k=retrieval_top_k,
+        score_threshold=args.score_threshold,
+        metadata_filters=tuple(
+            parse_metadata_filter(value)
+            for value in (args.metadata_filters or ())
+        ),
+    )
+    return _RetrievalRuntimeConfig(
+        embedding=embedding_config,
+        vector_store=vector_store_config,
+        sparse_embedding=sparse_embedding_config,
+        retrieval=retrieval_config,
+        local_reranker=local_reranker_config,
+        reranking=reranking_config,
+    )
 
 
 def _build_reranking_configs(
