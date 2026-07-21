@@ -1,4 +1,8 @@
-"""Text extraction for local business documents."""
+"""Extract supported business files into provenance-rich text documents.
+
+Format-specific readers are normalized to LangChain ``Document`` objects so
+chunking and retrieval do not depend on parser-specific response types.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,14 @@ SUPPORTED_FILE_EXTENSIONS = (
 
 
 def extract_documents(path: PathInput, *, encoding: str = "utf-8") -> list[Document]:
-    """Extract text from one supported local file into LangChain Documents."""
+    """Read one supported file into LangChain documents with source metadata.
+
+    Text-like and DOCX inputs produce one document, while PDFs produce one per
+    page to preserve page-level citations. The function performs filesystem and
+    parser I/O. Unsupported formats use the ingestion exception hierarchy;
+    PDF/DOCX parser failures are wrapped, while plain-text I/O and decoding
+    errors propagate from ``Path.read_text``.
+    """
     file_path = Path(path).expanduser().resolve()
     suffix = file_path.suffix.lower()
 
@@ -41,6 +52,12 @@ def extract_documents(path: PathInput, *, encoding: str = "utf-8") -> list[Docum
 
 
 def _extract_text_file(path: Path, *, encoding: str) -> Document:
+    """Read a text-like file without interpreting its markup.
+
+    The caller supplies the decoding to use. Markdown and HTML therefore remain
+    raw text at this stage rather than being semantically cleaned. Filesystem and
+    decoding errors propagate to the caller.
+    """
     return Document(
         page_content=path.read_text(encoding=encoding),
         metadata=_build_metadata(path, extractor="text"),
@@ -48,6 +65,12 @@ def _extract_text_file(path: Path, *, encoding: str) -> Document:
 
 
 def _extract_pdf(path: Path) -> list[Document]:
+    """Extract one LangChain document per PDF page using pypdf.
+
+    Page order and total-page metadata are preserved for citations. Pages with
+    no text layer yield empty content for the chunking stage to skip; encrypted,
+    corrupt, or otherwise unreadable PDFs raise ``TextExtractionError``.
+    """
     try:
         from pypdf import PdfReader
     except ImportError as exc:
@@ -76,6 +99,12 @@ def _extract_pdf(path: Path) -> list[Document]:
 
 
 def _extract_docx(path: Path) -> list[Document]:
+    """Extract a DOCX file as one logical document using docx2txt.
+
+    Word pagination depends on rendering settings, so this path intentionally
+    records file provenance without inventing page numbers. Parser failures are
+    wrapped as ``TextExtractionError``.
+    """
     try:
         import docx2txt
     except ImportError as exc:
@@ -95,6 +124,11 @@ def _extract_docx(path: Path) -> list[Document]:
 
 
 def _build_metadata(path: Path, *, extractor: str) -> dict[str, Any]:
+    """Capture filesystem provenance shared by every extraction backend.
+
+    Reading ``Path.stat`` performs filesystem I/O. The resulting scalar values
+    are suitable for persistence in the Qdrant metadata payload.
+    """
     stat = path.stat()
     return {
         "source": str(path),

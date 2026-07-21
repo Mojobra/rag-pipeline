@@ -1,4 +1,9 @@
-"""Command entry point for the local RAG pipeline prototype."""
+"""Expose the local RAG pipeline stages through one command-line interface.
+
+The module assembles validated stage configurations, performs lazy provider
+initialization, coordinates filesystem/model/Qdrant work, and formats terminal
+output without moving domain logic out of the underlying services.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +31,12 @@ DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the command-line parser for the package entry point."""
+    """Build the complete parser for the package module entry point.
+
+    Related option groups are reused across commands so indexing, retrieval, and
+    answering construct the same model and storage contracts. Parser creation
+    has no provider, filesystem, or database side effects.
+    """
     parser = argparse.ArgumentParser(
         prog="rag_pipeline",
         description="Run the local RAG pipeline prototype.",
@@ -136,6 +146,11 @@ def _add_retrieval_arguments(
     *,
     default_score_threshold: float | None = None,
 ) -> None:
+    """Attach shared result, score-gate, and metadata-filter options.
+
+    ``answer`` supplies a conservative default score gate, while diagnostic
+    retrieval intentionally leaves the threshold unset for calibration.
+    """
     command_parser.add_argument(
         "--top-k",
         type=int,
@@ -168,6 +183,11 @@ def _add_retrieval_arguments(
 
 
 def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> None:
+    """Attach dense/hybrid collection and sparse-model options to a command.
+
+    The options configure later service construction only; parser assembly does
+    not initialize FastEmbed or access its cache.
+    """
     command_parser.add_argument(
         "--search-mode",
         choices=("dense", "hybrid"),
@@ -204,6 +224,11 @@ def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> Non
 
 
 def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
+    """Attach optional second-stage candidate and model settings.
+
+    Candidate width remains distinct from final top-k so the first stage can
+    overfetch before cross-encoder scoring.
+    """
     command_parser.add_argument(
         "--rerank",
         action="store_true",
@@ -255,6 +280,11 @@ def _add_reranking_arguments(command_parser: argparse.ArgumentParser) -> None:
 
 
 def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
+    """Attach local language-model and prompt-budget settings for answers.
+
+    These options are isolated to generation so retrieval diagnostics never
+    initialize or configure a language model.
+    """
     command_parser.add_argument(
         "--generation-model",
         default="google/flan-t5-small",
@@ -295,6 +325,11 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
 
 
 def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
+    """Attach the dense model identity, device, and batching options.
+
+    Indexing and retrieval share this group because they must use a compatible
+    embedding contract.
+    """
     command_parser.add_argument(
         "--model",
         default=DEFAULT_LOCAL_EMBEDDING_MODEL,
@@ -362,7 +397,13 @@ def _add_document_input_arguments(command_parser: argparse.ArgumentParser) -> No
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command-line entry point."""
+    """Parse and execute one local pipeline command.
+
+    Depending on the command, execution may read documents, download/cache and
+    run models, mutate or query local Qdrant, and print results to stdout.
+    Invalid command configuration is reported through ``argparse`` and may raise
+    ``SystemExit``; successful commands return zero.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -829,6 +870,12 @@ def _build_reranking_configs(
     RerankingConfig | None,
     int,
 ]:
+    """Translate CLI reranking arguments into service and result-limit settings.
+
+    Disabled reranking preserves the requested top-k as first-stage width.
+    Enabled reranking validates that candidate width can satisfy final top-k and
+    returns the wider retrieval count. No model is initialized here.
+    """
     from rag_pipeline.exceptions import InvalidRerankingConfigurationError
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
 
@@ -858,6 +905,12 @@ def _rerank_results(
     local_config: LocalRerankerConfig | None,
     config: RerankingConfig | None,
 ) -> list[RetrievalResult]:
+    """Optionally initialize the local reranker and reorder retrieved results.
+
+    Empty input or disabled reranking returns the original list unchanged.
+    Otherwise the function may download/cache a model and performs cross-encoder
+    inference through ``RerankerService``.
+    """
     if not results or config is None:
         return results
     if local_config is None:

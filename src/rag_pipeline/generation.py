@@ -1,4 +1,8 @@
-"""Grounded answer generation from ranked retrieval results."""
+"""Generate grounded answers from bounded, ranked retrieval evidence.
+
+The module owns the versioned LangChain prompt, exact tokenizer budgeting,
+evidence/citation alignment, local model construction, and safe abstention paths.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +37,11 @@ INSUFFICIENT_CONTEXT_ANSWER = (
 
 
 class PromptTokenizer(Protocol):
-    """Tokenizer behavior required to enforce a generation input budget."""
+    """Tokenizer behavior required for exact prompt-budget enforcement.
+
+    Local and future model adapters must expose a finite model limit or callers
+    must configure one explicitly, plus an encode operation without truncation.
+    """
 
     model_max_length: int
 
@@ -44,7 +52,9 @@ class PromptTokenizer(Protocol):
         add_special_tokens: bool = True,
         truncation: bool = False,
         verbose: bool = False,
-    ) -> list[int]: ...
+    ) -> list[int]:
+        """Tokenize prompt text without silently removing over-limit input."""
+        ...
 
 
 GROUNDED_ANSWER_PROMPT = PromptTemplate.from_template(
@@ -71,7 +81,11 @@ Answer:"""
 
 @dataclass(frozen=True, slots=True)
 class LocalGenerationConfig:
-    """Settings for the local Hugging Face text-generation pipeline."""
+    """Validated settings for the local Hugging Face generation pipeline.
+
+    The configuration controls reproducible model identity, inference device,
+    output length, and deterministic versus sampled generation behavior.
+    """
 
     model_name: str = DEFAULT_LOCAL_GENERATION_MODEL
     model_revision: str | None = None
@@ -80,6 +94,7 @@ class LocalGenerationConfig:
     temperature: float = 0.0
 
     def __post_init__(self) -> None:
+        """Validate local model and decoding settings before initialization."""
         _validate_non_empty_string("model_name", self.model_name)
         _validate_non_empty_string("device", self.device)
         if self.model_revision is not None:
@@ -121,13 +136,19 @@ class LocalGenerationConfig:
 
 @dataclass(frozen=True, slots=True)
 class GenerationConfig:
-    """Controls character and token limits for the answer prompt."""
+    """Validated input-budget policy for one answer-generation request.
+
+    The character cap bounds rendered evidence as a secondary guard. The token
+    cap defaults to the tokenizer's model limit and always reserves a safety
+    margin before provider inference.
+    """
 
     max_context_characters: int = 1200
     max_input_tokens: int | None = None
     token_safety_margin: int = DEFAULT_TOKEN_SAFETY_MARGIN
 
     def __post_init__(self) -> None:
+        """Reject prompt limits that cannot leave a positive safe token budget."""
         if isinstance(self.max_context_characters, bool) or not isinstance(
             self.max_context_characters, int
         ):
@@ -170,7 +191,12 @@ class GenerationConfig:
 
 @dataclass(frozen=True, slots=True)
 class GeneratedAnswer:
-    """An answer and the exact retrieved evidence used to produce it."""
+    """Grounded generation result with reproducibility and evidence metadata.
+
+    The record identifies model and prompt versions, accepted retrieval records,
+    prefix-aligned citations, budget usage, truncation, and whether a model was
+    invoked or the no-evidence fallback was returned.
+    """
 
     answer: str
     model_identifier: str
@@ -186,12 +212,23 @@ class GeneratedAnswer:
 
 @dataclass(frozen=True, slots=True)
 class _PromptContext:
+    """Associate one retrieval result with the exact raw evidence prefix used.
+
+    Prompt labels and visual ellipses are excluded so citation positions can be
+    derived from source text rather than formatting added for the model.
+    """
+
     retrieval_result: RetrievalResult
     evidence_text: str
 
 
 class AnswerGenerator:
-    """Build a guarded LangChain prompt and invoke one language model."""
+    """Coordinate guarded prompt construction and one LangChain language model.
+
+    The service packs ranked evidence under exact tokenizer limits, creates
+    citations from the same accepted prefixes, invokes the model only when
+    evidence remains, and normalizes provider failures for the application.
+    """
 
     def __init__(
         self,
@@ -226,7 +263,13 @@ class AnswerGenerator:
         *,
         config: GenerationConfig | None = None,
     ) -> GeneratedAnswer:
-        """Generate an answer from bounded context or return a safe fallback."""
+        """Answer one question from bounded retrieval evidence.
+
+        Input and budget validation happen before model inference. No accepted
+        evidence returns the deterministic fallback without calling the model;
+        otherwise the method performs generation and attaches citations only to
+        non-abstaining output. Retrieved documents are not mutated.
+        """
         if not isinstance(question, str):
             raise TypeError("question must be a string.")
         if not question.strip():
@@ -317,7 +360,13 @@ class AnswerGenerator:
 def create_local_answer_generator(
     config: LocalGenerationConfig | None = None,
 ) -> AnswerGenerator:
-    """Create the default local LangChain Hugging Face answer generator."""
+    """Initialize the local Hugging Face text-to-text generation service.
+
+    Construction may download/cache model artifacts and allocate CPU/GPU
+    resources. The factory also captures the provider tokenizer used for exact
+    prompt budgeting; import, initialization, or tokenizer failures become
+    ``GenerationProviderError``.
+    """
     settings = config or LocalGenerationConfig()
 
     try:
@@ -376,6 +425,13 @@ def _build_context(
     input_token_limit: int,
     token_safety_margin: int,
 ) -> tuple[str, tuple[_PromptContext, ...], bool, int]:
+    """Pack ranked chunks into numbered evidence blocks under two budgets.
+
+    The question and empty prompt must fit before evidence is considered. Chunks
+    are accepted in input order until character or token pressure requires one
+    exact source prefix and then stops further packing. The return value contains
+    rendered context, citation-aligned prefixes, truncation state, and token use.
+    """
     max_prompt_tokens = input_token_limit - token_safety_margin
     prompt_tokens = _prompt_token_count(
         tokenizer,
@@ -482,6 +538,12 @@ def _longest_fitting_evidence_prefix(
     tokenizer: PromptTokenizer,
     max_prompt_tokens: int,
 ) -> str:
+    """Find the longest evidence prefix that keeps the full prompt within budget.
+
+    A binary search repeatedly tokenizes complete candidate prompts, including
+    evidence labels and the truncation ellipsis. It returns an empty string when
+    no non-empty prefix can fit safely.
+    """
     lowest = 1
     highest = len(content)
     longest_prefix = ""
@@ -510,6 +572,11 @@ def _evidence_block_markers(number: int) -> tuple[str, str]:
 
 
 def _render_prompt(*, question: str, context: str) -> str:
+    """Render the exact prompt shared by token counting and model invocation.
+
+    Centralizing formatting prevents budget calculations from drifting from the
+    text ultimately sent through the LangChain chain.
+    """
     return GROUNDED_ANSWER_PROMPT.format(
         question=question,
         context=context,
@@ -518,6 +585,11 @@ def _render_prompt(*, question: str, context: str) -> str:
 
 
 def _prompt_token_count(tokenizer: PromptTokenizer, prompt: str) -> int:
+    """Count the complete prompt with special tokens and no truncation.
+
+    Tokenizer failures and empty token sequences are provider errors because
+    safe context assembly cannot proceed without a trustworthy count.
+    """
     try:
         token_ids = tokenizer.encode(
             prompt,
@@ -543,6 +615,12 @@ def _resolve_input_token_limit(
     *,
     configured_limit: int | None,
 ) -> int:
+    """Resolve a finite prompt limit from tokenizer and request configuration.
+
+    Hugging Face tokenizers sometimes expose very large sentinel values instead
+    of a real model limit. Such values require an explicit configured limit; a
+    configured value may narrow but never exceed a finite tokenizer limit.
+    """
     model_limit = tokenizer.model_max_length
     has_finite_model_limit = (
         not isinstance(model_limit, bool)
@@ -573,6 +651,11 @@ def _validate_prompt_tokenizer(tokenizer: object) -> None:
 
 
 def _pipeline_device(device: str) -> int:
+    """Map user-facing CPU/CUDA notation to Hugging Face pipeline indices.
+
+    CPU maps to ``-1`` and bare CUDA to device zero; malformed or unsupported
+    values fail before model initialization.
+    """
     normalized = device.strip().lower()
     if normalized == "cpu":
         return -1

@@ -1,4 +1,8 @@
-"""Local document ingestion for the RAG pipeline."""
+"""Discover and load supported local documents into the RAG pipeline.
+
+The module owns deterministic filesystem discovery and delegates format-specific
+text extraction while keeping directory traversal separate from parsing.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +30,13 @@ def discover_files(
     recursive: bool = True,
     allowed_extensions: Collection[str] | None = None,
 ) -> list[Path]:
-    """Discover supported files from explicit file and directory inputs."""
+    """Resolve supported files from explicit paths and directory trees.
+
+    Directory traversal is recursive by default. Results are deduplicated and
+    sorted for reproducible indexing; missing paths and explicitly unsupported
+    files raise ingestion errors. This function reads filesystem metadata but
+    does not open document contents.
+    """
     extensions = _normalize_extensions(allowed_extensions or SUPPORTED_FILE_EXTENSIONS)
     discovered: set[Path] = set()
 
@@ -61,7 +71,13 @@ def load_documents(
     recursive: bool = True,
     encoding: str = "utf-8",
 ) -> list[Document]:
-    """Load local supported files into LangChain Document objects."""
+    """Extract supported local files into ordered LangChain documents.
+
+    Files are first discovered deterministically, then opened by the extraction
+    layer. A PDF may produce several page documents, so the returned count can
+    exceed the number of files. The function performs filesystem I/O and lets
+    stage-specific ingestion or extraction errors propagate.
+    """
     documents = []
 
     for file_path in discover_files(paths, recursive=recursive):

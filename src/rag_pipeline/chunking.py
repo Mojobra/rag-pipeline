@@ -1,4 +1,8 @@
-"""Configurable document chunking for retrieval."""
+"""Split extracted documents into configurable retrieval chunks.
+
+This module owns the character-based LangChain splitting policy and preserves
+the source positions required by deterministic indexing and citations.
+"""
 
 from __future__ import annotations
 
@@ -13,12 +17,21 @@ from rag_pipeline.exceptions import ChunkingError, InvalidChunkingConfigurationE
 
 @dataclass(frozen=True, slots=True)
 class ChunkingConfig:
-    """Character-based chunking settings for the local prototype."""
+    """Validated character-splitting settings for indexing workflows.
+
+    The configuration supplies LangChain's maximum chunk length and target
+    overlap. Construction rejects ranges that would make splitting ambiguous or
+    invalid before any document processing begins.
+    """
 
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
     def __post_init__(self) -> None:
+        """Reject non-integer or unsafe splitter ranges at construction time.
+
+        Overlap may be zero but must remain strictly smaller than chunk size.
+        """
         _validate_integer("chunk_size", self.chunk_size)
         _validate_integer("chunk_overlap", self.chunk_overlap)
 
@@ -41,7 +54,13 @@ def chunk_documents(
     *,
     config: ChunkingConfig | None = None,
 ) -> list[Document]:
-    """Split documents while preserving provenance and adding chunk positions."""
+    """Create retrieval chunks while preserving source provenance.
+
+    Blank documents are skipped. Each returned LangChain document inherits its
+    source metadata and gains stable chunk counts plus start/end character
+    positions. Invalid input types fail before they can reach embedding or
+    persistent indexing stages.
+    """
     settings = config or ChunkingConfig()
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,

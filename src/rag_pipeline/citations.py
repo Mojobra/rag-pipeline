@@ -1,4 +1,8 @@
-"""Deterministic source citations for retrieved answer evidence."""
+"""Build deterministic citations from retrieved answer evidence.
+
+Citation identity and locations come from validated retrieval metadata rather
+than language-model output, keeping source attribution reproducible and auditable.
+"""
 
 from __future__ import annotations
 
@@ -20,11 +24,16 @@ DEFAULT_CITATION_EXCERPT_CHARACTERS = 240
 
 @dataclass(frozen=True, slots=True)
 class CitationConfig:
-    """Controls the bounded evidence preview attached to each citation."""
+    """Validated display limits for citation evidence excerpts.
+
+    The setting bounds rendered previews without changing the complete source
+    metadata retained by each citation record.
+    """
 
     max_excerpt_characters: int = DEFAULT_CITATION_EXCERPT_CHARACTERS
 
     def __post_init__(self) -> None:
+        """Validate a limit large enough to represent truncated text safely."""
         if isinstance(self.max_excerpt_characters, bool) or not isinstance(
             self.max_excerpt_characters, int
         ):
@@ -39,7 +48,11 @@ class CitationConfig:
 
 @dataclass(frozen=True, slots=True)
 class Citation:
-    """A numbered, structured reference to one retrieved evidence chunk."""
+    """Structured source reference for one evidence chunk used by generation.
+
+    A citation carries display location, stable chunk identity, retrieval
+    provenance, and a bounded excerpt so callers never need to parse model text.
+    """
 
     number: int
     source: str
@@ -64,7 +77,13 @@ def build_citation(
     evidence_text: str | None = None,
     config: CitationConfig | None = None,
 ) -> Citation:
-    """Build one citation from trusted retrieval metadata, never model output."""
+    """Build one citation from validated retrieval provenance.
+
+    ``evidence_text`` may provide the exact prefix that survived generation
+    budgeting; when shorter than the chunk, the character end position is
+    reduced accordingly. Missing or malformed provenance raises
+    ``CitationInputError`` before an unsupported source can be presented.
+    """
     if not isinstance(retrieval_result, RetrievalResult):
         raise TypeError("retrieval_result must be a RetrievalResult.")
     if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
@@ -161,7 +180,11 @@ def build_citations(
     *,
     config: CitationConfig | None = None,
 ) -> tuple[Citation, ...]:
-    """Build ordered citations from a sequence of retrieved evidence chunks."""
+    """Create sequential citations in the supplied retrieval order.
+
+    The iterable is consumed once and numbering begins at one. Validation is
+    delegated to ``build_citation`` for each result.
+    """
     if config is not None and not isinstance(config, CitationConfig):
         raise TypeError("config must be a CitationConfig.")
 
@@ -172,7 +195,11 @@ def build_citations(
 
 
 def format_citation(citation: Citation) -> str:
-    """Render one citation for the local command-line interface."""
+    """Render a structured citation for terminal output.
+
+    Only available page, chunk, and character locations are included. The
+    function returns text and performs no printing or other I/O itself.
+    """
     if not isinstance(citation, Citation):
         raise TypeError("citation must be a Citation.")
 
