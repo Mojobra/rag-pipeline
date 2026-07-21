@@ -18,11 +18,16 @@ from rag_pipeline.embeddings import (  # noqa: E402
     EmbeddingService,
     LocalEmbeddingConfig,
     create_local_embedding_service,
+    create_profile_embedding_service,
 )
 from rag_pipeline.exceptions import (  # noqa: E402
     EmbeddingInputError,
     EmbeddingProviderError,
     InvalidEmbeddingConfigurationError,
+)
+from rag_pipeline.model_profiles import (  # noqa: E402
+    ModelProvider,
+    ProviderModelProfile,
 )
 
 
@@ -188,6 +193,74 @@ class EmbeddingServiceTests(unittest.TestCase):
             captured["query_encode_kwargs"],
             {"normalize_embeddings": False},
         )
+
+    def test_profile_factory_configures_hosted_langchain_embeddings(self) -> None:
+        provider_cases = (
+            (
+                ModelProvider.GEMINI,
+                "langchain_google_genai",
+                "GoogleGenerativeAIEmbeddings",
+            ),
+            (ModelProvider.OPENAI, "langchain_openai", "OpenAIEmbeddings"),
+        )
+
+        for provider, module_name, class_name in provider_cases:
+            with self.subTest(provider=provider.value):
+                captured: dict[str, object] = {}
+
+                class FakeProviderEmbeddings(StubEmbeddings):
+                    def __init__(self, **kwargs: object) -> None:
+                        captured.update(kwargs)
+                        super().__init__(document_vectors=[[1.0, 0.0]])
+
+                fake_module = ModuleType(module_name)
+                setattr(fake_module, class_name, FakeProviderEmbeddings)
+                profile = ProviderModelProfile(
+                    provider=provider,
+                    api_key="private-key",
+                    generation_model="generation-model",
+                    embedding_model="embedding-model",
+                )
+
+                with patch.dict(sys.modules, {module_name: fake_module}):
+                    service = create_profile_embedding_service(profile)
+
+                self.assertEqual(service.model_identifier, "embedding-model")
+                self.assertEqual(captured["model"], "embedding-model")
+                self.assertEqual(
+                    captured["api_key"].get_secret_value(),  # type: ignore[union-attr]
+                    "private-key",
+                )
+
+    def test_claude_profile_uses_configured_local_embedding_model(self) -> None:
+        profile = ProviderModelProfile(
+            provider=ModelProvider.CLAUDE,
+            api_key="anthropic-key",
+            generation_model="claude-model",
+            embedding_model="organization/local-embedding-model",
+        )
+        expected_service = EmbeddingService(
+            StubEmbeddings(document_vectors=[[1.0, 0.0]]),
+            model_name="organization/local-embedding-model",
+        )
+
+        with patch(
+            "rag_pipeline.embeddings.create_local_embedding_service",
+            return_value=expected_service,
+        ) as local_factory:
+            service = create_profile_embedding_service(
+                profile,
+                local_device="cuda:1",
+                local_batch_size=12,
+                local_model_revision="revision-sha",
+            )
+
+        self.assertIs(service, expected_service)
+        local_config = local_factory.call_args.args[0]
+        self.assertEqual(local_config.model_name, profile.embedding_model)
+        self.assertEqual(local_config.device, "cuda:1")
+        self.assertEqual(local_config.batch_size, 12)
+        self.assertEqual(local_config.model_revision, "revision-sha")
 
 
 if __name__ == "__main__":

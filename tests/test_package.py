@@ -687,6 +687,85 @@ class PackageSmokeTests(unittest.TestCase):
         self.assertIn("Sources:\n[1] expenses.txt (chunk 1)", output.getvalue())
         self.assertIn("Expense claims require receipts.", output.getvalue())
 
+    def test_answer_model_alias_reuses_one_profile_for_embedding_and_generation(
+        self,
+    ) -> None:
+        from langchain_core.documents import Document
+        from langchain_core.embeddings import DeterministicFakeEmbedding
+        from langchain_core.language_models.fake import FakeListLLM
+
+        from rag_pipeline.__main__ import main
+        from rag_pipeline.embeddings import EmbeddingService
+        from rag_pipeline.generation import AnswerGenerator
+        from rag_pipeline.model_profiles import ModelProvider, ProviderModelProfile
+        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+
+        profile = ProviderModelProfile(
+            provider=ModelProvider.GEMINI,
+            api_key="private-key",
+            generation_model="gemini-generation-model",
+            embedding_model="gemini-embedding-model",
+        )
+        embedding_service = EmbeddingService(
+            DeterministicFakeEmbedding(size=4),
+            model_name=profile.embedding_model,
+        )
+        answer_generator = AnswerGenerator(
+            FakeListLLM(responses=["Receipts are required."]),
+            model_identifier=profile.generation_model,
+            tokenizer=PromptTokenizerStub(),
+        )
+        document = Document(
+            page_content="Expense claims require receipts.",
+            metadata={"source": "expenses.txt", "chunk_index": 0},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = VectorStoreConfig(
+                path=Path(temp_dir) / "qdrant",
+                collection_name="profile-policies",
+            )
+            with LocalVectorStore(config) as store:
+                store.index(
+                    embedding_service.embed_documents([document]),
+                    model_identifier=embedding_service.model_identifier,
+                )
+
+            output = io.StringIO()
+            with patch(
+                "rag_pipeline.model_profiles.load_provider_model_profile",
+                return_value=profile,
+            ) as profile_loader:
+                with patch(
+                    "rag_pipeline.embeddings.create_profile_embedding_service",
+                    return_value=embedding_service,
+                ) as embedding_factory:
+                    with patch(
+                        "rag_pipeline.generation.create_profile_answer_generator",
+                        return_value=answer_generator,
+                    ) as generation_factory:
+                        with redirect_stdout(output):
+                            exit_code = main(
+                                [
+                                    "answer",
+                                    "Expense claims require receipts.",
+                                    "--model",
+                                    "gemini",
+                                    "--store-path",
+                                    str(config.resolved_path),
+                                    "--collection-name",
+                                    config.collection_name,
+                                    "--top-k",
+                                    "1",
+                                ]
+                            )
+
+        self.assertEqual(exit_code, 0)
+        profile_loader.assert_called_once_with("gemini")
+        self.assertIs(embedding_factory.call_args.args[0], profile)
+        self.assertIs(generation_factory.call_args.args[0].profile, profile)
+        self.assertIn("Answer:\nReceipts are required.", output.getvalue())
+
     def test_answer_command_default_gate_skips_irrelevant_retrieval(self) -> None:
         from langchain_core.documents import Document
         from langchain_core.embeddings import Embeddings
