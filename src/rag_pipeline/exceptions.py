@@ -143,6 +143,18 @@ class GenerationProviderError(GenerationError):
     """Raised when a language model fails or returns invalid output."""
 
 
+class AnswerEvaluationError(RagPipelineError):
+    """Base error for offline generated-answer evaluation failures."""
+
+
+class InvalidAnswerEvaluationDatasetError(AnswerEvaluationError, ValueError):
+    """Raised when an answer evaluation dataset violates its schema."""
+
+
+class AnswerEvaluationInputError(AnswerEvaluationError, ValueError):
+    """Raised when an evaluator receives an invalid generation result."""
+
+
 class CitationError(RagPipelineError):
     """Base error for answer citation failures."""
 

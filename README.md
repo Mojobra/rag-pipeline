@@ -30,6 +30,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Ranked semantic retrieval with configurable top-k and score thresholds
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
 - Versioned retrieval evaluation datasets with per-query and macro top-k metrics
+- Versioned answer evaluation with reference, abstention, and citation metrics
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -56,6 +57,8 @@ flowchart LR
     G --> P["LangChain grounded-v2 prompt"]
     P --> H["Local FLAN-T5 generation"]
     H --> I["Answer and deterministic citations"]
+    K["Labeled answer cases"] --> W["Reference, abstention, and citation metrics"]
+    I --> W
 ```
 
 ## Engineering Decisions
@@ -72,6 +75,7 @@ flowchart LR
 | Overfetch before optional cross-encoder reranking | Lets the first stage optimize recall while the second stage improves precision without scoring the entire corpus. |
 | Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
 | Evaluate exact metadata relevance labels at a fixed cutoff | Makes retrieval regressions measurable without involving nondeterministic answer generation. |
+| Score references and abstention separately | Prevents correct refusals from being treated as bad answers and exposes models that always answer or always abstain. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -163,6 +167,9 @@ uv run python -m rag_pipeline retrieve "What is the policy?" --filter file_exten
 
 # Evaluate ranked retrieval against labeled queries without generation
 uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json --top-k 5
+
+# Evaluate full generated-answer behavior against references and abstention labels
+uv run python -m rag_pipeline evaluate-answer answer-evaluation.json --top-k 3
 
 # Retrieve evidence and generate a cited answer
 uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
@@ -274,11 +281,78 @@ format is suitable for saving results; Task 17 will add representative project
 datasets and Task 18 will add reproducible benchmark comparisons and runtime
 measurements.
 
+## Answer Evaluation
+
+The `evaluate-answer` command runs labeled questions through the same dense or
+hybrid retrieval, filters, score threshold, optional reranker, `grounded-v2`
+LangChain prompt, and generation model used by `answer`. It reuses provider
+instances across the dataset and reads the existing collection without changing
+it. The default score threshold is the same conservative `0.2` used by
+`answer`, and the default generation temperature is deterministic `0`.
+
+Answer datasets use a separate strict schema because answerability and accepted
+wording are different labels from retrieval relevance:
+
+```json
+{
+  "schema_version": 1,
+  "name": "expense-policy-answers-v1",
+  "cases": [
+    {
+      "id": "itemized-receipts",
+      "query": "What evidence is required for an expense claim?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Expense claims require itemized receipts."
+      ]
+    },
+    {
+      "id": "unsupported-founder",
+      "query": "Who founded the company?",
+      "should_abstain": true,
+      "reference_answers": []
+    }
+  ]
+}
+```
+
+Answerable cases require one or more accepted references. Cases expected to
+abstain require an empty reference list. This explicit combination catches
+contradictory labels before models or Qdrant are initialized.
+
+```powershell
+uv run python -m rag_pipeline evaluate-answer answer-evaluation.json `
+  --collection-name expense_policies `
+  --top-k 3 `
+  --output-format json
+```
+
+The report includes:
+
+- **Exact-match rate:** normalized case-, punctuation-, and whitespace-insensitive
+  matches, taking the best result across accepted references.
+- **Mean token F1:** multiset word overlap with the best accepted reference,
+  using Unicode-aware normalization.
+- **Abstention accuracy, precision, and recall:** classification metrics for the
+  pipeline's one exact insufficient-context response.
+- **Answerable response rate:** the share of answerable cases the pipeline did
+  not incorrectly refuse.
+- **Citation-behavior rate:** whether answered cases contain citations and
+  abstentions contain none.
+
+Lexical overlap is reproducible and useful for regression testing, but it can
+penalize valid paraphrases and reward unsupported wording that resembles a
+reference. Citation behavior checks presence, not whether each claim is entailed
+by its cited evidence. These metrics therefore do not prove semantic
+faithfulness. Task 17 will add reviewed representative cases; Task 18 will add
+run manifests and thresholds, while future production evaluation can add a
+separately calibrated human, NLI, or LLM judge.
+
 ## Metadata Filters
 
-Both `retrieve` and `answer` accept repeatable exact-match filters. Conditions
-are translated into structured Qdrant payload filters and applied before
-semantic top-k selection:
+`retrieve`, `answer`, `evaluate-retrieval`, and `evaluate-answer` accept
+repeatable exact-match filters. Conditions are translated into structured
+Qdrant payload filters and applied before semantic top-k selection:
 
 ```powershell
 uv run python -m rag_pipeline answer "What is the policy?" `
@@ -445,11 +519,11 @@ Run the complete suite:
 uv run python -m unittest discover -s tests -v
 ```
 
-The suite currently contains 90 tests covering ingestion, extraction, chunking,
-chunking experiments, dense and sparse embedding contracts, persistent dense
-and hybrid indexing, typed metadata filtering, cosine and RRF retrieval,
-cross-encoder reranking, versioned guarded generation, evidence boundary and
-token-budget behavior, deterministic citations, and CLI integration. Provider
+The suite covers ingestion, extraction, chunking, chunking experiments, dense
+and sparse embedding contracts, persistent dense and hybrid indexing, typed
+metadata filtering, cosine and RRF retrieval, cross-encoder reranking,
+versioned guarded generation, evidence boundaries, token budgeting, retrieval
+and answer evaluation, deterministic citations, and CLI integration. Provider
 calls use test doubles where appropriate; the local model path has also been
 verified end to end with MiniLM, Qdrant, the MS MARCO cross-encoder, and
 FLAN-T5.
@@ -461,6 +535,7 @@ FLAN-T5.
 |-- src/
 |   `-- rag_pipeline/
 |       |-- __main__.py
+|       |-- answer_evaluation.py
 |       |-- citations.py
 |       |-- chunking.py
 |       |-- chunking_experiments.py
@@ -475,6 +550,7 @@ FLAN-T5.
 |       |-- sparse_embeddings.py
 |       `-- vector_store.py
 |-- tests/
+|   |-- test_answer_evaluation.py
 |   |-- test_citations.py
 |   |-- test_chunking.py
 |   |-- test_chunking_experiments.py
@@ -511,9 +587,10 @@ FLAN-T5.
   deferred to the later dataset and benchmarking tasks.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
-- The `grounded-v2` prompt is a hand-authored baseline; faithfulness,
-  abstention, and prompt-injection resilience are not yet benchmarked on a
-  representative answer dataset.
+- Answer evaluation uses deterministic lexical references and exact abstention
+  labels; semantic faithfulness, claim-level citation support, human judgment,
+  and prompt-injection resilience are not yet benchmarked on a representative
+  dataset.
 - Local source paths should become stable document IDs or authorized URLs before
   citations are exposed through a service.
 - The default generation model prioritizes local accessibility over answer

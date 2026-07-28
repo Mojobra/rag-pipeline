@@ -25,6 +25,7 @@ from rag_pipeline.sparse_embeddings import (
 
 if TYPE_CHECKING:
     from rag_pipeline.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.generation import GeneratedAnswer
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
     from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
     from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
@@ -218,6 +219,44 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    answer_evaluation_parser = subparsers.add_parser(
+        "evaluate-answer",
+        help="Measure answer quality, abstention, and citation behavior.",
+        description=(
+            "Run each case in a versioned JSON dataset through retrieval and "
+            "grounded generation, then report deterministic reference, "
+            "abstention, and citation-state metrics. The command reads an "
+            "existing collection and never modifies the index."
+        ),
+    )
+    answer_evaluation_parser.add_argument(
+        "dataset",
+        help=(
+            "UTF-8 JSON file containing schema_version, name, and labeled cases "
+            "with should_abstain plus reference_answers. Change it to evaluate "
+            "a different corpus, question set, or accepted-answer snapshot."
+        ),
+    )
+    _add_embedding_arguments(answer_evaluation_parser)
+    _add_vector_store_location_arguments(answer_evaluation_parser)
+    _add_hybrid_search_arguments(answer_evaluation_parser)
+    _add_retrieval_arguments(
+        answer_evaluation_parser,
+        default_score_threshold=DEFAULT_ANSWER_SCORE_THRESHOLD,
+    )
+    _add_reranking_arguments(answer_evaluation_parser)
+    _add_generation_arguments(answer_evaluation_parser)
+    answer_evaluation_parser.add_argument(
+        "--output-format",
+        choices=("table", "json"),
+        default="table",
+        help=(
+            "Render identical case and aggregate metrics as an aligned table or "
+            "structured JSON. Use JSON for saved comparisons and later benchmark "
+            "automation (default: table)."
+        ),
+    )
+
     answer_parser = subparsers.add_parser(
         "answer",
         help="Generate a cited local answer from retrieved evidence.",
@@ -261,10 +300,10 @@ def _add_retrieval_arguments(
         type=int,
         default=4,
         help=(
-            "Maximum final chunks retained for each query and the evaluation "
-            "metric cutoff. Higher values can improve recall but increase output, "
-            "evaluation, or prompt work; with --rerank, must not exceed "
-            "--candidate-k (default: 4)."
+            "Maximum final chunks retained for each query. It is the cutoff for "
+            "retrieval evaluation and the evidence limit for answer generation; "
+            "higher values can improve recall but add work. With --rerank, it "
+            "must not exceed --candidate-k (default: 4)."
         ),
     )
     command_parser.add_argument(
@@ -440,9 +479,10 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
         "--generation-model",
         default="google/flan-t5-small",
         help=(
-            "Hugging Face model loaded with the text2text-generation pipeline "
-            "after answer retrieval succeeds. Model choice affects answer quality, "
-            "download size, memory, and latency (default: google/flan-t5-small)."
+            "Hugging Face model used by the text2text-generation pipeline. Model "
+            "choice affects answer quality, download size, memory, and latency "
+            "and is reused across an evaluation run "
+            "(default: google/flan-t5-small)."
         ),
     )
     command_parser.add_argument(
@@ -556,8 +596,9 @@ def _add_vector_store_location_arguments(
         default=".rag_data/qdrant",
         help=(
             "Directory containing the persistent local Qdrant database. Use the "
-            "same path for index, retrieve, and answer; different paths isolate "
-            "stored collections (default: .rag_data/qdrant)."
+            "same path for indexing and later query or evaluation commands; "
+            "different paths isolate stored collections "
+            "(default: .rag_data/qdrant)."
         ),
     )
     command_parser.add_argument(
@@ -998,6 +1039,121 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(retrieval_evaluation_to_dict(report), indent=2))
         else:
             print(format_retrieval_evaluation_table(report))
+        return 0
+
+    if args.command == "evaluate-answer":
+        import json
+
+        from rag_pipeline.answer_evaluation import (
+            answer_evaluation_to_dict,
+            evaluate_answers,
+            format_answer_evaluation_table,
+            load_answer_evaluation_dataset,
+        )
+        from rag_pipeline.embeddings import (
+            InvalidEmbeddingConfigurationError,
+            create_local_embedding_service,
+        )
+        from rag_pipeline.exceptions import (
+            InvalidAnswerEvaluationDatasetError,
+            InvalidGenerationConfigurationError,
+            InvalidRerankingConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidVectorStoreConfigurationError,
+        )
+        from rag_pipeline.generation import (
+            GenerationConfig,
+            LocalGenerationConfig,
+            create_local_answer_generator,
+        )
+        from rag_pipeline.reranking import create_local_reranker_service
+        from rag_pipeline.retrieval import RetrieverService
+        from rag_pipeline.sparse_embeddings import (
+            create_local_sparse_embedding_service,
+        )
+        from rag_pipeline.vector_store import LocalVectorStore
+
+        try:
+            dataset = load_answer_evaluation_dataset(args.dataset)
+            runtime_config = _build_retrieval_runtime_config(args)
+            local_generation_config = LocalGenerationConfig(
+                model_name=args.generation_model,
+                model_revision=args.generation_model_revision,
+                device=args.generation_device,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+            )
+            generation_config = GenerationConfig(
+                max_context_characters=args.max_context_characters,
+                max_input_tokens=args.max_input_tokens,
+            )
+        except (
+            InvalidAnswerEvaluationDatasetError,
+            InvalidEmbeddingConfigurationError,
+            InvalidVectorStoreConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidRerankingConfigurationError,
+            InvalidGenerationConfigurationError,
+        ) as exc:
+            parser.error(str(exc))
+
+        embedding_service = create_local_embedding_service(
+            runtime_config.embedding
+        )
+        sparse_embedding_service = (
+            create_local_sparse_embedding_service(
+                runtime_config.sparse_embedding
+            )
+            if runtime_config.sparse_embedding is not None
+            else None
+        )
+        reranker = (
+            create_local_reranker_service(runtime_config.local_reranker)
+            if runtime_config.local_reranker is not None
+            else None
+        )
+        answer_generator = None
+
+        with LocalVectorStore(runtime_config.vector_store) as vector_store:
+            retriever = RetrieverService(
+                embedding_service,
+                vector_store,
+                sparse_embedding_service,
+            )
+
+            def generate_for_evaluation(query: str) -> GeneratedAnswer:
+                """Run one case through shared retrieval and generation services."""
+                nonlocal answer_generator
+                results = retriever.retrieve(
+                    query,
+                    config=runtime_config.retrieval,
+                )
+                if reranker is not None:
+                    if runtime_config.reranking is None:
+                        raise RuntimeError(
+                            "Reranker service has no result-limit configuration."
+                        )
+                    results = reranker.rerank(
+                        query,
+                        results,
+                        config=runtime_config.reranking,
+                    )
+                if answer_generator is None:
+                    answer_generator = create_local_answer_generator(
+                        local_generation_config
+                    )
+                return answer_generator.generate(
+                    query,
+                    results,
+                    config=generation_config,
+                )
+
+            report = evaluate_answers(dataset, generate_for_evaluation)
+
+        if args.output_format == "json":
+            print(json.dumps(answer_evaluation_to_dict(report), indent=2))
+        else:
+            print(format_answer_evaluation_table(report))
         return 0
 
     if args.command == "answer":
