@@ -33,6 +33,8 @@ code was reviewed, adapted, and validated through automated tests.
 - Versioned answer evaluation with reference, abstention, and citation metrics
 - Committed synthetic business-policy corpus with aligned retrieval, answer,
   and abstention labels plus automated drift checks
+- Isolated full-pipeline benchmarks with input hashes, stage and case latency,
+  environment manifests, regression gates, and compatible-run comparisons
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -64,6 +66,8 @@ flowchart LR
     K["Labeled answer cases"] --> W["Reference, abstention, and citation metrics"]
     T --> K
     I --> W
+    V --> Z["Versioned benchmark artifact and gates"]
+    W --> Z
 ```
 
 ## Engineering Decisions
@@ -82,6 +86,8 @@ flowchart LR
 | Evaluate exact metadata relevance labels at a fixed cutoff | Makes retrieval regressions measurable without involving nondeterministic answer generation. |
 | Score references and abstention separately | Prevents correct refusals from being treated as bad answers and exposes models that always answer or always abstain. |
 | Commit a synthetic corpus with its labels | Makes evaluation reproducible without exposing customer data, personal files, or copyrighted source material. |
+| Rebuild a temporary index for each full benchmark | Binds quality and latency to an exact corpus and configuration instead of trusting potentially stale collection state. |
+| Gate allowlisted metrics from a separate versioned profile | Keeps ground-truth labels independent of deployment policy and makes CI failures explicit and reviewable. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -177,6 +183,12 @@ uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json --top
 # Evaluate full generated-answer behavior against references and abstention labels
 uv run python -m rag_pipeline evaluate-answer answer-evaluation.json --top-k 3
 
+# Rebuild a corpus in isolation and save a full quality/latency benchmark
+uv run python -m rag_pipeline benchmark path/to/documents retrieval-evaluation.json answer-evaluation.json --output .rag_data/benchmarks/local-v1.json
+
+# Compare two compatible saved benchmark artifacts
+uv run python -m rag_pipeline compare-benchmarks baseline.json candidate.json
+
 # Retrieve evidence and generate a cited answer
 uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
 ```
@@ -198,6 +210,8 @@ Useful options include:
 - repeatable `--candidate SIZE:OVERLAP` for chunking experiments
 - `--output-format table|json` for human or machine-readable experiment and
   evaluation reports
+- `--output`, optional `--thresholds`, and `--work-dir` for isolated benchmark
+  artifacts, regression gates, and temporary-index disk placement
 - `--max-input-tokens` for an optional limit below the tokenizer model maximum
 - `--max-context-characters` as a secondary generation context guard
 - `--collection-name` and `--store-path` for Qdrant persistence
@@ -225,7 +239,8 @@ uv run python -m rag_pipeline chunk-experiment path/to/documents --output-format
 These are structural diagnostics, not retrieval-quality scores. A candidate
 with fewer chunks or less duplication is not automatically better. Use the
 retrieval evaluator below to compare candidates with representative queries and
-relevance labels; Task 18 will add latency and broader benchmark reporting.
+relevance labels, then use the benchmark command to record end-to-end quality,
+latency, and index size for promising policies.
 
 ## Retrieval Evaluation
 
@@ -284,8 +299,8 @@ The report includes these binary metrics at the selected cutoff:
 
 Aggregate values are macro averages, so every query has equal weight. The
 committed Task 17 dataset provides manually cross-checked project labels for
-this command. Task 18 will add reproducible benchmark comparisons, runtime
-measurements, and regression thresholds.
+this command. The benchmark runner reuses these exact metrics in versioned,
+comparable run artifacts.
 
 ## Answer Evaluation
 
@@ -351,8 +366,8 @@ penalize valid paraphrases and reward unsupported wording that resembles a
 reference. Citation behavior checks presence, not whether each claim is entailed
 by its cited evidence. These metrics therefore do not prove semantic
 faithfulness. The committed Task 17 cases provide a reproducible development
-baseline; Task 18 will add run manifests and thresholds, while future production
-evaluation can add a separately calibrated human, NLI, or LLM judge.
+baseline. The benchmark runner adds manifests and thresholds, while future
+production evaluation can add a separately calibrated human, NLI, or LLM judge.
 
 ## Representative Test Dataset
 
@@ -394,8 +409,128 @@ Automated tests reproduce all chunks, require every relevance selector to match
 exactly one chunk, align answerable cases with retrieval judgments, and check
 accepted-answer vocabulary against the labeled evidence. The labels were
 manually cross-checked but have not received independent annotator review.
-Task 18 will run and record comparable configurations; Task 17 intentionally
-does not declare quality thresholds or a winning setup.
+Task 18 runs and records comparable configurations; the dataset itself remains
+independent of benchmark settings, thresholds, or a declared winning setup.
+
+## Reproducible Benchmarking
+
+The `benchmark` command measures a complete configuration from raw documents to
+generated answers. It always creates a fresh temporary Qdrant index, runs both
+evaluation datasets with shared model instances, measures one pass, records the
+temporary index size, and deletes the index afterward. This costs more time than
+evaluating an existing collection, but prevents stale points or undocumented
+chunking settings from invalidating a comparison.
+
+```powershell
+uv run python -m rag_pipeline benchmark `
+  evaluation/datasets/asteria-policies-v1/documents `
+  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
+  evaluation/datasets/asteria-policies-v1/answers-v1.json `
+  --name asteria-dense-local-v1 `
+  --top-k 4 `
+  --output .rag_data/benchmarks/asteria-dense-local-v1.json
+```
+
+The schema-v1 artifact contains:
+
+- SHA-256 fingerprints for the corpus and both label files, using portable
+  relative corpus paths rather than absolute local paths
+- the Git commit and tracked-worktree state when available
+- chunking, model revisions, devices, search, filters, reranking, prompt, token
+  limits, decoding, batching, and index configuration
+- Python, package, CPU/platform, and available CUDA device metadata
+- document, chunk, point, vector-dimension, and temporary-index storage totals
+- stage timings plus ordered per-case retrieval and end-to-end answer latency
+- the complete retrieval and answer evaluation reports
+- reproducibility warnings for unpinned models, sampled generation, or dirty
+  tracked source files
+
+Benchmark artifacts contain dataset queries and generated answers. Treat reports
+created from private or customer data according to the same access, retention,
+and deletion rules as the source data; do not commit them by default.
+
+### Regression Thresholds
+
+An optional strict JSON profile applies inclusive `minimum` or `maximum` checks:
+
+```json
+{
+  "schema_version": 1,
+  "name": "asteria-local-ci-v1",
+  "applies_to": {
+    "corpus_sha256": "e4c9da40c104e45792d0242f2b962e3d0267f980f04e5475d4a15fde2c798949",
+    "retrieval_dataset_sha256": "4344c821c85f665cf8494c1233743a06611b63d7a1baa2d720a6007b044b8e52",
+    "answer_dataset_sha256": "babd60d5819651a9cf19e01ec8ff5df80f3fbe50bad0354cd1b8cea89e92dec3",
+    "top_k": 4
+  },
+  "checks": [
+    {
+      "metric": "retrieval.mean_recall_at_k",
+      "operator": "minimum",
+      "value": 0.9
+    },
+    {
+      "metric": "answer.abstention_accuracy",
+      "operator": "minimum",
+      "value": 0.8
+    },
+    {
+      "metric": "latency.answer.p95_seconds",
+      "operator": "maximum",
+      "value": 5.0
+    }
+  ]
+}
+```
+
+The numbers above demonstrate the schema; calibrate real gates from reviewed
+runs rather than adopting example values blindly. The `applies_to` hashes shown
+are the committed Asteria v1 inputs; take these values from an ungated baseline
+artifact for another dataset. A profile is rejected before model loading when
+its corpus, labels, or final top-k differ, so an easier dataset cannot
+accidentally satisfy an approved gate. Supported checks cover all retrieval
+quality rates, answer quality/abstention/citation rates, retrieval and answer
+mean or p95 seconds, total runtime seconds, and index storage bytes. A configured
+optional metric that is undefined for the dataset fails explicitly.
+
+```powershell
+uv run python -m rag_pipeline benchmark `
+  evaluation/datasets/asteria-policies-v1/documents `
+  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
+  evaluation/datasets/asteria-policies-v1/answers-v1.json `
+  --thresholds benchmark-thresholds.json `
+  --output .rag_data/benchmarks/ci-run.json
+```
+
+A failed gate still writes the diagnostic artifact and returns exit status `1`;
+invalid configuration or schemas use the normal CLI error status. Existing
+artifacts are preserved unless `--overwrite` is explicit.
+
+### Comparing Runs
+
+```powershell
+uv run python -m rag_pipeline compare-benchmarks `
+  .rag_data/benchmarks/baseline.json `
+  .rag_data/benchmarks/candidate.json `
+  --output-format table
+```
+
+Comparison requires identical corpus and dataset fingerprints plus the same
+final `top-k`. Chunking, embedding, search mode, filters, reranking, generation,
+and code revision may differ because those are valid experiment variables.
+The comparison lists which top-level configuration sections changed alongside
+the metric deltas. Quality remains comparable across runtime environments.
+Latency, total runtime, and storage deltas are marked diagnostic when recorded
+software, platform, accelerator, or inference-device fields differ.
+
+Timings are wall-clock measurements from one local pass, including normal
+first-call effects but separating model-load and pipeline stages. Use the same
+machine, power settings, cache state, and background-load conditions for useful
+regression signals. Production capacity planning still needs warmups, repeated
+runs, concurrency, confidence intervals, memory telemetry, and representative
+service traffic. `runtime.total_seconds` covers benchmark preparation and
+execution through provenance capture; JSON serialization and artifact writing
+occur afterward and are not included.
 
 ## Metadata Filters
 
@@ -593,6 +728,9 @@ MARCO cross-encoder, and FLAN-T5.
 |   `-- rag_pipeline/
 |       |-- __main__.py
 |       |-- answer_evaluation.py
+|       |-- benchmark_artifacts.py
+|       |-- benchmark_provenance.py
+|       |-- benchmarking.py
 |       |-- citations.py
 |       |-- chunking.py
 |       |-- chunking_experiments.py
@@ -608,6 +746,7 @@ MARCO cross-encoder, and FLAN-T5.
 |       `-- vector_store.py
 |-- tests/
 |   |-- test_answer_evaluation.py
+|   |-- test_benchmarking.py
 |   |-- test_citations.py
 |   |-- test_chunking.py
 |   |-- test_chunking_experiments.py
@@ -636,14 +775,16 @@ MARCO cross-encoder, and FLAN-T5.
   learned sparse retrieval remain roadmap items.
 - The default reranker is a small English MS MARCO baseline; candidate width,
   latency, domain fit, multilingual quality, and score calibration still need
-  Task 18 benchmark runs on representative business queries.
+  reviewed benchmark runs on representative business queries.
 - Metadata filters currently support exact scalar AND conditions; range, OR,
   list-membership, and policy-composition support are future extensions.
 - The default retrieval threshold is a conservative safety baseline pending
-  Task 18 calibration against the committed evaluation dataset.
+  calibration and approval from representative benchmark runs.
 - Retrieval evaluation currently uses binary exact-match labels and macro
-  averages; graded relevance, confidence intervals, and saved run manifests are
-  deferred to benchmarking and later evaluation work.
+  averages; graded relevance and confidence intervals remain future work.
+- Benchmark latency is one local wall-clock pass. It does not yet provide
+  warmups, repetitions, concurrency, memory peaks, confidence intervals, remote
+  model cost, or service-level load testing.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
 - Answer evaluation uses deterministic lexical references and exact abstention

@@ -16,7 +16,7 @@ application data and not training data.
 - Review labels against the complete corpus rather than only the current
   retriever's results. Otherwise existing misses cannot be discovered.
 - Keep benchmark execution settings and result thresholds out of the dataset.
-  Task 18 owns reproducible run manifests and comparisons.
+  The `benchmark` command records them in separate reproducible run artifacts.
 
 ## Available Datasets
 

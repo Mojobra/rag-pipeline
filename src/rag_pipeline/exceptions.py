@@ -155,6 +155,30 @@ class AnswerEvaluationInputError(AnswerEvaluationError, ValueError):
     """Raised when an evaluator receives an invalid generation result."""
 
 
+class BenchmarkError(RagPipelineError):
+    """Base error for reproducible benchmark execution and comparison."""
+
+
+class InvalidBenchmarkConfigurationError(BenchmarkError, ValueError):
+    """Raised when benchmark orchestration or output settings are invalid."""
+
+
+class BenchmarkInputError(BenchmarkError, ValueError):
+    """Raised when benchmark corpus, timing, or runtime inputs are invalid."""
+
+
+class InvalidBenchmarkThresholdsError(BenchmarkError, ValueError):
+    """Raised when a regression-threshold profile violates its schema."""
+
+
+class InvalidBenchmarkArtifactError(BenchmarkError, ValueError):
+    """Raised when a saved benchmark report violates its artifact contract."""
+
+
+class BenchmarkComparisonError(BenchmarkError, ValueError):
+    """Raised when two benchmark artifacts do not share comparable ground truth."""
+
+
 class CitationError(RagPipelineError):
     """Base error for answer citation failures."""
 
