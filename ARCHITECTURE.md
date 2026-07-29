@@ -13,7 +13,7 @@
 9. Versioned Prompt Construction and Token-Aware Evidence Packing
 10. LLM Generation
 11. Citation System
-12. Versioned Retrieval and Answer Evaluation Framework
+12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Monitoring & Observability
 14. API Layer
 15. Frontend/UI
@@ -68,12 +68,14 @@ before production use.
 - Reports include per-case Hit@k, Precision@k, Recall@k, and reciprocal rank,
   plus macro averages that give every query equal weight.
 - Table output supports local diagnosis and JSON output supports saved
-  comparisons. Representative datasets, latency capture, and benchmark
-  manifests remain later Phase 3 work.
+  comparisons.
+- The committed synthetic policy corpus supplies 17 manually cross-checked
+  retrieval cases, including one multi-document judgment.
 
 Exact metadata selectors are transparent but depend on stable provenance.
 Portable business datasets should eventually use immutable document and chunk
-version identifiers instead of absolute local source paths.
+version identifiers instead of filenames and chunk positions. Latency capture,
+benchmark manifests, and thresholds remain Task 18 work.
 
 ---
 
@@ -95,8 +97,32 @@ version identifiers instead of absolute local source paths.
 
 These deterministic metrics are regression signals, not semantic judges.
 Lexical overlap does not establish factual entailment, and citation presence
-does not prove claim-level support. Representative datasets, benchmark
-manifests, human review, and a calibrated NLI or LLM judge remain future work.
+does not prove claim-level support. The committed synthetic dataset supplies 17
+answerable and four expected-abstention cases. Benchmark manifests, independent
+annotation, human review, and a calibrated NLI or LLM judge remain future work.
+
+---
+
+## Current Test Dataset Contract
+
+- `evaluation/datasets/asteria-policies-v1` contains five repository-owned,
+  synthetic Markdown policies. No local user documents or customer data are
+  part of the benchmark.
+- Retrieval and answer datasets share IDs and query text for all 17 answerable
+  cases; the answer dataset adds four unsupported questions.
+- Retrieval labels use `file_name` and zero-based `chunk_index` against the
+  documented 1000-character size and 200-character overlap defaults.
+- Integrity tests reproduce the ten expected chunks, require each selector to
+  match exactly one chunk, align the paired schemas, and check reference
+  vocabulary against labeled evidence.
+- Dataset versions are repository artifacts and should be treated as immutable
+  after benchmark results depend on them.
+
+Synthetic data is safe, portable, and reviewable, but it cannot represent the
+full language, layout, security, or ambiguity of production documents. The
+labels were manually cross-checked but do not yet have independent annotator
+agreement. Task 18 will define run manifests and regression thresholds without
+changing these ground-truth assets.
 
 ---
 

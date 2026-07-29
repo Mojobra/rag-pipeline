@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "name": "asteria-policies-answers-v1",
+  "cases": [
+    {
+      "id": "expense-receipt-threshold",
+      "query": "When is an itemized receipt required for an expense?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Employees must attach an itemized receipt for every purchase above EUR 25."
+      ]
+    },
+    {
+      "id": "expense-card-slip",
+      "query": "Is a payment-card slip enough evidence for reimbursement?",
+      "should_abstain": false,
+      "reference_answers": [
+        "A payment-card slip without line-item details is not an itemized receipt."
+      ]
+    },
+    {
+      "id": "expense-director-approval",
+      "query": "Who must approve an expense claim above EUR 500?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Claims above EUR 500 require department-director approval before submission."
+      ]
+    },
+    {
+      "id": "expense-submission-deadline",
+      "query": "How long does an employee have to submit an expense claim?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Employees must submit claims within 30 calendar days of the purchase date."
+      ]
+    },
+    {
+      "id": "travel-booking-channel",
+      "query": "Where must employees book flights and hotels?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Employees must book flights and hotels through the Asteria Travel Portal."
+      ]
+    },
+    {
+      "id": "travel-flight-cabin",
+      "query": "What are the economy and premium-economy rules based on flight duration?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Economy class is required for flights shorter than six hours. Premium economy is permitted for flights of six hours or longer when a manager approves it before booking."
+      ]
+    },
+    {
+      "id": "travel-hotel-limit",
+      "query": "What is the standard nightly hotel limit before local taxes?",
+      "should_abstain": false,
+      "reference_answers": [
+        "The standard hotel limit is EUR 180 per night before local taxes."
+      ]
+    },
+    {
+      "id": "security-phishing-response",
+      "query": "How and when should an employee report suspected phishing?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Employees must report suspected phishing to Security Operations through the security portal within 30 minutes of discovery."
+      ]
+    },
+    {
+      "id": "security-lost-device",
+      "query": "Who must be notified about a lost company device, and by when?",
+      "should_abstain": false,
+      "reference_answers": [
+        "A lost or stolen company device must be reported to Security Operations and the employee's manager within one hour."
+      ]
+    },
+    {
+      "id": "security-policy-identifier",
+      "query": "Which policy has the identifier SEC-210?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Information Security Incident Policy, Policy ID SEC-210."
+      ]
+    },
+    {
+      "id": "remote-work-days",
+      "query": "How many days per week may an employee work remotely?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Employees may work remotely up to three days per week with manager approval."
+      ]
+    },
+    {
+      "id": "remote-public-wifi",
+      "query": "What must an employee do before using company systems on public Wi-Fi?",
+      "should_abstain": false,
+      "reference_answers": [
+        "When using public Wi-Fi, employees must connect through the company VPN before accessing company systems."
+      ]
+    },
+    {
+      "id": "retention-support-tickets",
+      "query": "How long are closed customer support tickets retained?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Closed customer support tickets are retained for 24 months after closure."
+      ]
+    },
+    {
+      "id": "retention-expense-records",
+      "query": "How long must expense records be retained?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Expense records are retained for seven years after the end of the fiscal year in which the expense was recorded."
+      ]
+    },
+    {
+      "id": "retention-security-logs",
+      "query": "What is the normal retention period for security-access logs?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Routine security-access logs are retained for 12 months unless they are associated with an investigation."
+      ]
+    },
+    {
+      "id": "retention-legal-hold",
+      "query": "What happens to scheduled deletion when a legal hold applies?",
+      "should_abstain": false,
+      "reference_answers": [
+        "A legal hold overrides the standard deletion schedule until Legal releases the hold in writing."
+      ]
+    },
+    {
+      "id": "cross-policy-travel-meal-receipt",
+      "query": "What evidence is required for a travel meal costing more than EUR 25?",
+      "should_abstain": false,
+      "reference_answers": [
+        "Travel meals follow the Expense Reimbursement Policy and require the same supporting evidence. Employees must attach an itemized receipt for every purchase above EUR 25."
+      ]
+    },
+    {
+      "id": "unsupported-annual-leave",
+      "query": "How many annual leave days may an employee carry into the next year?",
+      "should_abstain": true,
+      "reference_answers": []
+    },
+    {
+      "id": "unsupported-parental-leave",
+      "query": "How many weeks of paid parental leave does Asteria provide?",
+      "should_abstain": true,
+      "reference_answers": []
+    },
+    {
+      "id": "unsupported-health-insurance",
+      "query": "Which company provides Asteria's employee health insurance?",
+      "should_abstain": true,
+      "reference_answers": []
+    },
+    {
+      "id": "unsupported-founder",
+      "query": "Who founded Asteria Works?",
+      "should_abstain": true,
+      "reference_answers": []
+    }
+  ]
+}

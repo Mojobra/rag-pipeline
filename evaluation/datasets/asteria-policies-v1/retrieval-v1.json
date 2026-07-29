@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "name": "asteria-policies-retrieval-v1",
+  "cases": [
+    {
+      "id": "expense-receipt-threshold",
+      "query": "When is an itemized receipt required for an expense?",
+      "relevant": [
+        {
+          "file_name": "expense-reimbursement.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "expense-card-slip",
+      "query": "Is a payment-card slip enough evidence for reimbursement?",
+      "relevant": [
+        {
+          "file_name": "expense-reimbursement.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "expense-director-approval",
+      "query": "Who must approve an expense claim above EUR 500?",
+      "relevant": [
+        {
+          "file_name": "expense-reimbursement.md",
+          "chunk_index": 1
+        }
+      ]
+    },
+    {
+      "id": "expense-submission-deadline",
+      "query": "How long does an employee have to submit an expense claim?",
+      "relevant": [
+        {
+          "file_name": "expense-reimbursement.md",
+          "chunk_index": 1
+        }
+      ]
+    },
+    {
+      "id": "travel-booking-channel",
+      "query": "Where must employees book flights and hotels?",
+      "relevant": [
+        {
+          "file_name": "business-travel.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "travel-flight-cabin",
+      "query": "What are the economy and premium-economy rules based on flight duration?",
+      "relevant": [
+        {
+          "file_name": "business-travel.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "travel-hotel-limit",
+      "query": "What is the standard nightly hotel limit before local taxes?",
+      "relevant": [
+        {
+          "file_name": "business-travel.md",
+          "chunk_index": 1
+        }
+      ]
+    },
+    {
+      "id": "security-phishing-response",
+      "query": "How and when should an employee report suspected phishing?",
+      "relevant": [
+        {
+          "file_name": "information-security.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "security-lost-device",
+      "query": "Who must be notified about a lost company device, and by when?",
+      "relevant": [
+        {
+          "file_name": "information-security.md",
+          "chunk_index": 1
+        }
+      ]
+    },
+    {
+      "id": "security-policy-identifier",
+      "query": "Which policy has the identifier SEC-210?",
+      "relevant": [
+        {
+          "file_name": "information-security.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "remote-work-days",
+      "query": "How many days per week may an employee work remotely?",
+      "relevant": [
+        {
+          "file_name": "remote-work.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "remote-public-wifi",
+      "query": "What must an employee do before using company systems on public Wi-Fi?",
+      "relevant": [
+        {
+          "file_name": "remote-work.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "retention-support-tickets",
+      "query": "How long are closed customer support tickets retained?",
+      "relevant": [
+        {
+          "file_name": "records-retention.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "retention-expense-records",
+      "query": "How long must expense records be retained?",
+      "relevant": [
+        {
+          "file_name": "records-retention.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "retention-security-logs",
+      "query": "What is the normal retention period for security-access logs?",
+      "relevant": [
+        {
+          "file_name": "records-retention.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "retention-legal-hold",
+      "query": "What happens to scheduled deletion when a legal hold applies?",
+      "relevant": [
+        {
+          "file_name": "records-retention.md",
+          "chunk_index": 0
+        }
+      ]
+    },
+    {
+      "id": "cross-policy-travel-meal-receipt",
+      "query": "What evidence is required for a travel meal costing more than EUR 25?",
+      "relevant": [
+        {
+          "file_name": "business-travel.md",
+          "chunk_index": 1
+        },
+        {
+          "file_name": "expense-reimbursement.md",
+          "chunk_index": 0
+        }
+      ]
+    }
+  ]
+}

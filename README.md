@@ -31,6 +31,8 @@ code was reviewed, adapted, and validated through automated tests.
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
 - Versioned retrieval evaluation datasets with per-query and macro top-k metrics
 - Versioned answer evaluation with reference, abstention, and citation metrics
+- Committed synthetic business-policy corpus with aligned retrieval, answer,
+  and abstention labels plus automated drift checks
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -51,13 +53,16 @@ flowchart LR
     E --> F
     F --> R["Reciprocal-rank fusion"]
     R --> X["Optional cross-encoder reranking"]
+    T["Versioned synthetic policy corpus"] --> B
     J["Labeled retrieval queries"] --> V["Hit, precision, recall, and MRR at k"]
+    T --> J
     X --> V
     X --> G["Bounded numbered evidence blocks"]
     G --> P["LangChain grounded-v2 prompt"]
     P --> H["Local FLAN-T5 generation"]
     H --> I["Answer and deterministic citations"]
     K["Labeled answer cases"] --> W["Reference, abstention, and citation metrics"]
+    T --> K
     I --> W
 ```
 
@@ -76,6 +81,7 @@ flowchart LR
 | Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
 | Evaluate exact metadata relevance labels at a fixed cutoff | Makes retrieval regressions measurable without involving nondeterministic answer generation. |
 | Score references and abstention separately | Prevents correct refusals from being treated as bad answers and exposes models that always answer or always abstain. |
+| Commit a synthetic corpus with its labels | Makes evaluation reproducible without exposing customer data, personal files, or copyrighted source material. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -276,10 +282,10 @@ The report includes these binary metrics at the selected cutoff:
 - **RR@k / MRR@k:** reciprocal rank of the first relevant chunk for each query,
   or `0` for a miss; MRR is the macro average across queries.
 
-Aggregate values are macro averages, so every query has equal weight. The JSON
-format is suitable for saving results; Task 17 will add representative project
-datasets and Task 18 will add reproducible benchmark comparisons and runtime
-measurements.
+Aggregate values are macro averages, so every query has equal weight. The
+committed Task 17 dataset provides manually cross-checked project labels for
+this command. Task 18 will add reproducible benchmark comparisons, runtime
+measurements, and regression thresholds.
 
 ## Answer Evaluation
 
@@ -344,9 +350,52 @@ Lexical overlap is reproducible and useful for regression testing, but it can
 penalize valid paraphrases and reward unsupported wording that resembles a
 reference. Citation behavior checks presence, not whether each claim is entailed
 by its cited evidence. These metrics therefore do not prove semantic
-faithfulness. Task 17 will add reviewed representative cases; Task 18 will add
-run manifests and thresholds, while future production evaluation can add a
-separately calibrated human, NLI, or LLM judge.
+faithfulness. The committed Task 17 cases provide a reproducible development
+baseline; Task 18 will add run manifests and thresholds, while future production
+evaluation can add a separately calibrated human, NLI, or LLM judge.
+
+## Representative Test Dataset
+
+Task 17 adds
+[`asteria-policies-v1`](evaluation/datasets/asteria-policies-v1/README.md), a
+repository-owned synthetic business-policy corpus designed for both evaluation
+commands. Asteria Works is fictional, so the benchmark is safe to publish and
+does not depend on private development documents.
+
+| Asset | Count |
+| --- | ---: |
+| Markdown policy documents | 5 |
+| Default retrieval chunks | 10 |
+| Retrieval cases | 17 |
+| Answerable answer cases | 17 |
+| Expected-abstention cases | 4 |
+
+The cases cover direct facts, paraphrases, policy identifiers, numerical and
+time constraints, similar terminology across documents, multi-document
+evidence, and unsupported questions. Retrieval selectors use portable
+`file_name` and zero-based `chunk_index` metadata under the documented default
+chunking policy.
+
+```powershell
+uv run python -m rag_pipeline index `
+  evaluation/datasets/asteria-policies-v1/documents `
+  --collection-name asteria_policies_v1
+
+uv run python -m rag_pipeline evaluate-retrieval `
+  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
+  --collection-name asteria_policies_v1
+
+uv run python -m rag_pipeline evaluate-answer `
+  evaluation/datasets/asteria-policies-v1/answers-v1.json `
+  --collection-name asteria_policies_v1
+```
+
+Automated tests reproduce all chunks, require every relevance selector to match
+exactly one chunk, align answerable cases with retrieval judgments, and check
+accepted-answer vocabulary against the labeled evidence. The labels were
+manually cross-checked but have not received independent annotator review.
+Task 18 will run and record comparable configurations; Task 17 intentionally
+does not declare quality thresholds or a winning setup.
 
 ## Metadata Filters
 
@@ -523,15 +572,23 @@ The suite covers ingestion, extraction, chunking, chunking experiments, dense
 and sparse embedding contracts, persistent dense and hybrid indexing, typed
 metadata filtering, cosine and RRF retrieval, cross-encoder reranking,
 versioned guarded generation, evidence boundaries, token budgeting, retrieval
-and answer evaluation, deterministic citations, and CLI integration. Provider
-calls use test doubles where appropriate; the local model path has also been
-verified end to end with MiniLM, Qdrant, the MS MARCO cross-encoder, and
-FLAN-T5.
+and answer evaluation, committed dataset integrity, deterministic citations,
+and CLI integration. Provider calls use test doubles where appropriate; the
+local model path has also been verified end to end with MiniLM, Qdrant, the MS
+MARCO cross-encoder, and FLAN-T5.
 
 ## Project Layout
 
 ```text
 .
+|-- evaluation/
+|   |-- README.md
+|   `-- datasets/
+|       `-- asteria-policies-v1/
+|           |-- documents/
+|           |-- answers-v1.json
+|           |-- retrieval-v1.json
+|           `-- README.md
 |-- src/
 |   `-- rag_pipeline/
 |       |-- __main__.py
@@ -555,6 +612,7 @@ FLAN-T5.
 |   |-- test_chunking.py
 |   |-- test_chunking_experiments.py
 |   |-- test_embeddings.py
+|   |-- test_evaluation_datasets.py
 |   |-- test_extraction.py
 |   |-- test_generation.py
 |   |-- test_ingestion.py
@@ -565,6 +623,7 @@ FLAN-T5.
 |   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
 |-- ARCHITECTURE.md
+|-- MANIFEST.in
 |-- PROJECT_BRIEF.md
 |-- ROADMAP.md
 |-- pyproject.toml
@@ -577,19 +636,19 @@ FLAN-T5.
   learned sparse retrieval remain roadmap items.
 - The default reranker is a small English MS MARCO baseline; candidate width,
   latency, domain fit, multilingual quality, and score calibration still need
-  evaluation on representative business queries.
+  Task 18 benchmark runs on representative business queries.
 - Metadata filters currently support exact scalar AND conditions; range, OR,
   list-membership, and policy-composition support are future extensions.
 - The default retrieval threshold is a conservative safety baseline pending
-  calibration against an evaluation dataset.
+  Task 18 calibration against the committed evaluation dataset.
 - Retrieval evaluation currently uses binary exact-match labels and macro
   averages; graded relevance, confidence intervals, and saved run manifests are
-  deferred to the later dataset and benchmarking tasks.
+  deferred to benchmarking and later evaluation work.
 - Citations identify the evidence supplied to the model but are not yet mapped
   to individual answer claims.
 - Answer evaluation uses deterministic lexical references and exact abstention
   labels; semantic faithfulness, claim-level citation support, human judgment,
-  and prompt-injection resilience are not yet benchmarked on a representative
+  and prompt-injection resilience are not established by the small synthetic
   dataset.
 - Local source paths should become stable document IDs or authorized URLs before
   citations are exposed through a service.
