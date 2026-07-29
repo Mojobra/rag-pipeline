@@ -24,6 +24,7 @@ from rag_pipeline.sparse_embeddings import (
 )
 
 if TYPE_CHECKING:
+    from rag_pipeline.benchmarking import BenchmarkConfig
     from rag_pipeline.embeddings import LocalEmbeddingConfig
     from rag_pipeline.generation import GeneratedAnswer
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
@@ -257,6 +258,140 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Run and save an isolated full-pipeline quality benchmark.",
+        description=(
+            "Build a fresh temporary Qdrant index from one corpus, run paired "
+            "retrieval and answer evaluations through the configured LangChain "
+            "pipeline, and save a versioned JSON artifact with provenance, "
+            "quality, latency, and optional regression gates."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "corpus",
+        help=(
+            "File or directory used to build the isolated benchmark index. "
+            "Directories are scanned recursively; supported files are hashed so "
+            "later comparisons can prove they used identical source content."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "retrieval_dataset",
+        help=(
+            "Schema-v1 retrieval evaluation JSON whose queries and exact "
+            "metadata selectors score the freshly indexed corpus."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "answer_dataset",
+        help=(
+            "Schema-v1 answer evaluation JSON containing answerability labels "
+            "and accepted references for end-to-end generation scoring."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--name",
+        default="rag-benchmark",
+        help=(
+            "Human-readable experiment identity stored in the artifact and "
+            "comparison output. Use a stable descriptive name for review and CI "
+            "history (default: rag-benchmark)."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--output",
+        required=True,
+        help=(
+            "Destination .json artifact. Parent directories are created; an "
+            "existing file is preserved unless --overwrite is supplied."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--thresholds",
+        help=(
+            "Optional schema-v1 JSON profile of inclusive minimum quality or "
+            "maximum latency/runtime/storage checks, bound to the input hashes "
+            "and final top-k. A failed gate still writes the report and makes "
+            "the command exit with status 1."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Allow --output to replace an existing benchmark artifact atomically. "
+            "Leave disabled when historical run files must remain immutable."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--work-dir",
+        help=(
+            "Parent directory for the temporary Qdrant database, which is deleted "
+            "after the run. Change it for disk capacity or performance needs; "
+            "storage location can affect latency."
+        ),
+    )
+    _add_chunking_arguments(benchmark_parser)
+    _add_embedding_arguments(
+        benchmark_parser,
+        isolated_collection=True,
+    )
+    _add_hybrid_search_arguments(
+        benchmark_parser,
+        isolated_collection=True,
+    )
+    _add_retrieval_arguments(
+        benchmark_parser,
+        default_score_threshold=DEFAULT_ANSWER_SCORE_THRESHOLD,
+    )
+    _add_reranking_arguments(benchmark_parser)
+    _add_generation_arguments(benchmark_parser)
+    benchmark_parser.add_argument(
+        "--write-batch-size",
+        type=int,
+        default=64,
+        help=(
+            "Chunk vectors written per synchronous Qdrant upsert while building "
+            "the temporary index. Larger batches reduce calls but use more memory "
+            "and can change indexing time (default: 64)."
+        ),
+    )
+
+    comparison_parser = subparsers.add_parser(
+        "compare-benchmarks",
+        help="Compare quality and operational metrics from two saved runs.",
+        description=(
+            "Compare schema-v1 benchmark artifacts after verifying identical "
+            "corpus and dataset fingerprints plus the same top-k cutoff. Model "
+            "and pipeline settings may differ intentionally; operational metrics "
+            "are marked diagnostic when runtime environments differ."
+        ),
+    )
+    comparison_parser.add_argument(
+        "baseline",
+        help=(
+            "Existing schema-v1 benchmark JSON used as the reference. Its corpus, "
+            "labels, and top-k must match the candidate for a valid comparison."
+        ),
+    )
+    comparison_parser.add_argument(
+        "candidate",
+        help=(
+            "Existing schema-v1 benchmark JSON containing the proposed pipeline "
+            "configuration and measurements to compare with the baseline."
+        ),
+    )
+    comparison_parser.add_argument(
+        "--output-format",
+        choices=("table", "json"),
+        default="table",
+        help=(
+            "Render the same metric deltas as a readable table or structured JSON. "
+            "Use JSON for automation and saved review data (default: table)."
+        ),
+    )
+
     answer_parser = subparsers.add_parser(
         "answer",
         help="Generate a cited local answer from retrieved evidence.",
@@ -334,7 +469,11 @@ def _add_retrieval_arguments(
     )
 
 
-def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> None:
+def _add_hybrid_search_arguments(
+    command_parser: argparse.ArgumentParser,
+    *,
+    isolated_collection: bool = False,
+) -> None:
     """Attach dense/hybrid collection and sparse-model options to a command.
 
     The options configure later service construction only; parser assembly does
@@ -347,16 +486,31 @@ def _add_hybrid_search_arguments(command_parser: argparse.ArgumentParser) -> Non
         help=(
             "Qdrant schema and retrieval strategy. Hybrid adds local sparse "
             "vectors and RRF fusion for keyword recall, with extra CPU, storage, "
-            "and latency; must match the existing collection (default: dense)."
+            "and latency; "
+            + (
+                "the benchmark builds the selected schema in isolation "
+                "(default: dense)."
+                if isolated_collection
+                else "must match the existing collection (default: dense)."
+            )
         ),
     )
     command_parser.add_argument(
         "--sparse-model",
         default=DEFAULT_LOCAL_SPARSE_MODEL,
         help=(
-            "FastEmbed sparse model used only in hybrid indexing and queries. "
-            "Changing it alters retrieval and requires a new or rebuilt hybrid "
-            f"collection (default: {DEFAULT_LOCAL_SPARSE_MODEL})."
+            (
+                "FastEmbed sparse model used in the temporary hybrid index and "
+                "queries. Changing it changes keyword retrieval and benchmark "
+                "storage; the index is rebuilt automatically "
+                if isolated_collection
+                else (
+                    "FastEmbed sparse model used only in hybrid indexing and "
+                    "queries. Changing it alters retrieval and requires a new "
+                    "or rebuilt hybrid collection "
+                )
+            )
+            + f"(default: {DEFAULT_LOCAL_SPARSE_MODEL})."
         ),
     )
     command_parser.add_argument(
@@ -543,7 +697,11 @@ def _add_generation_arguments(command_parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
+def _add_embedding_arguments(
+    command_parser: argparse.ArgumentParser,
+    *,
+    isolated_collection: bool = False,
+) -> None:
     """Attach the dense model identity, device, and batching options.
 
     Indexing and retrieval share this group because they must use a compatible
@@ -553,10 +711,18 @@ def _add_embedding_arguments(command_parser: argparse.ArgumentParser) -> None:
         "--model",
         default=DEFAULT_LOCAL_EMBEDDING_MODEL,
         help=(
-            "Sentence Transformers-compatible Hugging Face model for document and "
-            "query dense vectors. Index and query with the same model; changing it "
-            "requires a new or rebuilt collection. "
-            f"Default: {DEFAULT_LOCAL_EMBEDDING_MODEL}."
+            (
+                "Sentence Transformers-compatible Hugging Face model for the "
+                "temporary index and query vectors. Changing it changes quality, "
+                "memory, and latency; the index is rebuilt automatically. "
+                if isolated_collection
+                else (
+                    "Sentence Transformers-compatible Hugging Face model for "
+                    "document and query dense vectors. Index and query with the "
+                    "same model; changing it requires a new or rebuilt collection. "
+                )
+            )
+            + f"Default: {DEFAULT_LOCAL_EMBEDDING_MODEL}."
         ),
     )
     command_parser.add_argument(
@@ -1156,6 +1322,131 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(format_answer_evaluation_table(report))
         return 0
 
+    if args.command == "benchmark":
+        from pathlib import Path
+
+        from rag_pipeline.benchmark_artifacts import (
+            load_benchmark_threshold_profile,
+        )
+        from rag_pipeline.benchmarking import (
+            format_benchmark_summary,
+            run_benchmark,
+            validate_benchmark_output_path,
+            write_benchmark_report,
+        )
+        from rag_pipeline.exceptions import (
+            AnswerEvaluationError,
+            BenchmarkError,
+            ChunkingError,
+            EmbeddingInputError,
+            GenerationInputError,
+            IngestionError,
+            InvalidBenchmarkConfigurationError,
+            InvalidEmbeddingConfigurationError,
+            InvalidGenerationConfigurationError,
+            InvalidRerankingConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidVectorStoreConfigurationError,
+            RerankingInputError,
+            RetrievalEvaluationError,
+            RetrievalInputError,
+            VectorStoreInputError,
+        )
+
+        try:
+            output_path = validate_benchmark_output_path(
+                args.output,
+                overwrite=args.overwrite,
+            )
+            protected_inputs = {
+                Path(args.retrieval_dataset).expanduser().resolve(),
+                Path(args.answer_dataset).expanduser().resolve(),
+            }
+            if args.thresholds is not None:
+                protected_inputs.add(
+                    Path(args.thresholds).expanduser().resolve()
+                )
+            if output_path in protected_inputs:
+                raise InvalidBenchmarkConfigurationError(
+                    "benchmark output must not replace an input dataset or "
+                    "threshold profile."
+                )
+
+            benchmark_config = _build_benchmark_config(args)
+            threshold_profile = (
+                None
+                if args.thresholds is None
+                else load_benchmark_threshold_profile(args.thresholds)
+            )
+            report = run_benchmark(
+                args.corpus,
+                args.retrieval_dataset,
+                args.answer_dataset,
+                config=benchmark_config,
+                thresholds=threshold_profile,
+            )
+            written_path = write_benchmark_report(
+                report,
+                output_path,
+                overwrite=args.overwrite,
+            )
+        except (
+            AnswerEvaluationError,
+            BenchmarkError,
+            ChunkingError,
+            EmbeddingInputError,
+            GenerationInputError,
+            IngestionError,
+            InvalidEmbeddingConfigurationError,
+            InvalidGenerationConfigurationError,
+            InvalidRerankingConfigurationError,
+            InvalidRetrievalConfigurationError,
+            InvalidVectorStoreConfigurationError,
+            RerankingInputError,
+            RetrievalEvaluationError,
+            RetrievalInputError,
+            VectorStoreInputError,
+        ) as exc:
+            parser.error(str(exc))
+
+        print(format_benchmark_summary(report))
+        print(f"Artifact: {written_path}")
+        if report.threshold_gate is not None and not report.threshold_gate.passed:
+            return 1
+        return 0
+
+    if args.command == "compare-benchmarks":
+        import json
+
+        from rag_pipeline.benchmark_artifacts import (
+            benchmark_comparison_to_dict,
+            compare_benchmark_artifacts,
+            format_benchmark_comparison_table,
+            load_benchmark_artifact,
+        )
+        from rag_pipeline.exceptions import BenchmarkError
+
+        try:
+            baseline_artifact = load_benchmark_artifact(args.baseline)
+            candidate_artifact = load_benchmark_artifact(args.candidate)
+            comparison = compare_benchmark_artifacts(
+                baseline_artifact,
+                candidate_artifact,
+            )
+        except BenchmarkError as exc:
+            parser.error(str(exc))
+
+        if args.output_format == "json":
+            print(
+                json.dumps(
+                    benchmark_comparison_to_dict(comparison),
+                    indent=2,
+                )
+            )
+        else:
+            print(format_benchmark_comparison_table(comparison))
+        return 0
+
     if args.command == "answer":
         from rag_pipeline.citations import format_citation
         from rag_pipeline.embeddings import (
@@ -1248,6 +1539,78 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print("RAG Pipeline skeleton is ready.")
     return 0
+
+
+def _build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
+    """Translate CLI fields into the isolated benchmark orchestration contract.
+
+    The function validates every stage configuration but performs no filesystem
+    access, model initialization, inference, or vector-store writes.
+    """
+    from rag_pipeline.benchmarking import BenchmarkConfig
+    from rag_pipeline.chunking import ChunkingConfig
+    from rag_pipeline.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.generation import GenerationConfig, LocalGenerationConfig
+    from rag_pipeline.retrieval import RetrievalConfig, parse_metadata_filter
+    from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
+    from rag_pipeline.vector_store import SearchMode
+
+    embedding_config = LocalEmbeddingConfig(
+        model_name=args.model,
+        model_revision=args.model_revision,
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    search_mode = SearchMode(args.search_mode)
+    sparse_embedding_config = (
+        LocalSparseEmbeddingConfig(
+            model_name=args.sparse_model,
+            cache_dir=args.sparse_cache_dir,
+            batch_size=args.sparse_batch_size,
+            threads=args.sparse_threads,
+        )
+        if search_mode == SearchMode.HYBRID
+        else None
+    )
+    (
+        local_reranker_config,
+        reranking_config,
+        retrieval_top_k,
+    ) = _build_reranking_configs(args)
+    retrieval_config = RetrievalConfig(
+        top_k=retrieval_top_k,
+        score_threshold=args.score_threshold,
+        metadata_filters=tuple(
+            parse_metadata_filter(value)
+            for value in (args.metadata_filters or ())
+        ),
+    )
+    return BenchmarkConfig(
+        name=args.name,
+        chunking=ChunkingConfig(
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+        ),
+        embedding=embedding_config,
+        search_mode=search_mode,
+        sparse_embedding=sparse_embedding_config,
+        write_batch_size=args.write_batch_size,
+        retrieval=retrieval_config,
+        local_reranker=local_reranker_config,
+        reranking=reranking_config,
+        local_generation=LocalGenerationConfig(
+            model_name=args.generation_model,
+            model_revision=args.generation_model_revision,
+            device=args.generation_device,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+        ),
+        generation=GenerationConfig(
+            max_context_characters=args.max_context_characters,
+            max_input_tokens=args.max_input_tokens,
+        ),
+        work_directory=args.work_dir,
+    )
 
 
 def _build_retrieval_runtime_config(

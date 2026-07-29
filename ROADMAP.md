@@ -25,7 +25,7 @@ Task 14 - Prompt optimization
 Task 15 - Retrieval evaluation
 Task 16 - Answer evaluation
 Task 17 - Test datasets: versioned synthetic corpus and paired labels
-Task 18 - Benchmarking
+Task 18 - Benchmarking: isolated indexes, manifests, latency, comparisons, and gates
 
 Planned quality follow-up - Semantic chunking experiment
 

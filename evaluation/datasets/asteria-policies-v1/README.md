@@ -69,6 +69,20 @@ Changing chunking settings invalidates the current selectors. Use a new
 collection name for a clean comparison because indexing updates matching chunk
 IDs but does not define a benchmark-run lifecycle.
 
+Run an isolated benchmark without creating or reusing a persistent collection:
+
+```powershell
+uv run python -m rag_pipeline benchmark `
+  evaluation/datasets/asteria-policies-v1/documents `
+  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
+  evaluation/datasets/asteria-policies-v1/answers-v1.json `
+  --name asteria-dense-local-v1 `
+  --output .rag_data/benchmarks/asteria-dense-local-v1.json
+```
+
+The benchmark command rebuilds the index from this exact corpus, records hashes,
+configuration, quality, latency, and storage, then removes the temporary index.
+
 ## Known Limits
 
 - The corpus is small, synthetic, English-only, and text-native.
@@ -77,5 +91,5 @@ IDs but does not define a benchmark-run lifecycle.
 - Binary retrieval labels do not express degrees of relevance.
 - Reference answers support deterministic lexical scoring, not semantic
   faithfulness judgment.
-- Task 18 will add run manifests, timing, configurations, baseline results, and
-  regression thresholds.
+- Benchmark timings use one local pass; capacity and service-level analysis need
+  controlled warmups, repetitions, concurrency, and production-like hardware.

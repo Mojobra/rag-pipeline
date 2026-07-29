@@ -14,10 +14,11 @@
 10. LLM Generation
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
-13. Monitoring & Observability
-14. API Layer
-15. Frontend/UI
-16. Deployment Infrastructure
+13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
+14. Monitoring & Observability
+15. API Layer
+16. Frontend/UI
+17. Deployment Infrastructure
 
 ---
 
@@ -74,8 +75,9 @@ before production use.
 
 Exact metadata selectors are transparent but depend on stable provenance.
 Portable business datasets should eventually use immutable document and chunk
-version identifiers instead of filenames and chunk positions. Latency capture,
-benchmark manifests, and thresholds remain Task 18 work.
+version identifiers instead of filenames and chunk positions. The benchmark
+layer now captures latency and immutable input fingerprints around these
+metrics.
 
 ---
 
@@ -98,8 +100,9 @@ benchmark manifests, and thresholds remain Task 18 work.
 These deterministic metrics are regression signals, not semantic judges.
 Lexical overlap does not establish factual entailment, and citation presence
 does not prove claim-level support. The committed synthetic dataset supplies 17
-answerable and four expected-abstention cases. Benchmark manifests, independent
-annotation, human review, and a calibrated NLI or LLM judge remain future work.
+answerable and four expected-abstention cases. Benchmark manifests are now
+implemented; independent annotation, human review, and a calibrated NLI or LLM
+judge remain future work.
 
 ---
 
@@ -121,8 +124,45 @@ annotation, human review, and a calibrated NLI or LLM judge remain future work.
 Synthetic data is safe, portable, and reviewable, but it cannot represent the
 full language, layout, security, or ambiguity of production documents. The
 labels were manually cross-checked but do not yet have independent annotator
-agreement. Task 18 will define run manifests and regression thresholds without
-changing these ground-truth assets.
+agreement. Benchmark settings and thresholds remain separate from these
+ground-truth assets so dataset versions do not encode a preferred pipeline.
+
+---
+
+## Current Benchmark Contract
+
+- `benchmark` starts from one explicit corpus and the paired schema-v1
+  evaluation files, then builds a fresh temporary Qdrant collection. The index
+  is closed and deleted after its storage size is recorded.
+- Corpus relative paths and bytes plus both dataset files receive SHA-256
+  fingerprints. Artifacts omit absolute corpus, cache, output, and work paths.
+- One manifest records chunking, dense and optional sparse models, retrieval,
+  filters, reranking, generation, prompt/token limits, devices, batching, Git
+  state, package versions, CPU/platform data, and available CUDA devices.
+- Models are initialized once. Reports separate model-load, extraction,
+  chunking, embedding, index, retrieval-evaluation, and answer-evaluation stage
+  durations, with ordered per-case retrieval and end-to-end answer latency.
+- Optional strict threshold profiles apply inclusive minimum or maximum bounds
+  to allowlisted quality and operational metrics. Profiles bind to corpus and
+  dataset hashes plus final top-k and fail before model loading on a mismatch.
+  The report is still written when a metric gate fails, and the CLI returns
+  status `1`.
+- `compare-benchmarks` requires identical corpus and dataset hashes and final
+  top-k. Pipeline configuration may differ intentionally. Operational deltas
+  are marked diagnostic when the recorded environment or devices differ.
+
+Fresh indexing is slower than reading an existing collection, but it prevents
+stale points and unknown chunking state from producing misleading comparisons.
+The current timing model is one local wall-clock pass, not a throughput or load
+benchmark. Production evolution should add configurable warmups and repetitions,
+confidence intervals, memory and accelerator telemetry, request concurrency,
+cost metrics, durable artifact storage, retention policies, and CI calibration
+on controlled runners.
+
+Artifacts include evaluation queries and generated answers. Reports created from
+non-synthetic data therefore require the same authorization, privacy, retention,
+and deletion controls as their source documents. Quality thresholds should be
+approved from reviewed baselines; example values are not production defaults.
 
 ---
 
