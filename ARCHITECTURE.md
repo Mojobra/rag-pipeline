@@ -15,10 +15,11 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Monitoring & Observability
-15. API Layer
-16. Frontend/UI
-17. Deployment Infrastructure
+14. Modular CLI Adapter
+15. Monitoring & Observability
+16. API Layer
+17. Frontend/UI
+18. Deployment Infrastructure
 
 ---
 
@@ -38,6 +39,31 @@ Production hardening
 
 Phase 5:
 Enterprise integrations
+
+---
+
+## Current CLI Adapter Contract
+
+- `rag_pipeline.__main__` remains the stable module entry point and re-exports
+  `main` and `build_parser`, but it owns no command behavior.
+- `rag_pipeline.cli.app` constructs the root parser and dispatches through an
+  explicit handler attached by each subcommand. There is no central conditional
+  covering every command.
+- Shared option groups define one embedding, chunking, retrieval, reranking,
+  generation, and storage vocabulary across commands.
+- A dedicated configuration boundary translates dynamic argparse values into
+  the existing validated stage dataclasses before model or storage side effects.
+- Command handlers are grouped by document, indexing, query, evaluation, and
+  benchmark responsibilities. Domain services remain outside the CLI package.
+- Provider factories and Qdrant construction stay inside command handlers so
+  parser creation and help output do not initialize models, download files, or
+  open a database.
+- Terminal-specific retrieval and answer rendering is isolated from service
+  orchestration and can be tested without provider calls.
+
+This is an adapter refactor, not a new application-service layer. Task 19 should
+introduce transport-neutral use cases only where both CLI and FastAPI genuinely
+need the same lifecycle orchestration; the API must not import CLI handlers.
 
 ---
 
