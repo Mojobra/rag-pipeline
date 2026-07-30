@@ -9,49 +9,25 @@ vector-store I/O.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from rag_pipeline.application.indexing import IndexingPipelineConfig
+from rag_pipeline.application.retrieval import RetrievalPipelineConfig
+
 if TYPE_CHECKING:
-    from rag_pipeline.benchmarking import BenchmarkConfig
+    from rag_pipeline.benchmark_config import BenchmarkConfig
     from rag_pipeline.chunking import ChunkingConfig
     from rag_pipeline.embeddings import LocalEmbeddingConfig
     from rag_pipeline.generation import GenerationConfig, LocalGenerationConfig
     from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
-    from rag_pipeline.retrieval import RetrievalConfig
     from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
-    from rag_pipeline.vector_store import SearchMode, VectorStoreConfig
+    from rag_pipeline.vector_store import SearchMode
 
-
-@dataclass(frozen=True, slots=True)
-class IndexCommandConfig:
-    """Validated settings needed to build or update a local collection.
-
-    The object keeps indexing handlers focused on orchestration while retaining
-    separate dense, optional sparse, chunking, and Qdrant contracts.
-    """
-
-    chunking: ChunkingConfig
-    embedding: LocalEmbeddingConfig
-    vector_store: VectorStoreConfig
-    sparse_embedding: LocalSparseEmbeddingConfig | None
-
-
-@dataclass(frozen=True, slots=True)
-class RetrievalRuntimeConfig:
-    """Validated service settings shared by retrieval-based CLI commands.
-
-    Interactive retrieval, evaluations, and answer generation use this same
-    contract so common flags cannot be interpreted differently. Provider
-    resources are still initialized lazily by each command handler.
-    """
-
-    embedding: LocalEmbeddingConfig
-    vector_store: VectorStoreConfig
-    sparse_embedding: LocalSparseEmbeddingConfig | None
-    retrieval: RetrievalConfig
-    local_reranker: LocalRerankerConfig | None
-    reranking: RerankingConfig | None
+# Backward-compatible aliases for callers that imported the pre-refactor CLI
+# configuration names. New code should use the transport-neutral application
+# contracts directly.
+IndexCommandConfig = IndexingPipelineConfig
+RetrievalRuntimeConfig = RetrievalPipelineConfig
 
 
 def build_chunking_config(args: argparse.Namespace) -> ChunkingConfig:
@@ -99,7 +75,7 @@ def build_generation_configs(
 
 def build_index_command_config(
     args: argparse.Namespace,
-) -> IndexCommandConfig:
+) -> IndexingPipelineConfig:
     """Assemble validated chunking, embedding, sparse, and Qdrant settings.
 
     The builder performs no document loading or inference. Sparse settings are
@@ -124,7 +100,7 @@ def build_index_command_config(
         args,
         search_mode=search_mode,
     )
-    return IndexCommandConfig(
+    return IndexingPipelineConfig(
         chunking=chunking_config,
         embedding=embedding_config,
         vector_store=vector_store_config,
@@ -138,7 +114,7 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
     Every stage is validated here, but the function performs no filesystem
     access, model initialization, inference, or vector-store writes.
     """
-    from rag_pipeline.benchmarking import BenchmarkConfig
+    from rag_pipeline.benchmark_config import BenchmarkConfig
     from rag_pipeline.retrieval import RetrievalConfig, parse_metadata_filter
     from rag_pipeline.vector_store import SearchMode
 
@@ -157,8 +133,7 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
         top_k=retrieval_top_k,
         score_threshold=args.score_threshold,
         metadata_filters=tuple(
-            parse_metadata_filter(value)
-            for value in (args.metadata_filters or ())
+            parse_metadata_filter(value) for value in (args.metadata_filters or ())
         ),
     )
     chunking_config = build_chunking_config(args)
@@ -181,7 +156,7 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
 
 def build_retrieval_runtime_config(
     args: argparse.Namespace,
-) -> RetrievalRuntimeConfig:
+) -> RetrievalPipelineConfig:
     """Translate shared CLI fields into one validated retrieval contract.
 
     Dense and optional sparse models, Qdrant location, result limits, metadata
@@ -211,11 +186,10 @@ def build_retrieval_runtime_config(
         top_k=retrieval_top_k,
         score_threshold=args.score_threshold,
         metadata_filters=tuple(
-            parse_metadata_filter(value)
-            for value in (args.metadata_filters or ())
+            parse_metadata_filter(value) for value in (args.metadata_filters or ())
         ),
     )
-    return RetrievalRuntimeConfig(
+    return RetrievalPipelineConfig(
         embedding=embedding_config,
         vector_store=vector_store_config,
         sparse_embedding=sparse_embedding_config,

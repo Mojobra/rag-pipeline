@@ -19,7 +19,6 @@ from rag_pipeline.sparse_embeddings import (
     DEFAULT_LOCAL_SPARSE_MODEL,
 )
 
-
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
 
 

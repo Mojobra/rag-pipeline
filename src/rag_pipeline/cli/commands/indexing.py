@@ -14,7 +14,7 @@ from rag_pipeline.cli.options import (
 
 
 def register_indexing_commands(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register embedding diagnostics and persistent indexing handlers."""
     embed_parser = subparsers.add_parser(
@@ -66,19 +66,15 @@ def run_embed(
     The command may initialize or download the selected model, but it performs
     no vector-store writes.
     """
-    from rag_pipeline.chunking import (
-        InvalidChunkingConfigurationError,
-        chunk_documents,
-    )
+    from rag_pipeline.application.indexing import preview_local_embeddings
     from rag_pipeline.cli.config import (
         build_chunking_config,
         build_embedding_config,
     )
-    from rag_pipeline.embeddings import (
+    from rag_pipeline.exceptions import (
+        InvalidChunkingConfigurationError,
         InvalidEmbeddingConfigurationError,
-        create_local_embedding_service,
     )
-    from rag_pipeline.ingestion import load_documents
 
     try:
         chunking_config = build_chunking_config(args)
@@ -89,19 +85,21 @@ def run_embed(
     ) as exc:
         parser.error(str(exc))
 
-    documents = load_documents(args.paths, recursive=args.recursive)
-    chunks = chunk_documents(documents, config=chunking_config)
-    service = create_local_embedding_service(embedding_config)
-    embedded_documents = service.embed_documents(chunks)
+    preview = preview_local_embeddings(
+        args.paths,
+        recursive=args.recursive,
+        chunking=chunking_config,
+        embedding=embedding_config,
+    )
 
-    if not embedded_documents:
+    if preview.dimension is None:
         print("Embedded 0 chunk(s); no vectors were created.")
         return 0
 
     print(
-        f"Embedded {len(embedded_documents)} chunk(s) into "
-        f"{embedded_documents[0].dimension}-dimensional vectors using "
-        f"{service.model_identifier}."
+        f"Embedded {preview.chunk_count} chunk(s) into "
+        f"{preview.dimension}-dimensional vectors using "
+        f"{preview.model_identifier}."
     )
     return 0
 
@@ -115,57 +113,30 @@ def run_index(
     The handler performs document and model I/O and mutates the selected
     collection. Configuration validation occurs before those side effects.
     """
-    from rag_pipeline.chunking import (
-        InvalidChunkingConfigurationError,
-        chunk_documents,
-    )
+    from rag_pipeline.application.indexing import index_local_documents
     from rag_pipeline.cli.config import build_index_command_config
-    from rag_pipeline.embeddings import (
+    from rag_pipeline.exceptions import (
+        InvalidChunkingConfigurationError,
         InvalidEmbeddingConfigurationError,
-        create_local_embedding_service,
+        InvalidPipelineConfigurationError,
+        InvalidVectorStoreConfigurationError,
     )
-    from rag_pipeline.exceptions import InvalidVectorStoreConfigurationError
-    from rag_pipeline.ingestion import load_documents
-    from rag_pipeline.sparse_embeddings import (
-        create_local_sparse_embedding_service,
-    )
-    from rag_pipeline.vector_store import LocalVectorStore
 
     try:
         config = build_index_command_config(args)
     except (
         InvalidChunkingConfigurationError,
         InvalidEmbeddingConfigurationError,
+        InvalidPipelineConfigurationError,
         InvalidVectorStoreConfigurationError,
     ) as exc:
         parser.error(str(exc))
 
-    documents = load_documents(args.paths, recursive=args.recursive)
-    chunks = chunk_documents(documents, config=config.chunking)
-    embedding_service = create_local_embedding_service(config.embedding)
-    embedded_documents = embedding_service.embed_documents(chunks)
-    sparse_embedding_service = (
-        create_local_sparse_embedding_service(config.sparse_embedding)
-        if config.sparse_embedding is not None
-        else None
+    result = index_local_documents(
+        args.paths,
+        recursive=args.recursive,
+        config=config,
     )
-    sparse_vectors = (
-        sparse_embedding_service.embed_documents(chunks)
-        if sparse_embedding_service is not None
-        else None
-    )
-
-    with LocalVectorStore(config.vector_store) as vector_store:
-        result = vector_store.index(
-            embedded_documents,
-            model_identifier=embedding_service.model_identifier,
-            sparse_vectors=sparse_vectors,
-            sparse_model_identifier=(
-                None
-                if sparse_embedding_service is None
-                else sparse_embedding_service.model_identifier
-            ),
-        )
 
     print(
         f"Indexed {result.indexed_count} chunk(s) into "

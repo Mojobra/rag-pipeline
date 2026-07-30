@@ -1,6 +1,7 @@
+"""Test Qdrant persistence, schema compatibility, and deterministic upserts."""
+
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,19 +9,14 @@ from uuid import UUID
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.embeddings import EmbeddedDocument  # noqa: E402
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.embeddings import EmbeddedDocument
+from rag_pipeline.exceptions import (
     InvalidVectorStoreConfigurationError,
     VectorStoreCompatibilityError,
     VectorStoreInputError,
 )
-from rag_pipeline.sparse_embeddings import SparseEmbeddingVector  # noqa: E402
-from rag_pipeline.vector_store import (  # noqa: E402
+from rag_pipeline.sparse_embeddings import SparseEmbeddingVector
+from rag_pipeline.vector_store import (
     LocalVectorStore,
     SearchMode,
     VectorStoreConfig,
@@ -74,7 +70,9 @@ class LocalVectorStoreTests(unittest.TestCase):
         self.assertEqual(result.embedding_dimension, 2)
         self.assertEqual(result.embedding_model, "test-model@revision")
         self.assertEqual(len(stored_documents), 2)
-        self.assertTrue(all(UUID(point_id).version == 5 for point_id in result.point_ids))
+        self.assertTrue(
+            all(UUID(point_id).version == 5 for point_id in result.point_ids)
+        )
 
         stored_by_id = {
             document.metadata["_id"]: document for document in stored_documents

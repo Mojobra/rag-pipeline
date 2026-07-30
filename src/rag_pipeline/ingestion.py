@@ -18,7 +18,6 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.extraction import SUPPORTED_FILE_EXTENSIONS, extract_documents
 
-
 PathInput = str | Path
 
 TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".html", ".htm"})

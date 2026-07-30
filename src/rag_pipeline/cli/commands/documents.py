@@ -12,7 +12,7 @@ from rag_pipeline.cli.options import (
 
 
 def register_document_commands(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register ingestion and chunking commands with explicit handlers."""
     ingest_parser = subparsers.add_parser(
@@ -96,11 +96,9 @@ def run_chunk(
     parser: argparse.ArgumentParser,
 ) -> int:
     """Load and split documents, reporting counts without model inference."""
-    from rag_pipeline.chunking import (
-        InvalidChunkingConfigurationError,
-        chunk_documents,
-    )
+    from rag_pipeline.chunking import chunk_documents
     from rag_pipeline.cli.config import build_chunking_config
+    from rag_pipeline.exceptions import InvalidChunkingConfigurationError
     from rag_pipeline.ingestion import load_documents
 
     try:
@@ -134,8 +132,7 @@ def run_chunk_experiment(
             DEFAULT_CHUNKING_CANDIDATES
             if args.chunking_candidates is None
             else tuple(
-                parse_chunking_candidate(value)
-                for value in args.chunking_candidates
+                parse_chunking_candidate(value) for value in args.chunking_candidates
             )
         )
         documents = load_documents(args.paths, recursive=args.recursive)

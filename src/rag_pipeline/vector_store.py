@@ -6,16 +6,16 @@ deterministic point identity, idempotent batched writes, and LangChain adapters.
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from hashlib import sha256
-import json
 from math import isfinite
 from numbers import Real
 from pathlib import Path
-import sqlite3
-from typing import Any
+from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from langchain_core.documents import Document
@@ -37,7 +37,6 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.sparse_embeddings import SparseEmbeddingVector
 
-
 DEFAULT_VECTOR_STORE_PATH = Path(".rag_data/qdrant")
 DEFAULT_COLLECTION_NAME = "rag_documents"
 VECTOR_STORE_SCHEMA_VERSION = 1
@@ -50,7 +49,8 @@ _POINT_ID_NAMESPACE = uuid5(
 )
 
 
-class SearchMode(str, Enum):
+# Retain the established str-plus-Enum semantics for public compatibility.
+class SearchMode(str, Enum):  # noqa: UP042
     """Vector representations supported by a versioned Qdrant collection.
 
     Dense and hybrid modes use intentionally different schemas so retrieval
@@ -67,7 +67,7 @@ class VectorStoreConfig:
 
     A ``None`` path selects an in-memory database for tests; any filesystem path
     is resolved before the client is opened. Search mode determines the expected
-    collection schema.
+    collection schema and accepts either its enum or the matching string.
     """
 
     path: str | Path | None = DEFAULT_VECTOR_STORE_PATH
@@ -86,7 +86,10 @@ class VectorStoreConfig:
                 raise InvalidVectorStoreConfigurationError(
                     "path must be non-empty when provided."
                 )
-        if not isinstance(self.collection_name, str) or not self.collection_name.strip():
+        if (
+            not isinstance(self.collection_name, str)
+            or not self.collection_name.strip()
+        ):
             raise InvalidVectorStoreConfigurationError(
                 "collection_name must be a non-empty string."
             )
@@ -212,7 +215,7 @@ class LocalVectorStore:
                 point_ids=(),
                 embedding_model=model_identifier,
                 embedding_dimension=None,
-                search_mode=self.config.search_mode,
+                search_mode=cast(SearchMode, self.config.search_mode),
                 sparse_embedding_model=sparse_model_identifier,
             )
 
@@ -247,7 +250,7 @@ class LocalVectorStore:
             point_ids=tuple(point_ids),
             embedding_model=model_identifier,
             embedding_dimension=dimension,
-            search_mode=self.config.search_mode,
+            search_mode=cast(SearchMode, self.config.search_mode),
             sparse_embedding_model=sparse_model_identifier,
         )
 
@@ -425,8 +428,8 @@ class LocalVectorStore:
         non-empty content, and JSON-safe metadata. It prepares named dense/sparse
         vectors for hybrid mode but performs no database writes itself.
         """
-        points = []
-        point_ids = []
+        points: list[models.PointStruct] = []
+        point_ids: list[str] = []
         seen_ids: set[str] = set()
         dimension: int | None = None
 
@@ -471,14 +474,18 @@ class LocalVectorStore:
                     )
                 metadata["sparse_embedding_model"] = sparse_model_identifier
                 sparse_vector = sparse_vectors[index]
-                point_vector: list[float] | dict[str, object] = {
+                hybrid_vector: dict[
+                    str,
+                    list[float] | models.SparseVector,
+                ] = {
                     DENSE_VECTOR_NAME: vector,
                 }
                 if not sparse_vector.is_empty:
-                    point_vector[SPARSE_VECTOR_NAME] = models.SparseVector(
+                    hybrid_vector[SPARSE_VECTOR_NAME] = models.SparseVector(
                         indices=list(sparse_vector.indices),
                         values=list(sparse_vector.values),
                     )
+                point_vector = cast(models.VectorStruct, hybrid_vector)
             else:
                 point_vector = vector
             points.append(
@@ -675,8 +682,10 @@ def build_chunk_point_id(document: Document) -> str:
         "chunk_index": chunk_index,
     }
 
-    if source is None or isinstance(chunk_index, bool) or not isinstance(
-        chunk_index, int
+    if (
+        source is None
+        or isinstance(chunk_index, bool)
+        or not isinstance(chunk_index, int)
     ):
         identity["content_sha256"] = sha256(
             document.page_content.encode("utf-8")
@@ -692,7 +701,7 @@ def build_chunk_point_id(document: Document) -> str:
     return str(uuid5(_POINT_ID_NAMESPACE, canonical_identity))
 
 
-def _validate_vector(vector: Iterable[Real], *, index: int) -> list[float]:
+def _validate_vector(vector: Iterable[object], *, index: int) -> list[float]:
     """Normalize one dense vector to finite floats for Qdrant persistence.
 
     Empty vectors, booleans, non-numeric values, NaN, and infinity are rejected
@@ -700,9 +709,7 @@ def _validate_vector(vector: Iterable[Real], *, index: int) -> list[float]:
     """
     values = list(vector)
     if not values:
-        raise VectorStoreInputError(
-            f"embedded_documents[{index}] has an empty vector."
-        )
+        raise VectorStoreInputError(f"embedded_documents[{index}] has an empty vector.")
 
     normalized = []
     for value_index, value in enumerate(values):
@@ -737,7 +744,7 @@ def _validate_sparse_vector(
             f"sparse_vectors[{index}] has different index and value counts."
         )
 
-    pairs = []
+    pairs: list[tuple[int, float]] = []
     seen_indices: set[int] = set()
     for value_index, (sparse_index, value) in enumerate(
         zip(vector.indices, vector.values, strict=True)
@@ -800,9 +807,7 @@ def _json_safe_metadata(metadata: dict[str, Any], *, index: int) -> dict[str, An
 
 def _validate_model_identifier(model_identifier: object) -> None:
     if not isinstance(model_identifier, str) or not model_identifier.strip():
-        raise VectorStoreInputError(
-            "model_identifier must be a non-empty string."
-        )
+        raise VectorStoreInputError("model_identifier must be a non-empty string.")
 
 
 def _validate_sparse_model_identifier(model_identifier: object) -> None:

@@ -13,7 +13,6 @@ from langchain_core.documents import Document
 
 from rag_pipeline.exceptions import TextExtractionError, UnsupportedDocumentTypeError
 
-
 PathInput = str | Path
 
 TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".html", ".htm"})

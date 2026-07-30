@@ -1,18 +1,14 @@
+"""Test deterministic document discovery and multi-format ingestion."""
+
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.ingestion import (  # noqa: E402
+from rag_pipeline.ingestion import (
     IngestionPathNotFoundError,
     UnsupportedDocumentTypeError,
     discover_files,

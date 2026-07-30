@@ -1,24 +1,19 @@
+"""Test reproducible comparison metrics for candidate chunking policies."""
+
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.chunking import ChunkingConfig  # noqa: E402
-from rag_pipeline.chunking_experiments import (  # noqa: E402
+from rag_pipeline.chunking import ChunkingConfig
+from rag_pipeline.chunking_experiments import (
     chunking_experiment_to_dict,
     format_chunking_experiment_table,
     parse_chunking_candidate,
     run_chunking_experiment,
 )
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     InvalidChunkingExperimentError,
 )
 

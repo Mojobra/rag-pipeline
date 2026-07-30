@@ -12,6 +12,10 @@ class RagPipelineError(Exception):
     """Base error for pipeline failures."""
 
 
+class InvalidPipelineConfigurationError(RagPipelineError, ValueError):
+    """Raised when individually valid stage settings conflict as a workflow."""
+
+
 class IngestionError(RagPipelineError):
     """Base error for document ingestion failures."""
 

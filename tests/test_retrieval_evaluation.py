@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -13,11 +12,6 @@ from unittest.mock import patch
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
 
 
 def make_result(
@@ -84,9 +78,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
     def test_relevance_matching_requires_all_values_and_matching_types(self) -> None:
         from rag_pipeline.retrieval_evaluation import RelevantDocument
 
-        relevant_document = RelevantDocument(
-            {"file_name": "policy.pdf", "page": 1}
-        )
+        relevant_document = RelevantDocument({"file_name": "policy.pdf", "page": 1})
 
         self.assertTrue(
             relevant_document.matches(
@@ -130,21 +122,15 @@ class RetrievalEvaluationTests(unittest.TestCase):
                     case_id="expense",
                     query="Expense query",
                     relevant_documents=(
-                        RelevantDocument(
-                            {"document_id": "expense", "chunk_index": 1}
-                        ),
-                        RelevantDocument(
-                            {"document_id": "expense", "chunk_index": 2}
-                        ),
+                        RelevantDocument({"document_id": "expense", "chunk_index": 1}),
+                        RelevantDocument({"document_id": "expense", "chunk_index": 2}),
                     ),
                 ),
                 RetrievalEvaluationCase(
                     case_id="leave",
                     query="Leave query",
                     relevant_documents=(
-                        RelevantDocument(
-                            {"document_id": "leave", "chunk_index": 0}
-                        ),
+                        RelevantDocument({"document_id": "leave", "chunk_index": 0}),
                     ),
                 ),
             ),
@@ -228,9 +214,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
                         json.dumps(payload),
                         encoding="utf-8",
                     )
-                    with self.assertRaises(
-                        InvalidRetrievalEvaluationDatasetError
-                    ):
+                    with self.assertRaises(InvalidRetrievalEvaluationDatasetError):
                         load_retrieval_evaluation_dataset(dataset_path)
 
     def test_rejects_invalid_cutoff_and_noncontiguous_ranking(self) -> None:
@@ -248,9 +232,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 RetrievalEvaluationCase(
                     case_id="case-1",
                     query="Question",
-                    relevant_documents=(
-                        RelevantDocument({"document_id": "expected"}),
-                    ),
+                    relevant_documents=(RelevantDocument({"document_id": "expected"}),),
                 ),
             ),
         )
@@ -266,9 +248,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
         ):
             evaluate_retrieval(
                 dataset,
-                lambda _: [
-                    make_result(2, document_id="expected", chunk_index=0)
-                ],
+                lambda _: [make_result(2, document_id="expected", chunk_index=0)],
                 top_k=1,
             )
 
@@ -293,11 +273,7 @@ class RetrievalEvaluationCliTests(unittest.TestCase):
                 ]
 
             def embed_query(self, text: str) -> list[float]:
-                return (
-                    [1.0, 0.0]
-                    if "receipt" in text.lower()
-                    else [0.0, 1.0]
-                )
+                return [1.0, 0.0] if "receipt" in text.lower() else [0.0, 1.0]
 
         embedding_service = EmbeddingService(
             PolicyEmbeddings(),
@@ -328,16 +304,12 @@ class RetrievalEvaluationCliTests(unittest.TestCase):
                 {
                     "id": "expenses",
                     "query": "Which receipt is required?",
-                    "relevant": [
-                        {"file_name": "expenses.txt", "chunk_index": 0}
-                    ],
+                    "relevant": [{"file_name": "expenses.txt", "chunk_index": 0}],
                 },
                 {
                     "id": "leave",
                     "query": "Where are leave requests submitted?",
-                    "relevant": [
-                        {"file_name": "leave.txt", "chunk_index": 0}
-                    ],
+                    "relevant": [{"file_name": "leave.txt", "chunk_index": 0}],
                 },
             ],
         }

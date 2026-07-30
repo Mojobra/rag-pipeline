@@ -1,7 +1,8 @@
+"""Test sparse embedding normalization and local BM25 provider wiring."""
+
 from __future__ import annotations
 
 import math
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,17 +11,12 @@ from unittest.mock import patch
 from langchain_core.documents import Document
 from langchain_qdrant import SparseEmbeddings, SparseVector
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     EmbeddingInputError,
     EmbeddingProviderError,
     InvalidEmbeddingConfigurationError,
 )
-from rag_pipeline.sparse_embeddings import (  # noqa: E402
+from rag_pipeline.sparse_embeddings import (
     LocalSparseEmbeddingConfig,
     SparseEmbeddingService,
     SparseEmbeddingVector,

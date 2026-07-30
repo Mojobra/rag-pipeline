@@ -44,8 +44,7 @@ def format_retrieval_results(results: Sequence[RetrievalResult]) -> str:
                 f" reranker_model={result.reranker_model}"
             )
         lines.append(
-            f"{result.rank}. score={result.score:.4f} {location} "
-            f"{ranking_details}"
+            f"{result.rank}. score={result.score:.4f} {location} {ranking_details}"
         )
         lines.append(f"   {_content_preview(result.document.page_content)}")
     return "\n".join(lines)

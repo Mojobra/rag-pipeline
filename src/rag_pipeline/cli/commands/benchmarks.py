@@ -18,7 +18,7 @@ from rag_pipeline.cli.options import (
 
 
 def register_benchmark_commands(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     """Register isolated benchmark execution and artifact comparison handlers."""
     benchmark_parser = subparsers.add_parser(
@@ -167,15 +167,15 @@ def run_benchmark(
     Validation protects input files before corpus processing or model loading.
     A failed configured metric gate still writes the report and returns status 1.
     """
-    from rag_pipeline.benchmark_artifacts import (
-        load_benchmark_threshold_profile,
-    )
-    from rag_pipeline.benchmarking import (
+    from rag_pipeline.benchmark_reporting import (
         format_benchmark_summary,
-        run_benchmark as execute_benchmark,
         validate_benchmark_output_path,
         write_benchmark_report,
     )
+    from rag_pipeline.benchmark_thresholds import (
+        load_benchmark_threshold_profile,
+    )
+    from rag_pipeline.benchmarking import run_benchmark as execute_benchmark
     from rag_pipeline.cli.config import build_benchmark_config
     from rag_pipeline.exceptions import (
         AnswerEvaluationError,

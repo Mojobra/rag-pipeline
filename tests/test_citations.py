@@ -1,28 +1,23 @@
+"""Test deterministic citation construction from retrieval provenance."""
+
 from __future__ import annotations
 
 import math
-import sys
 import unittest
-from pathlib import Path
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.citations import (  # noqa: E402
+from rag_pipeline.citations import (
     CitationConfig,
     build_citation,
     build_citations,
     format_citation,
 )
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     CitationInputError,
     InvalidCitationConfigurationError,
 )
-from rag_pipeline.retrieval import RetrievalResult  # noqa: E402
+from rag_pipeline.retrieval import RetrievalResult
 
 
 def make_result(
@@ -114,9 +109,7 @@ class CitationTests(unittest.TestCase):
                 "page metadata",
             ),
             (
-                make_result(
-                    metadata={"source": "policy.pdf", "start_index": 10}
-                ),
+                make_result(metadata={"source": "policy.pdf", "start_index": 10}),
                 "provided together",
             ),
             (make_result(score=math.nan), "score must be finite"),
@@ -127,7 +120,9 @@ class CitationTests(unittest.TestCase):
                 with self.assertRaisesRegex(CitationInputError, message):
                     build_citation(result, number=1)
 
-        with self.assertRaisesRegex(CitationInputError, "evidence text cannot be empty"):
+        with self.assertRaisesRegex(
+            CitationInputError, "evidence text cannot be empty"
+        ):
             build_citation(make_result(), number=1, evidence_text=" ")
 
         with self.assertRaisesRegex(CitationInputError, "must be a prefix"):

@@ -18,7 +18,6 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.retrieval import RetrievalResult
 
-
 DEFAULT_CITATION_EXCERPT_CHARACTERS = 240
 
 
@@ -122,17 +121,11 @@ def build_citation(
         raise CitationInputError(
             "start_index and end_index metadata must be provided together."
         )
-    if (
-        start_index is not None
-        and end_index is not None
-        and end_index < start_index
-    ):
+    if start_index is not None and end_index is not None and end_index < start_index:
         raise CitationInputError("end_index metadata cannot precede start_index.")
 
     chunk_id = metadata.get("chunk_id")
-    if chunk_id is not None and (
-        not isinstance(chunk_id, str) or not chunk_id.strip()
-    ):
+    if chunk_id is not None and (not isinstance(chunk_id, str) or not chunk_id.strip()):
         raise CitationInputError("chunk_id metadata must be a non-empty string.")
 
     document_content = retrieval_result.document.page_content.strip()
@@ -209,9 +202,7 @@ def format_citation(citation: Citation) -> str:
     if citation.chunk_index is not None:
         location.append(f"chunk {citation.chunk_index + 1}")
     if citation.start_index is not None and citation.end_index is not None:
-        location.append(
-            f"characters {citation.start_index}-{citation.end_index}"
-        )
+        location.append(f"characters {citation.start_index}-{citation.end_index}")
 
     suffix = f" ({', '.join(location)})" if location else ""
     return f"{citation.label} {citation.source}{suffix}\n    {citation.excerpt}"
@@ -225,9 +216,7 @@ def _optional_nonnegative_integer(
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise CitationInputError(
-            f"{name} metadata must be a non-negative integer."
-        )
+        raise CitationInputError(f"{name} metadata must be a non-negative integer.")
     return value
 
 

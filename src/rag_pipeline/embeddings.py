@@ -20,7 +20,6 @@ from rag_pipeline.exceptions import (
     InvalidEmbeddingConfigurationError,
 )
 
-
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -46,9 +45,7 @@ class LocalEmbeddingConfig:
         if self.model_revision is not None:
             _validate_non_empty_string("model_revision", self.model_revision)
         if isinstance(self.batch_size, bool) or not isinstance(self.batch_size, int):
-            raise InvalidEmbeddingConfigurationError(
-                "batch_size must be an integer."
-            )
+            raise InvalidEmbeddingConfigurationError("batch_size must be an integer.")
         if self.batch_size <= 0:
             raise InvalidEmbeddingConfigurationError(
                 "batch_size must be greater than zero."
@@ -93,7 +90,9 @@ class EmbeddingService:
         model_revision: str | None = None,
     ) -> None:
         if not isinstance(embeddings, Embeddings):
-            raise TypeError("embeddings must implement LangChain's Embeddings interface.")
+            raise TypeError(
+                "embeddings must implement LangChain's Embeddings interface."
+            )
         _validate_non_empty_string("model_name", model_name)
         if model_revision is not None:
             _validate_non_empty_string("model_revision", model_revision)
@@ -121,9 +120,7 @@ class EmbeddingService:
     def dimension(self) -> int | None:
         return self._dimension
 
-    def embed_documents(
-        self, documents: Iterable[Document]
-    ) -> list[EmbeddedDocument]:
+    def embed_documents(self, documents: Iterable[Document]) -> list[EmbeddedDocument]:
         """Embed non-empty documents and preserve their input order.
 
         The input iterable is materialized and sent to the configured provider
@@ -141,9 +138,7 @@ class EmbeddingService:
                     f"documents[{index}] must be a LangChain Document object."
                 )
             if not document.page_content.strip():
-                raise EmbeddingInputError(
-                    f"documents[{index}] has empty page_content."
-                )
+                raise EmbeddingInputError(f"documents[{index}] has empty page_content.")
 
         try:
             provider_vectors = list(
@@ -268,7 +263,7 @@ def create_local_embedding_service(
 
 
 def _normalize_vector(
-    raw_vector: Iterable[Real],
+    raw_vector: Iterable[object],
     *,
     context: str,
 ) -> tuple[float, ...]:
@@ -303,6 +298,4 @@ def _normalize_vector(
 
 def _validate_non_empty_string(name: str, value: object) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise InvalidEmbeddingConfigurationError(
-            f"{name} must be a non-empty string."
-        )
+        raise InvalidEmbeddingConfigurationError(f"{name} must be a non-empty string.")

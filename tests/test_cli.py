@@ -4,16 +4,8 @@ from __future__ import annotations
 
 import argparse
 import io
-import sys
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
 
 EXPECTED_COMMANDS = (
     "ingest",
@@ -36,6 +28,8 @@ class CliArchitectureTests(unittest.TestCase):
     def test_entry_point_reexports_modular_cli_api(self) -> None:
         from rag_pipeline.__main__ import (
             build_parser as entry_build_parser,
+        )
+        from rag_pipeline.__main__ import (
             main as entry_main,
         )
         from rag_pipeline.cli import build_parser, main
@@ -150,9 +144,7 @@ class CliOutputTests(unittest.TestCase):
 
         rendered = format_generated_answer(answer)
 
-        self.assertTrue(
-            rendered.startswith("Answer:\nItemized receipts are required.")
-        )
+        self.assertTrue(rendered.startswith("Answer:\nItemized receipts are required."))
         self.assertIn(
             "Sources:\n[1] expenses.md (chunk 3, characters 0-20)",
             rendered,

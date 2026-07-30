@@ -7,13 +7,13 @@ formats deterministic reports without invoking answer generation.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-import json
 from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 from langchain_core.documents import Document
 
@@ -22,7 +22,6 @@ from rag_pipeline.exceptions import (
     RetrievalEvaluationInputError,
 )
 from rag_pipeline.retrieval import RetrievalResult
-
 
 RETRIEVAL_EVALUATION_SCHEMA_VERSION = 1
 
@@ -300,9 +299,7 @@ def evaluate_retrieval(
         mean_precision_at_k=(
             sum(case.precision_at_k for case in case_metrics) / case_count
         ),
-        mean_recall_at_k=(
-            sum(case.recall_at_k for case in case_metrics) / case_count
-        ),
+        mean_recall_at_k=(sum(case.recall_at_k for case in case_metrics) / case_count),
         mean_reciprocal_rank_at_k=(
             sum(case.reciprocal_rank_at_k for case in case_metrics) / case_count
         ),
@@ -331,9 +328,7 @@ def retrieval_evaluation_to_dict(
             "hit_rate_at_k": report.aggregate.hit_rate_at_k,
             "mean_precision_at_k": report.aggregate.mean_precision_at_k,
             "mean_recall_at_k": report.aggregate.mean_recall_at_k,
-            "mean_reciprocal_rank_at_k": (
-                report.aggregate.mean_reciprocal_rank_at_k
-            ),
+            "mean_reciprocal_rank_at_k": (report.aggregate.mean_reciprocal_rank_at_k),
         },
         "cases": [
             {
@@ -403,9 +398,7 @@ def format_retrieval_evaluation_table(report: RetrievalEvaluationReport) -> str:
     def format_row(values: Sequence[str]) -> str:
         return "  ".join(
             value.ljust(width) if index == 0 else value.rjust(width)
-            for index, (value, width) in enumerate(
-                zip(values, widths, strict=True)
-            )
+            for index, (value, width) in enumerate(zip(values, widths, strict=True))
         )
 
     separator = "  ".join("-" * width for width in widths)
@@ -433,7 +426,7 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
     if not isinstance(raw_cases, list):
         raise InvalidRetrievalEvaluationDatasetError("cases must be a list.")
 
-    cases = []
+    cases: list[RetrievalEvaluationCase] = []
     for index, raw_case in enumerate(raw_cases):
         case_object = _require_object(raw_case, context=f"cases[{index}]")
         _validate_object_fields(
@@ -448,13 +441,16 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
             )
         cases.append(
             RetrievalEvaluationCase(
-                case_id=case_object["id"],
-                query=case_object["query"],
+                case_id=cast(str, case_object["id"]),
+                query=cast(str, case_object["query"]),
                 relevant_documents=tuple(
                     RelevantDocument(
-                        _require_object(
-                            selector,
-                            context=f"cases[{index}].relevant[{selector_index}]",
+                        cast(
+                            dict[str, MetadataScalar],
+                            _require_object(
+                                selector,
+                                context=(f"cases[{index}].relevant[{selector_index}]"),
+                            ),
                         )
                     )
                     for selector_index, selector in enumerate(raw_relevant)
@@ -463,9 +459,9 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
         )
 
     return RetrievalEvaluationDataset(
-        name=dataset_object["name"],
+        name=cast(str, dataset_object["name"]),
         cases=tuple(cases),
-        schema_version=dataset_object["schema_version"],
+        schema_version=cast(int, dataset_object["schema_version"]),
     )
 
 
@@ -476,9 +472,7 @@ def _evaluate_case(
     top_k: int,
 ) -> RetrievalCaseMetrics:
     """Validate one ranking and calculate metrics at the configured cutoff."""
-    if isinstance(raw_results, (str, bytes)) or not isinstance(
-        raw_results, Sequence
-    ):
+    if isinstance(raw_results, (str, bytes)) or not isinstance(raw_results, Sequence):
         raise RetrievalEvaluationInputError(
             f"retriever output for case {case.case_id!r} must be a sequence."
         )
@@ -504,10 +498,7 @@ def _evaluate_case(
         for result in results
     )
     matched_relevant_count = sum(
-        any(
-            relevant_document.matches(result.document)
-            for result in results
-        )
+        any(relevant_document.matches(result.document) for result in results)
         for relevant_document in case.relevant_documents
     )
     relevant_retrieved_count = sum(relevance_flags)
@@ -583,6 +574,4 @@ def _validate_metadata_scalar(value: object, *, key: str) -> None:
 
 def _validate_top_k(top_k: object) -> None:
     if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
-        raise RetrievalEvaluationInputError(
-            "top_k must be a positive integer."
-        )
+        raise RetrievalEvaluationInputError("top_k must be a positive integer.")

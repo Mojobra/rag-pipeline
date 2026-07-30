@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from hashlib import sha256
 import io
 import json
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.fake import FakeListLLM
 from langchain_qdrant import SparseEmbeddings, SparseVector
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
 
 _SHA_A = "a" * 64
 _SHA_B = "b" * 64
@@ -49,16 +43,11 @@ class PolicyEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [
-            [1.0, 0.0] if "receipt" in text.lower() else [0.0, 1.0]
-            for text in texts
+            [1.0, 0.0] if "receipt" in text.lower() else [0.0, 1.0] for text in texts
         ]
 
     def embed_query(self, text: str) -> list[float]:
-        return (
-            [1.0, 0.0]
-            if "receipt" in text.lower()
-            else [0.0, 1.0]
-        )
+        return [1.0, 0.0] if "receipt" in text.lower() else [0.0, 1.0]
 
 
 class PolicySparseEmbeddings(SparseEmbeddings):
@@ -456,9 +445,7 @@ class BenchmarkCliTests(unittest.TestCase):
                             "id": "receipts",
                             "query": "Which receipt is required?",
                             "should_abstain": False,
-                            "reference_answers": [
-                                "Itemized receipts are required."
-                            ],
+                            "reference_answers": ["Itemized receipts are required."],
                         },
                         {
                             "id": "unsupported",
@@ -543,8 +530,7 @@ class BenchmarkCliTests(unittest.TestCase):
             return_value=embedding_service,
         ) as embedding_factory:
             with patch(
-                "rag_pipeline.benchmarking."
-                "create_local_sparse_embedding_service",
+                "rag_pipeline.benchmarking.create_local_sparse_embedding_service",
                 return_value=sparse_service,
             ) as sparse_factory:
                 with patch(
@@ -591,9 +577,7 @@ class BenchmarkCliTests(unittest.TestCase):
         self.assertEqual(artifact["index"]["chunk_count"], 1)
         self.assertGreater(artifact["index"]["storage_bytes"], 0)
         self.assertEqual(
-            artifact["results"]["retrieval"]["metrics"][
-                "mean_recall_at_k"
-            ],
+            artifact["results"]["retrieval"]["metrics"]["mean_recall_at_k"],
             1.0,
         )
         self.assertEqual(
@@ -601,9 +585,7 @@ class BenchmarkCliTests(unittest.TestCase):
             1.0,
         )
         self.assertTrue(artifact["threshold_gate"]["passed"])
-        self.assertTrue(
-            artifact["threshold_gate"]["applicability_verified"]
-        )
+        self.assertTrue(artifact["threshold_gate"]["applicability_verified"])
         self.assertEqual(len(artifact["timings"]["answer"]["cases"]), 2)
         self.assertEqual(remaining_work_files, ())
         serialized_temp_path = json.dumps(temp_dir)[1:-1]
