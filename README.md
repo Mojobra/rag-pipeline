@@ -35,6 +35,8 @@ code was reviewed, adapted, and validated through automated tests.
   and abstention labels plus automated drift checks
 - Isolated full-pipeline benchmarks with input hashes, stage and case latency,
   environment manifests, regression gates, and compatible-run comparisons
+- Modular CLI adapters with explicit command handlers and shared validated
+  configuration boundaries
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -88,6 +90,7 @@ flowchart LR
 | Commit a synthetic corpus with its labels | Makes evaluation reproducible without exposing customer data, personal files, or copyrighted source material. |
 | Rebuild a temporary index for each full benchmark | Binds quality and latency to an exact corpus and configuration instead of trusting potentially stale collection state. |
 | Gate allowlisted metrics from a separate versioned profile | Keeps ground-truth labels independent of deployment policy and makes CI failures explicit and reviewable. |
+| Dispatch CLI commands through explicit adapter handlers | Keeps parsing, configuration, orchestration, and terminal formatting reviewable without changing domain services. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -732,6 +735,17 @@ MARCO cross-encoder, and FLAN-T5.
 |       |-- benchmark_provenance.py
 |       |-- benchmarking.py
 |       |-- citations.py
+|       |-- cli/
+|       |   |-- commands/
+|       |   |   |-- benchmarks.py
+|       |   |   |-- documents.py
+|       |   |   |-- evaluation.py
+|       |   |   |-- indexing.py
+|       |   |   `-- query.py
+|       |   |-- app.py
+|       |   |-- config.py
+|       |   |-- options.py
+|       |   `-- output.py
 |       |-- chunking.py
 |       |-- chunking_experiments.py
 |       |-- embeddings.py
@@ -747,6 +761,7 @@ MARCO cross-encoder, and FLAN-T5.
 |-- tests/
 |   |-- test_answer_evaluation.py
 |   |-- test_benchmarking.py
+|   |-- test_cli.py
 |   |-- test_citations.py
 |   |-- test_chunking.py
 |   |-- test_chunking_experiments.py
