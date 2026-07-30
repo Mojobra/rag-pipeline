@@ -2,9 +2,9 @@
 
 ## High-Level Components
 
-1. Document Ingestion
-2. Document Parsing
-3. Document Cleaning
+1. CLI Transport Adapter
+2. Transport-Neutral Application Use Cases
+3. Document Ingestion, Parsing, and Cleaning
 4. Chunking
 5. Embedding Generation
 6. Vector Database
@@ -15,11 +15,10 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Modular CLI Adapter
-15. Monitoring & Observability
-16. API Layer
-17. Frontend/UI
-18. Deployment Infrastructure
+14. Monitoring & Observability (planned)
+15. API Layer (planned)
+16. Frontend/UI (planned)
+17. Deployment Infrastructure (planned)
 
 ---
 
@@ -42,7 +41,7 @@ Enterprise integrations
 
 ---
 
-## Current CLI Adapter Contract
+## Current Adapter And Application Contract
 
 - `rag_pipeline.__main__` remains the stable module entry point and re-exports
   `main` and `build_parser`, but it owns no command behavior.
@@ -51,19 +50,24 @@ Enterprise integrations
   covering every command.
 - Shared option groups define one embedding, chunking, retrieval, reranking,
   generation, and storage vocabulary across commands.
-- A dedicated configuration boundary translates dynamic argparse values into
-  the existing validated stage dataclasses before model or storage side effects.
+- CLI configuration builders translate dynamic argparse values into validated
+  application configuration objects before model or storage side effects.
 - Command handlers are grouped by document, indexing, query, evaluation, and
-  benchmark responsibilities. Domain services remain outside the CLI package.
-- Provider factories and Qdrant construction stay inside command handlers so
-  parser creation and help output do not initialize models, download files, or
-  open a database.
+  benchmark responsibilities. They delegate reusable indexing and retrieval
+  lifecycles to `rag_pipeline.application`.
+- Application use cases own cross-stage invariants, provider lifecycle, and
+  orchestration. They accept explicit dependencies where useful for deterministic
+  tests and do not import argparse or terminal output helpers.
+- Provider factories remain lazy, so parser creation and help output do not
+  initialize models, download files, or open a database. Reranking models are
+  not initialized when first-stage retrieval returns no candidates.
 - Terminal-specific retrieval and answer rendering is isolated from service
   orchestration and can be tested without provider calls.
 
-This is an adapter refactor, not a new application-service layer. Task 19 should
-introduce transport-neutral use cases only where both CLI and FastAPI genuinely
-need the same lifecycle orchestration; the API must not import CLI handlers.
+The application layer is intentionally small. It coordinates existing domain
+services rather than replacing their validation or algorithms. A future API can
+reuse these use cases without importing CLI handlers; API-specific request,
+response, authentication, and error-mapping concerns remain future work.
 
 ---
 
@@ -71,8 +75,13 @@ need the same lifecycle orchestration; the API must not import CLI handlers.
 
 - LangChain composes the `grounded-v2` prompt with the configured language model
   and string output parser.
+- `rag_pipeline.prompting` owns the versioned template, evidence boundaries,
+  tokenizer protocol, and token-aware packing algorithm.
+- `rag_pipeline.generation` owns model lifecycle, invocation, answer assembly,
+  and deterministic citation integration while re-exporting established prompt
+  APIs for compatibility.
 - Ranked chunks are packed into numbered evidence blocks under exact character
-  and tokenizer limits.
+  and tokenizer limits before a model is invoked.
 - Retrieved text is explicitly treated as untrusted data, and unsupported or
   conflicting evidence maps to one deterministic abstention response.
 - The answer result records both model and prompt identifiers; source citations
@@ -157,6 +166,12 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
 
 ## Current Benchmark Contract
 
+- `rag_pipeline.benchmarking` is the stable orchestration facade. Configuration,
+  metrics, timing, threshold evaluation, and report construction live in
+  focused internal modules.
+- `rag_pipeline.benchmark_artifacts` remains the stable artifact and comparison
+  facade while threshold schemas and the metric registry live in focused
+  internal modules.
 - `benchmark` starts from one explicit corpus and the paired schema-v1
   evaluation files, then builds a fresh temporary Qdrant collection. The index
   is closed and deleted after its storage size is recorded.
@@ -189,6 +204,29 @@ Artifacts include evaluation queries and generated answers. Reports created from
 non-synthetic data therefore require the same authorization, privacy, retention,
 and deletion controls as their source documents. Quality thresholds should be
 approved from reviewed baselines; example values are not production defaults.
+
+---
+
+## Current Quality Contract
+
+- Ruff owns deterministic formatting, import ordering, and focused correctness
+  linting for source and tests.
+- Mypy checks all package source in strict mode. Dynamic JSON and provider values
+  are validated before narrow casts; the untyped `docx2txt` dependency has the
+  only module-level missing-stub exception.
+- The offline unittest suite uses provider doubles and temporary in-memory or
+  local Qdrant stores. It requires no credentials, model downloads, GPU, or
+  pre-existing collection.
+- Coverage measures branches as well as statements and enforces an 80 percent
+  repository floor.
+- GitHub Actions runs the locked environment, format check, lint, strict typing,
+  tests, coverage gate, and wheel/source-distribution build for pull requests
+  and updates to `main`.
+
+These checks protect deterministic software contracts; they do not establish
+model quality, production throughput, dependency vulnerability status, or
+deployment readiness. Those require reviewed benchmark baselines and later
+production tasks.
 
 ---
 
