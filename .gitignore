@@ -21,6 +21,10 @@ dist/
 
 # Local architecture working notes
 /ARCHITECTURE-DECISIONS.md
+/CODEX_RULES.md
+
+# Local reference material
+/ressources/
 
 # Editors and operating systems
 .idea/
