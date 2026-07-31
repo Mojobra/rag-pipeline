@@ -1,36 +1,31 @@
+"""Test dense and hybrid retrieval, filtering, ranking, and failure handling."""
+
 from __future__ import annotations
 
 import math
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_qdrant import SparseEmbeddings, SparseVector
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.embeddings import EmbeddedDocument, EmbeddingService  # noqa: E402
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.embeddings import EmbeddedDocument, EmbeddingService
+from rag_pipeline.exceptions import (
     InvalidRetrievalConfigurationError,
     RetrievalInputError,
     RetrievalProviderError,
     VectorStoreCollectionNotFoundError,
     VectorStoreCompatibilityError,
 )
-from rag_pipeline.retrieval import (  # noqa: E402
+from rag_pipeline.retrieval import (
     MetadataFilter,
     RetrievalConfig,
     RetrieverService,
     parse_metadata_filter,
 )
-from rag_pipeline.sparse_embeddings import SparseEmbeddingService  # noqa: E402
-from rag_pipeline.vector_store import (  # noqa: E402
+from rag_pipeline.sparse_embeddings import SparseEmbeddingService
+from rag_pipeline.vector_store import (
     LocalVectorStore,
     SearchMode,
     VectorStoreConfig,
@@ -128,7 +123,9 @@ class SemanticRetrievalTests(unittest.TestCase):
                 config=RetrievalConfig(top_k=2),
             )
 
-        self.assertEqual(query_model.queries, ["What evidence is needed for an expense claim?"])
+        self.assertEqual(
+            query_model.queries, ["What evidence is needed for an expense claim?"]
+        )
         self.assertEqual([result.rank for result in results], [1, 2])
         self.assertEqual(
             [result.document.page_content for result in results],
@@ -295,9 +292,7 @@ class SemanticRetrievalTests(unittest.TestCase):
                 "What does ZX-42 require?",
                 config=RetrievalConfig(
                     top_k=2,
-                    metadata_filters=(
-                        MetadataFilter("department", "finance"),
-                    ),
+                    metadata_filters=(MetadataFilter("department", "finance"),),
                 ),
             )
 
@@ -339,9 +334,7 @@ class SemanticRetrievalTests(unittest.TestCase):
             store.index(
                 [record],
                 model_identifier="dense-model",
-                sparse_vectors=[
-                    sparse_service.embed_documents([record.document])[0]
-                ],
+                sparse_vectors=[sparse_service.embed_documents([record.document])[0]],
                 sparse_model_identifier="sparse-model",
             )
             results = RetrieverService(
@@ -407,7 +400,7 @@ class SemanticRetrievalTests(unittest.TestCase):
             ("bad field=value", "dot-separated"),
             ("page=1.5", "string, integer, or boolean"),
             ("page=null", "string, integer, or boolean"),
-            ("tags=[\"finance\"]", "string, integer, or boolean"),
+            ('tags=["finance"]', "string, integer, or boolean"),
         ]
 
         for expression, message in invalid_expressions:

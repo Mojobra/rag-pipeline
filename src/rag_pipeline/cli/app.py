@@ -14,7 +14,6 @@ from typing import cast
 from rag_pipeline import __version__
 from rag_pipeline.cli.commands import register_commands
 
-
 CommandHandler = Callable[[argparse.Namespace, argparse.ArgumentParser], int]
 
 

@@ -1,25 +1,21 @@
+"""Test dense embedding validation, normalization, and local provider wiring."""
+
 from __future__ import annotations
 
 import sys
 import unittest
-from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.embeddings import (  # noqa: E402
+from rag_pipeline.embeddings import (
     EmbeddingService,
     LocalEmbeddingConfig,
     create_local_embedding_service,
 )
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     EmbeddingInputError,
     EmbeddingProviderError,
     InvalidEmbeddingConfigurationError,

@@ -1,9 +1,10 @@
+"""Test guarded generation, evidence packing, and local model configuration."""
+
 from __future__ import annotations
 
 import math
 import sys
 import unittest
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
@@ -12,18 +13,13 @@ from langchain_core.documents import Document
 from langchain_core.language_models.llms import LLM
 from pydantic import Field
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     CitationInputError,
     GenerationInputError,
     GenerationProviderError,
     InvalidGenerationConfigurationError,
 )
-from rag_pipeline.generation import (  # noqa: E402
+from rag_pipeline.generation import (
     GROUNDED_ANSWER_PROMPT_ID,
     INSUFFICIENT_CONTEXT_ANSWER,
     AnswerGenerator,
@@ -31,7 +27,7 @@ from rag_pipeline.generation import (  # noqa: E402
     LocalGenerationConfig,
     create_local_answer_generator,
 )
-from rag_pipeline.retrieval import RetrievalResult  # noqa: E402
+from rag_pipeline.retrieval import RetrievalResult
 
 
 class RecordingLLM(LLM):

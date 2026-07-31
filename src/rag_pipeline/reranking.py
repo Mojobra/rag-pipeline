@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 from langchain_core.documents import Document
 
@@ -21,7 +21,6 @@ from rag_pipeline.exceptions import (
     RerankingProviderError,
 )
 from rag_pipeline.retrieval import RetrievalResult
-
 
 DEFAULT_LOCAL_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 DEFAULT_RERANKER_CACHE_DIR = Path(".rag_data/rerankers")
@@ -190,12 +189,14 @@ class RerankerService:
         scored_candidates = list(
             zip(prepared_candidates, scores, range(len(scores)), strict=True)
         )
-        scored_candidates.sort(
-            key=lambda item: (-item[1], item[0].rank, item[2])
-        )
+        scored_candidates.sort(key=lambda item: (-item[1], item[0].rank, item[2]))
 
-        results = []
+        results: list[RetrievalResult] = []
         for candidate, score, _ in scored_candidates[: settings.top_n]:
+            first_stage_score_kind = cast(
+                Literal["cosine", "rrf"],
+                candidate.score_kind,
+            )
             results.append(
                 RetrievalResult(
                     document=candidate.document,
@@ -204,7 +205,7 @@ class RerankerService:
                     score_kind="cross_encoder",
                     retrieval_score=candidate.score,
                     retrieval_rank=candidate.rank,
-                    retrieval_score_kind=candidate.score_kind,
+                    retrieval_score_kind=first_stage_score_kind,
                     reranker_model=self.model_identifier,
                 )
             )
@@ -292,26 +293,20 @@ def _prepare_text_pairs(
     LangChain documents, and an unreranked cosine or RRF score kind. Validation
     prevents accidental recursive reranking and preserves pair/result alignment.
     """
-    text_pairs = []
+    text_pairs: list[tuple[str, str]] = []
     seen_ranks: set[int] = set()
     for index, candidate in enumerate(candidates):
         if not isinstance(candidate, RetrievalResult):
-            raise RerankingInputError(
-                f"candidates[{index}] must be a RetrievalResult."
-            )
+            raise RerankingInputError(f"candidates[{index}] must be a RetrievalResult.")
         if candidate.score_kind not in ("cosine", "rrf"):
-            raise RerankingInputError(
-                f"candidates[{index}] has already been reranked."
-            )
+            raise RerankingInputError(f"candidates[{index}] has already been reranked.")
         if not isinstance(candidate.document, Document):
             raise RerankingInputError(
                 f"candidates[{index}] has an invalid LangChain document."
             )
         content = candidate.document.page_content.strip()
         if not content:
-            raise RerankingInputError(
-                f"candidates[{index}] has empty page_content."
-            )
+            raise RerankingInputError(f"candidates[{index}] has empty page_content.")
         if (
             isinstance(candidate.rank, bool)
             or not isinstance(candidate.rank, int)
@@ -347,11 +342,9 @@ def _normalize_scores(raw_scores: object, *, expected_count: int) -> list[float]
     values are rejected before result ordering.
     """
     if isinstance(raw_scores, (str, bytes)):
-        raise RerankingProviderError(
-            "Reranking provider returned scores as text."
-        )
+        raise RerankingProviderError("Reranking provider returned scores as text.")
     try:
-        provider_scores = list(raw_scores)  # type: ignore[arg-type]
+        provider_scores = list(cast(Iterable[object], raw_scores))
     except TypeError as exc:
         raise RerankingProviderError(
             "Reranking provider returned non-iterable scores."
@@ -362,7 +355,7 @@ def _normalize_scores(raw_scores: object, *, expected_count: int) -> list[float]
             f"{len(provider_scores)} score(s) for {expected_count} candidate(s)."
         )
 
-    scores = []
+    scores: list[float] = []
     for index, score in enumerate(provider_scores):
         if isinstance(score, bool) or not isinstance(score, Real):
             raise RerankingProviderError(
@@ -370,24 +363,18 @@ def _normalize_scores(raw_scores: object, *, expected_count: int) -> list[float]
             )
         numeric_score = float(score)
         if not isfinite(numeric_score):
-            raise RerankingProviderError(
-                f"Reranking score {index} is not finite."
-            )
+            raise RerankingProviderError(f"Reranking score {index} is not finite.")
         scores.append(numeric_score)
     return scores
 
 
 def _validate_non_empty_string(name: str, value: object) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise InvalidRerankingConfigurationError(
-            f"{name} must be a non-empty string."
-        )
+        raise InvalidRerankingConfigurationError(f"{name} must be a non-empty string.")
 
 
 def _validate_positive_integer(name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise InvalidRerankingConfigurationError(f"{name} must be an integer.")
     if value <= 0:
-        raise InvalidRerankingConfigurationError(
-            f"{name} must be greater than zero."
-        )
+        raise InvalidRerankingConfigurationError(f"{name} must be greater than zero.")

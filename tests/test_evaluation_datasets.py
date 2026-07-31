@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+import unittest
 from collections import Counter
 from pathlib import Path
-import re
-import sys
-import unittest
-import unicodedata
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-DATASET_ROOT = (
-    PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v1"
-)
+DATASET_ROOT = PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v1"
 DOCUMENTS_ROOT = DATASET_ROOT / "documents"
 RETRIEVAL_DATASET_PATH = DATASET_ROOT / "retrieval-v1.json"
 ANSWER_DATASET_PATH = DATASET_ROOT / "answers-v1.json"
-sys.path.insert(0, str(SRC_ROOT))
 
 _WORD_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
@@ -48,9 +42,7 @@ class CommittedEvaluationDatasetTests(unittest.TestCase):
         cls.retrieval_dataset = load_retrieval_evaluation_dataset(
             RETRIEVAL_DATASET_PATH
         )
-        cls.answer_dataset = load_answer_evaluation_dataset(
-            ANSWER_DATASET_PATH
-        )
+        cls.answer_dataset = load_answer_evaluation_dataset(ANSWER_DATASET_PATH)
 
     def test_corpus_and_dataset_versions_are_explicit(self) -> None:
         """Keep the published v1 asset counts and identities intentional."""
@@ -90,26 +82,20 @@ class CommittedEvaluationDatasetTests(unittest.TestCase):
                         {"file_name", "chunk_index"},
                     )
                     matches = [
-                        chunk
-                        for chunk in self.chunks
-                        if selector.matches(chunk)
+                        chunk for chunk in self.chunks if selector.matches(chunk)
                     ]
                     self.assertEqual(len(matches), 1)
 
     def test_answerable_cases_align_with_retrieval_judgments(self) -> None:
         """Ensure answer scoring uses the same questions as retrieval scoring."""
-        retrieval_cases = {
-            case.case_id: case for case in self.retrieval_dataset.cases
-        }
+        retrieval_cases = {case.case_id: case for case in self.retrieval_dataset.cases}
         answerable_cases = {
             case.case_id: case
             for case in self.answer_dataset.cases
             if not case.should_abstain
         }
         abstention_cases = tuple(
-            case
-            for case in self.answer_dataset.cases
-            if case.should_abstain
+            case for case in self.answer_dataset.cases if case.should_abstain
         )
 
         self.assertEqual(set(answerable_cases), set(retrieval_cases))
@@ -124,9 +110,7 @@ class CommittedEvaluationDatasetTests(unittest.TestCase):
 
     def test_reference_vocabulary_occurs_in_labeled_evidence(self) -> None:
         """Catch references that introduce facts absent from relevant chunks."""
-        retrieval_cases = {
-            case.case_id: case for case in self.retrieval_dataset.cases
-        }
+        retrieval_cases = {case.case_id: case for case in self.retrieval_dataset.cases}
         for answer_case in self.answer_dataset.cases:
             if answer_case.should_abstain:
                 continue

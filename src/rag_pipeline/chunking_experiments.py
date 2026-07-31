@@ -18,7 +18,6 @@ from rag_pipeline.exceptions import (
     InvalidChunkingExperimentError,
 )
 
-
 DEFAULT_CHUNKING_CANDIDATES = (
     ChunkingConfig(chunk_size=500, chunk_overlap=100),
     ChunkingConfig(chunk_size=1000, chunk_overlap=200),

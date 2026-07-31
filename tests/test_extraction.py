@@ -1,6 +1,7 @@
+"""Test format-specific text extraction into provenance-bearing documents."""
+
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 import zipfile
@@ -9,12 +10,7 @@ from xml.sax.saxutils import escape
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.extraction import extract_documents  # noqa: E402
+from rag_pipeline.extraction import extract_documents
 
 
 def write_minimal_pdf(path: Path, text: str) -> None:
@@ -28,7 +24,9 @@ def write_minimal_pdf(path: Path, text: str) -> None:
             b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
         ),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+        b"<< /Length "
+        + str(len(stream)).encode("ascii")
+        + b" >>\nstream\n"
         + stream
         + b"endstream",
     ]

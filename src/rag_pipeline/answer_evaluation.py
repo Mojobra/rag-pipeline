@@ -7,29 +7,28 @@ formats reports without owning retrieval or model-provider construction.
 
 from __future__ import annotations
 
+import json
+import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import re
-import unicodedata
+from typing import cast
 
 from rag_pipeline.exceptions import (
     AnswerEvaluationInputError,
     InvalidAnswerEvaluationDatasetError,
 )
-from rag_pipeline.generation import GeneratedAnswer, INSUFFICIENT_CONTEXT_ANSWER
-
+from rag_pipeline.generation import GeneratedAnswer
+from rag_pipeline.prompting import INSUFFICIENT_CONTEXT_ANSWER
 
 ANSWER_EVALUATION_SCHEMA_VERSION = 1
 
 AnswerFunction = Callable[[str], GeneratedAnswer]
 
 _DATASET_FIELDS = frozenset({"schema_version", "name", "cases"})
-_CASE_FIELDS = frozenset(
-    {"id", "query", "should_abstain", "reference_answers"}
-)
+_CASE_FIELDS = frozenset({"id", "query", "should_abstain", "reference_answers"})
 _WORD_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
@@ -139,9 +138,7 @@ class AnswerEvaluationDataset:
         try:
             cases = tuple(self.cases)
         except TypeError as exc:
-            raise InvalidAnswerEvaluationDatasetError(
-                "cases must be a list."
-            ) from exc
+            raise InvalidAnswerEvaluationDatasetError("cases must be a list.") from exc
         if not cases:
             raise InvalidAnswerEvaluationDatasetError(
                 "answer evaluation datasets must contain at least one case."
@@ -270,8 +267,7 @@ def evaluate_answers(
     )
 
     true_abstentions = sum(
-        case.expected_abstention and case.predicted_abstention
-        for case in case_metrics
+        case.expected_abstention and case.predicted_abstention for case in case_metrics
     )
     answered_answerable_cases = sum(
         not case.predicted_abstention for case in answerable_cases
@@ -283,12 +279,9 @@ def evaluate_answers(
         exact_match_rate=_mean_optional(
             tuple(case.exact_match for case in answerable_cases)
         ),
-        mean_token_f1=_mean_optional(
-            tuple(case.token_f1 for case in answerable_cases)
-        ),
+        mean_token_f1=_mean_optional(tuple(case.token_f1 for case in answerable_cases)),
         abstention_accuracy=(
-            sum(case.abstention_correct for case in case_metrics)
-            / len(case_metrics)
+            sum(case.abstention_correct for case in case_metrics) / len(case_metrics)
         ),
         abstention_precision=_safe_ratio(
             true_abstentions,
@@ -405,9 +398,7 @@ def format_answer_evaluation_table(report: AnswerEvaluationReport) -> str:
     def format_row(values: Sequence[str]) -> str:
         return "  ".join(
             value.ljust(width) if index == 0 else value.rjust(width)
-            for index, (value, width) in enumerate(
-                zip(values, widths, strict=True)
-            )
+            for index, (value, width) in enumerate(zip(values, widths, strict=True))
         )
 
     aggregate = report.aggregate
@@ -450,7 +441,7 @@ def _parse_dataset(raw_data: object) -> AnswerEvaluationDataset:
     if not isinstance(raw_cases, list):
         raise InvalidAnswerEvaluationDatasetError("cases must be a list.")
 
-    cases = []
+    cases: list[AnswerEvaluationCase] = []
     for index, raw_case in enumerate(raw_cases):
         case_object = _require_object(raw_case, context=f"cases[{index}]")
         _validate_object_fields(
@@ -465,17 +456,17 @@ def _parse_dataset(raw_data: object) -> AnswerEvaluationDataset:
             )
         cases.append(
             AnswerEvaluationCase(
-                case_id=case_object["id"],
-                query=case_object["query"],
-                should_abstain=case_object["should_abstain"],
-                reference_answers=tuple(raw_references),
+                case_id=cast(str, case_object["id"]),
+                query=cast(str, case_object["query"]),
+                should_abstain=cast(bool, case_object["should_abstain"]),
+                reference_answers=cast(tuple[str, ...], tuple(raw_references)),
             )
         )
 
     return AnswerEvaluationDataset(
-        name=dataset_object["name"],
+        name=cast(str, dataset_object["name"]),
         cases=tuple(cases),
-        schema_version=dataset_object["schema_version"],
+        schema_version=cast(int, dataset_object["schema_version"]),
     )
 
 
@@ -486,8 +477,7 @@ def _evaluate_case(
     """Validate one generation result and calculate case-level diagnostics."""
     if not isinstance(prediction, GeneratedAnswer):
         raise AnswerEvaluationInputError(
-            f"answer callback for case {case.case_id!r} must return a "
-            "GeneratedAnswer."
+            f"answer callback for case {case.case_id!r} must return a GeneratedAnswer."
         )
     generated_answer = _validate_prediction_string(
         prediction.answer,
@@ -566,9 +556,7 @@ def _token_f1(candidate: str, reference: str) -> float:
     if not candidate_tokens or not reference_tokens:
         return float(candidate_tokens == reference_tokens)
 
-    common_count = sum(
-        (Counter(candidate_tokens) & Counter(reference_tokens)).values()
-    )
+    common_count = sum((Counter(candidate_tokens) & Counter(reference_tokens)).values())
     if common_count == 0:
         return 0.0
     precision = common_count / len(candidate_tokens)
@@ -588,9 +576,7 @@ def _answer_tokens(value: str) -> tuple[str, ...]:
 
 def _require_object(value: object, *, context: str) -> dict[str, object]:
     if not isinstance(value, dict):
-        raise InvalidAnswerEvaluationDatasetError(
-            f"{context} must be a JSON object."
-        )
+        raise InvalidAnswerEvaluationDatasetError(f"{context} must be a JSON object.")
     return value
 
 
@@ -616,9 +602,7 @@ def _validate_object_fields(
 
 def _validate_non_empty_string(name: str, value: object) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise InvalidAnswerEvaluationDatasetError(
-            f"{name} must be a non-empty string."
-        )
+        raise InvalidAnswerEvaluationDatasetError(f"{name} must be a non-empty string.")
     return value.strip()
 
 

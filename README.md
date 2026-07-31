@@ -1,5 +1,7 @@
 # Production-Minded RAG Pipeline
 
+[![CI](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml)
+
 An end-to-end Retrieval-Augmented Generation pipeline for question answering
 over business documents. The project uses LangChain, Hugging Face models, and a
 persistent local Qdrant vector store to turn PDF, DOCX, Markdown, HTML, and text
@@ -35,41 +37,36 @@ code was reviewed, adapted, and validated through automated tests.
   and abstention labels plus automated drift checks
 - Isolated full-pipeline benchmarks with input hashes, stage and case latency,
   environment manifests, regression gates, and compatible-run comparisons
-- Modular CLI adapters with explicit command handlers and shared validated
-  configuration boundaries
+- Thin CLI adapters over transport-neutral indexing and retrieval use cases
+- Focused benchmark, prompt-construction, and reporting modules with stable
+  compatibility facades
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
-- Typed configuration, stage-specific exceptions, and automated tests
+- Strictly typed source code, stage-specific exceptions, branch coverage, and
+  pinned automated quality checks
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A["PDF / DOCX / Markdown / HTML / Text"] --> B["Extraction"]
-    B --> C["LangChain chunking"]
-    C --> D["MiniLM dense embeddings"]
-    C --> S["BM25 sparse embeddings"]
-    D --> E["Persistent Qdrant index"]
-    S --> E
-    Q["User question"] --> F["Dense and sparse prefetch"]
-    M["Metadata filters"] --> F
-    E --> F
-    F --> R["Reciprocal-rank fusion"]
-    R --> X["Optional cross-encoder reranking"]
-    T["Versioned synthetic policy corpus"] --> B
-    J["Labeled retrieval queries"] --> V["Hit, precision, recall, and MRR at k"]
-    T --> J
-    X --> V
-    X --> G["Bounded numbered evidence blocks"]
-    G --> P["LangChain grounded-v2 prompt"]
-    P --> H["Local FLAN-T5 generation"]
-    H --> I["Answer and deterministic citations"]
-    K["Labeled answer cases"] --> W["Reference, abstention, and citation metrics"]
-    T --> K
-    I --> W
-    V --> Z["Versioned benchmark artifact and gates"]
-    W --> Z
+    CLI["CLI adapters"] --> APP["Application use cases"]
+    CLI --> BENCH["Benchmark orchestration"]
+    APP --> ING["Ingestion and chunking"]
+    APP --> RET["Retrieval and reranking"]
+    APP --> GEN["Prompting and generation"]
+    BENCH --> ING
+    BENCH --> RET
+    BENCH --> GEN
+    DOCS["PDF / DOCX / Markdown / HTML / Text"] --> ING
+    ING --> EMB["Dense and sparse embeddings"]
+    EMB --> DB["Persistent Qdrant index"]
+    DB --> RET
+    FILTERS["Typed metadata filters"] --> RET
+    RET --> GEN
+    GEN --> ANSWER["Grounded answer and deterministic citations"]
+    DATA["Versioned synthetic datasets"] --> BENCH
+    BENCH --> REPORT["Metrics, manifests, comparisons, and gates"]
 ```
 
 ## Engineering Decisions
@@ -90,7 +87,9 @@ flowchart LR
 | Commit a synthetic corpus with its labels | Makes evaluation reproducible without exposing customer data, personal files, or copyrighted source material. |
 | Rebuild a temporary index for each full benchmark | Binds quality and latency to an exact corpus and configuration instead of trusting potentially stale collection state. |
 | Gate allowlisted metrics from a separate versioned profile | Keeps ground-truth labels independent of deployment policy and makes CI failures explicit and reviewable. |
-| Dispatch CLI commands through explicit adapter handlers | Keeps parsing, configuration, orchestration, and terminal formatting reviewable without changing domain services. |
+| Dispatch CLI commands through explicit adapter handlers | Keeps parsing and terminal formatting separate from reusable application behavior. |
+| Put indexing and retrieval lifecycles in an application layer | Gives future transports one validated orchestration boundary without coupling domain services to argparse. |
+| Keep compatibility facades while splitting large modules | Improves navigation and ownership without breaking established imports or public behavior. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -108,8 +107,11 @@ Requirements:
 Install the locked environment:
 
 ```powershell
-uv sync
+uv sync --locked --no-dev
 ```
+
+The installed `uv run rag-pipeline` command and
+`uv run python -m rag_pipeline` module entry point are equivalent.
 
 Index one file or an entire directory:
 
@@ -700,25 +702,34 @@ calibrated rather than treated as confidence scores.
 
 ## Testing
 
-Run the complete suite:
+Install development tools and run the same quality gate used by CI:
 
 ```powershell
-uv run python -m unittest discover -s tests -v
+uv sync --locked --dev
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run coverage run -m unittest discover -s tests -v
+uv run coverage report
+uv build
 ```
 
-The suite covers ingestion, extraction, chunking, chunking experiments, dense
-and sparse embedding contracts, persistent dense and hybrid indexing, typed
-metadata filtering, cosine and RRF retrieval, cross-encoder reranking,
-versioned guarded generation, evidence boundaries, token budgeting, retrieval
-and answer evaluation, committed dataset integrity, deterministic citations,
-and CLI integration. Provider calls use test doubles where appropriate; the
-local model path has also been verified end to end with MiniLM, Qdrant, the MS
-MARCO cross-encoder, and FLAN-T5.
+The deterministic default suite covers application orchestration, ingestion,
+extraction, chunking, dense and sparse embedding contracts, persistent dense
+and hybrid indexing, typed metadata filtering, retrieval, reranking, guarded
+generation, token budgeting, evaluation, benchmark artifacts, citations, and
+CLI integration. Provider calls use test doubles, so CI does not require model
+downloads, network access, GPUs, or API keys. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and focused test
+commands.
 
 ## Project Layout
 
 ```text
 .
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
 |-- evaluation/
 |   |-- README.md
 |   `-- datasets/
@@ -730,9 +741,17 @@ MARCO cross-encoder, and FLAN-T5.
 |-- src/
 |   `-- rag_pipeline/
 |       |-- __main__.py
+|       |-- application/
+|       |   |-- indexing.py
+|       |   `-- retrieval.py
 |       |-- answer_evaluation.py
 |       |-- benchmark_artifacts.py
+|       |-- benchmark_config.py
+|       |-- benchmark_metrics.py
 |       |-- benchmark_provenance.py
+|       |-- benchmark_reporting.py
+|       |-- benchmark_thresholds.py
+|       |-- benchmark_timing.py
 |       |-- benchmarking.py
 |       |-- citations.py
 |       |-- cli/
@@ -753,13 +772,17 @@ MARCO cross-encoder, and FLAN-T5.
 |       |-- extraction.py
 |       |-- generation.py
 |       |-- ingestion.py
+|       |-- prompting.py
+|       |-- py.typed
 |       |-- reranking.py
 |       |-- retrieval.py
 |       |-- retrieval_evaluation.py
 |       |-- sparse_embeddings.py
 |       `-- vector_store.py
 |-- tests/
+|   |-- test_application.py
 |   |-- test_answer_evaluation.py
+|   |-- test_benchmark_config.py
 |   |-- test_benchmarking.py
 |   |-- test_cli.py
 |   |-- test_citations.py
@@ -777,6 +800,7 @@ MARCO cross-encoder, and FLAN-T5.
 |   |-- test_sparse_embeddings.py
 |   `-- test_vector_store.py
 |-- ARCHITECTURE.md
+|-- CONTRIBUTING.md
 |-- MANIFEST.in
 |-- PROJECT_BRIEF.md
 |-- ROADMAP.md
@@ -813,7 +837,7 @@ MARCO cross-encoder, and FLAN-T5.
 
 ## Roadmap
 
-The staged roadmap covers retrieval-quality experiments, evaluation datasets,
-benchmarking, a FastAPI service, authentication, monitoring, containerization,
-CI/CD, permissions-aware retrieval, and multi-tenant enterprise integrations.
-See [ROADMAP.md](ROADMAP.md) for the full sequence.
+The staged roadmap covers retrieval-quality experiments, a FastAPI service,
+authentication, monitoring, containerization, release automation,
+permissions-aware retrieval, and multi-tenant enterprise integrations. See
+[ROADMAP.md](ROADMAP.md) for the full sequence.

@@ -39,7 +39,7 @@ Task 20 - Authentication
 Task 21 - Logging
 Task 22 - Monitoring
 Task 23 - Dockerization
-Task 24 - CI/CD
+Task 24 - Deployment CI/CD (pull-request quality CI is already in place)
 
 ## Phase 5: Enterprise
 

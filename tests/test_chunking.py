@@ -1,18 +1,13 @@
+"""Test deterministic recursive chunking and provenance preservation."""
+
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.chunking import ChunkingConfig, chunk_documents  # noqa: E402
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.chunking import ChunkingConfig, chunk_documents
+from rag_pipeline.exceptions import (
     InvalidChunkingConfigurationError,
 )
 
@@ -85,9 +80,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
         for settings, message in invalid_settings:
             with self.subTest(settings=settings):
-                with self.assertRaisesRegex(
-                    InvalidChunkingConfigurationError, message
-                ):
+                with self.assertRaisesRegex(InvalidChunkingConfigurationError, message):
                     ChunkingConfig(**settings)
 
     def test_rejects_non_document_inputs(self) -> None:

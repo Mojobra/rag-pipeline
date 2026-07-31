@@ -36,7 +36,6 @@ from rag_pipeline.sparse_embeddings import (
 )
 from rag_pipeline.vector_store import LocalVectorStore, SearchMode
 
-
 MetadataFilterValue: TypeAlias = str | int | bool
 
 _METADATA_FIELD_PATTERN = re.compile(
@@ -133,9 +132,7 @@ class RetrievalConfig:
         if isinstance(self.top_k, bool) or not isinstance(self.top_k, int):
             raise InvalidRetrievalConfigurationError("top_k must be an integer.")
         if self.top_k <= 0:
-            raise InvalidRetrievalConfigurationError(
-                "top_k must be greater than zero."
-            )
+            raise InvalidRetrievalConfigurationError("top_k must be greater than zero.")
 
         if self.score_threshold is not None:
             if isinstance(self.score_threshold, bool) or not isinstance(
@@ -165,9 +162,7 @@ class RetrievalConfig:
                 "metadata_filters must be an iterable of MetadataFilter objects."
             ) from exc
 
-        seen_filter_keys: set[
-            tuple[str, type[object], MetadataFilterValue]
-        ] = set()
+        seen_filter_keys: set[tuple[str, type[object], MetadataFilterValue]] = set()
         for metadata_filter in metadata_filters:
             if not isinstance(metadata_filter, MetadataFilter):
                 raise InvalidRetrievalConfigurationError(
@@ -274,9 +269,7 @@ class RetrieverService:
         )
 
         try:
-            qdrant_filter = _build_qdrant_metadata_filter(
-                settings.metadata_filters
-            )
+            qdrant_filter = _build_qdrant_metadata_filter(settings.metadata_filters)
             if sparse_query_embedding is None or sparse_query_embedding.is_empty:
                 langchain_store = self._vector_store.as_langchain_vector_store()
                 provider_results = (
@@ -312,11 +305,9 @@ class RetrieverService:
         except VectorStoreError:
             raise
         except Exception as exc:
-            raise RetrievalProviderError(
-                "LangChain Qdrant retrieval failed."
-            ) from exc
+            raise RetrievalProviderError("LangChain Qdrant retrieval failed.") from exc
 
-        results = []
+        results: list[RetrievalResult] = []
         for provider_index, provider_result in enumerate(provider_results):
             if (
                 not isinstance(provider_result, (tuple, list))

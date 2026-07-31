@@ -1,19 +1,15 @@
+"""Exercise package metadata and complete CLI workflows with local doubles."""
+
 from __future__ import annotations
 
 import io
 import json
 import re
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
 
 
 class PromptTokenizerStub:
@@ -36,6 +32,31 @@ class PackageSmokeTests(unittest.TestCase):
         import rag_pipeline
 
         self.assertRegex(rag_pipeline.__version__, re.compile(r"^\d+\.\d+\.\d+$"))
+
+    def test_refactored_modules_preserve_established_public_imports(self) -> None:
+        from rag_pipeline.benchmark_artifacts import (
+            BenchmarkThresholdProfile as FacadeThresholdProfile,
+        )
+        from rag_pipeline.benchmark_config import (
+            BenchmarkConfig as SplitBenchmarkConfig,
+        )
+        from rag_pipeline.benchmark_thresholds import (
+            BenchmarkThresholdProfile as SplitThresholdProfile,
+        )
+        from rag_pipeline.benchmarking import BenchmarkConfig as FacadeBenchmarkConfig
+        from rag_pipeline.generation import (
+            GROUNDED_ANSWER_PROMPT as FACADE_PROMPT,
+        )
+        from rag_pipeline.generation import (
+            PromptTokenizer as FacadePromptTokenizer,
+        )
+        from rag_pipeline.prompting import GROUNDED_ANSWER_PROMPT as SPLIT_PROMPT
+        from rag_pipeline.prompting import PromptTokenizer as SplitPromptTokenizer
+
+        self.assertIs(FacadeBenchmarkConfig, SplitBenchmarkConfig)
+        self.assertIs(FacadeThresholdProfile, SplitThresholdProfile)
+        self.assertIs(FACADE_PROMPT, SPLIT_PROMPT)
+        self.assertIs(FacadePromptTokenizer, SplitPromptTokenizer)
 
     def test_module_entry_point_runs(self) -> None:
         from rag_pipeline.__main__ import main
@@ -277,9 +298,7 @@ class PackageSmokeTests(unittest.TestCase):
                         ]
                     )
 
-            with LocalVectorStore(
-                VectorStoreConfig(path=store_path)
-            ) as reopened_store:
+            with LocalVectorStore(VectorStoreConfig(path=store_path)) as reopened_store:
                 stored_count = reopened_store.count()
 
         self.assertEqual(exit_code, 0)
@@ -302,10 +321,7 @@ class PackageSmokeTests(unittest.TestCase):
 
         class HybridDenseEmbeddings(Embeddings):
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
-                return [
-                    [0.0, 1.0] if "ZX-42" in text else [1.0, 0.0]
-                    for text in texts
-                ]
+                return [[0.0, 1.0] if "ZX-42" in text else [1.0, 0.0] for text in texts]
 
             def embed_query(self, text: str) -> list[float]:
                 return [1.0, 0.0]

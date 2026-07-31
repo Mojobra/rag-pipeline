@@ -1,7 +1,8 @@
+"""Test cross-encoder reranking contracts and first-stage provenance."""
+
 from __future__ import annotations
 
 import math
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,23 +10,18 @@ from unittest.mock import Mock, patch
 
 from langchain_core.documents import Document
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
-
-from rag_pipeline.exceptions import (  # noqa: E402
+from rag_pipeline.exceptions import (
     InvalidRerankingConfigurationError,
     RerankingInputError,
     RerankingProviderError,
 )
-from rag_pipeline.reranking import (  # noqa: E402
+from rag_pipeline.reranking import (
     LocalRerankerConfig,
     RerankerService,
     RerankingConfig,
     create_local_reranker_service,
 )
-from rag_pipeline.retrieval import RetrievalResult  # noqa: E402
+from rag_pipeline.retrieval import RetrievalResult
 
 
 class FakeCrossEncoderScorer:

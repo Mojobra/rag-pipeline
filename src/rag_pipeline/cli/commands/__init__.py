@@ -14,7 +14,9 @@ from rag_pipeline.cli.commands.query import (
 )
 
 
-def register_commands(subparsers: argparse._SubParsersAction) -> None:
+def register_commands(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     """Attach every command parser and its explicit execution handler.
 
     Registration order is intentionally stable because argparse exposes it in

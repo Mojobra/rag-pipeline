@@ -8,6 +8,16 @@ version = "0.1.0"
 description = "A production-minded RAG pipeline built step by step."
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["rag", "langchain", "qdrant", "llm", "retrieval"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
 dependencies = [
     "langchain>=1.0,<2.0",
     "langchain-huggingface>=1.2,<2.0",
@@ -22,5 +32,74 @@ dependencies = [
     "fastembed>=0.3.3,<1.0",
 ]
 
+[project.scripts]
+rag-pipeline = "rag_pipeline.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Mojobra/rag-pipeline"
+Issues = "https://github.com/Mojobra/rag-pipeline/issues"
+
+[dependency-groups]
+dev = [
+    "coverage[toml]==7.15.2",
+    "mypy==2.3.0",
+    "ruff==0.16.1",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+rag_pipeline = ["py.typed"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "BLE",
+    "C4",
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+    "N",
+    "PERF",
+    "PIE",
+    "RUF",
+    "SIM",
+    "UP",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag_pipeline"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["SIM117"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+files = ["src/rag_pipeline"]
+strict = true
+pretty = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["docx2txt"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["rag_pipeline"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 1
+show_missing = true
+skip_covered = true

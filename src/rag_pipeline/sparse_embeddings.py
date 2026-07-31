@@ -21,7 +21,6 @@ from rag_pipeline.exceptions import (
     InvalidEmbeddingConfigurationError,
 )
 
-
 DEFAULT_LOCAL_SPARSE_MODEL = "Qdrant/bm25"
 DEFAULT_FASTEMBED_CACHE_DIR = Path(".rag_data/fastembed")
 
@@ -124,9 +123,7 @@ class SparseEmbeddingService:
                     f"documents[{index}] must be a LangChain Document object."
                 )
             if not document.page_content.strip():
-                raise EmbeddingInputError(
-                    f"documents[{index}] has empty page_content."
-                )
+                raise EmbeddingInputError(f"documents[{index}] has empty page_content.")
 
         try:
             provider_vectors = list(
@@ -259,15 +256,11 @@ def _normalize_sparse_vector(
 
 def _validate_non_empty_string(name: str, value: object) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise InvalidEmbeddingConfigurationError(
-            f"{name} must be a non-empty string."
-        )
+        raise InvalidEmbeddingConfigurationError(f"{name} must be a non-empty string.")
 
 
 def _validate_positive_integer(name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise InvalidEmbeddingConfigurationError(f"{name} must be an integer.")
     if value <= 0:
-        raise InvalidEmbeddingConfigurationError(
-            f"{name} must be greater than zero."
-        )
+        raise InvalidEmbeddingConfigurationError(f"{name} must be greater than zero.")

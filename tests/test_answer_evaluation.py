@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -14,11 +13,6 @@ from unittest.mock import patch
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.fake import FakeListLLM
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_ROOT))
 
 
 class CharacterTokenizer:
@@ -120,10 +114,10 @@ class AnswerEvaluationTests(unittest.TestCase):
         self.assertEqual(dataset.cases[1].reference_answers, ())
 
     def test_rejects_invalid_or_contradictory_dataset_cases(self) -> None:
-        from rag_pipeline.exceptions import InvalidAnswerEvaluationDatasetError
         from rag_pipeline.answer_evaluation import (
             load_answer_evaluation_dataset,
         )
+        from rag_pipeline.exceptions import InvalidAnswerEvaluationDatasetError
 
         base_case = {
             "id": "case-1",
@@ -188,9 +182,7 @@ class AnswerEvaluationTests(unittest.TestCase):
                         json.dumps(payload),
                         encoding="utf-8",
                     )
-                    with self.assertRaises(
-                        InvalidAnswerEvaluationDatasetError
-                    ):
+                    with self.assertRaises(InvalidAnswerEvaluationDatasetError):
                         load_answer_evaluation_dataset(dataset_path)
 
     def test_calculates_reference_abstention_and_citation_metrics(self) -> None:
@@ -394,11 +386,7 @@ class AnswerEvaluationCliTests(unittest.TestCase):
                 return [[1.0, 0.0] for _ in texts]
 
             def embed_query(self, text: str) -> list[float]:
-                return (
-                    [1.0, 0.0]
-                    if "receipt" in text.lower()
-                    else [0.0, 1.0]
-                )
+                return [1.0, 0.0] if "receipt" in text.lower() else [0.0, 1.0]
 
         embedding_service = EmbeddingService(
             PolicyEmbeddings(),
@@ -425,9 +413,7 @@ class AnswerEvaluationCliTests(unittest.TestCase):
                     "id": "receipts",
                     "query": "Which receipt is required?",
                     "should_abstain": False,
-                    "reference_answers": [
-                        "Itemized receipts are required."
-                    ],
+                    "reference_answers": ["Itemized receipts are required."],
                 },
                 {
                     "id": "unsupported",

@@ -40,9 +40,7 @@ class ChunkingConfig:
                 "chunk_size must be greater than zero."
             )
         if self.chunk_overlap < 0:
-            raise InvalidChunkingConfigurationError(
-                "chunk_overlap cannot be negative."
-            )
+            raise InvalidChunkingConfigurationError("chunk_overlap cannot be negative.")
         if self.chunk_overlap >= self.chunk_size:
             raise InvalidChunkingConfigurationError(
                 "chunk_overlap must be smaller than chunk_size."

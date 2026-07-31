@@ -7,20 +7,19 @@ cache locations, credentials, or document contents.
 
 from __future__ import annotations
 
+import json
+import os
+import platform
+import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
 from importlib import metadata as importlib_metadata
-import json
-import os
 from pathlib import Path
-import platform
-import subprocess
 
 from rag_pipeline import __version__
 from rag_pipeline.exceptions import BenchmarkInputError
 from rag_pipeline.ingestion import discover_files
-
 
 _PACKAGE_DISTRIBUTIONS = (
     "langchain",
@@ -149,12 +148,10 @@ def fingerprint_dataset(
 
 def runtime_environment() -> dict[str, object]:
     """Return non-secret software and platform fields relevant to comparisons."""
-    package_versions = {"rag-pipeline": __version__}
+    package_versions: dict[str, str | None] = {"rag-pipeline": __version__}
     for distribution in _PACKAGE_DISTRIBUTIONS:
         try:
-            package_versions[distribution] = importlib_metadata.version(
-                distribution
-            )
+            package_versions[distribution] = importlib_metadata.version(distribution)
         except importlib_metadata.PackageNotFoundError:
             package_versions[distribution] = None
     return {
@@ -287,7 +284,9 @@ def _accelerator_environment() -> dict[str, object]:
             "cuda_version": getattr(torch.version, "cuda", None),
             "device_names": device_names,
         }
-    except Exception:
+    # Accelerator telemetry is diagnostic; broken optional CUDA/PyTorch state
+    # must not prevent an otherwise valid benchmark from running.
+    except Exception:  # noqa: BLE001
         return {
             "cuda_available": None,
             "cuda_version": None,
