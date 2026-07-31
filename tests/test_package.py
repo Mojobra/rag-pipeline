@@ -2,41 +2,14 @@
 
 from __future__ import annotations
 
-import ast
 import io
 import json
 import re
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
-
-COMPATIBILITY_MODULE_NAMES = (
-    "answer_evaluation",
-    "benchmark_artifacts",
-    "benchmark_config",
-    "benchmark_metrics",
-    "benchmark_provenance",
-    "benchmark_reporting",
-    "benchmark_thresholds",
-    "benchmark_timing",
-    "chunking",
-    "chunking_experiments",
-    "citations",
-    "embeddings",
-    "extraction",
-    "prompting",
-    "reranking",
-    "retrieval_evaluation",
-    "sparse_embeddings",
-    "vector_store",
-)
-
-COMPATIBILITY_IMPORT_PATHS = frozenset(
-    f"rag_pipeline.{module_name}" for module_name in COMPATIBILITY_MODULE_NAMES
-)
 
 
 class PromptTokenizerStub:
@@ -60,100 +33,36 @@ class PackageSmokeTests(unittest.TestCase):
 
         self.assertRegex(rag_pipeline.__version__, re.compile(r"^\d+\.\d+\.\d+$"))
 
-    def test_refactored_modules_preserve_established_public_imports(self) -> None:
-        from rag_pipeline.answer_evaluation import (
-            AnswerEvaluationDataset as FacadeAnswerDataset,
-        )
-        from rag_pipeline.benchmark_artifacts import (
-            BenchmarkThresholdProfile as FacadeThresholdProfile,
-        )
-        from rag_pipeline.benchmark_config import (
-            BenchmarkConfig as SplitBenchmarkConfig,
-        )
-        from rag_pipeline.benchmark_thresholds import (
-            BenchmarkThresholdProfile as SplitThresholdProfile,
-        )
-        from rag_pipeline.benchmarking import BenchmarkConfig as FacadeBenchmarkConfig
-        from rag_pipeline.chunking import ChunkingConfig as FacadeChunkingConfig
-        from rag_pipeline.citations import Citation as FacadeCitation
-        from rag_pipeline.embeddings import EmbeddingService as FacadeEmbeddingService
-        from rag_pipeline.evaluation.answers import (
-            AnswerEvaluationDataset as FeatureAnswerDataset,
-        )
-        from rag_pipeline.generation import (
-            GROUNDED_ANSWER_PROMPT as FACADE_PROMPT,
-        )
-        from rag_pipeline.generation import (
-            PromptTokenizer as FacadePromptTokenizer,
-        )
-        from rag_pipeline.generation.citations import Citation as FeatureCitation
-        from rag_pipeline.infrastructure.embeddings import (
-            EmbeddingService as FeatureEmbeddingService,
-        )
-        from rag_pipeline.ingestion import (
-            extract_documents as facade_extract_documents,
-        )
-        from rag_pipeline.ingestion.chunking import (
-            ChunkingConfig as FeatureChunkingConfig,
-        )
-        from rag_pipeline.ingestion.extraction import (
-            extract_documents as feature_extract_documents,
-        )
-        from rag_pipeline.prompting import GROUNDED_ANSWER_PROMPT as SPLIT_PROMPT
-        from rag_pipeline.prompting import PromptTokenizer as SplitPromptTokenizer
-        from rag_pipeline.reranking import RerankerService as FacadeRerankerService
-        from rag_pipeline.retrieval.reranking import (
-            RerankerService as FeatureRerankerService,
-        )
-
-        self.assertIs(FacadeBenchmarkConfig, SplitBenchmarkConfig)
-        self.assertIs(FacadeThresholdProfile, SplitThresholdProfile)
-        self.assertIs(FACADE_PROMPT, SPLIT_PROMPT)
-        self.assertIs(FacadePromptTokenizer, SplitPromptTokenizer)
-        self.assertIs(FacadeAnswerDataset, FeatureAnswerDataset)
-        self.assertIs(FacadeChunkingConfig, FeatureChunkingConfig)
-        self.assertIs(FacadeCitation, FeatureCitation)
-        self.assertIs(FacadeEmbeddingService, FeatureEmbeddingService)
-        self.assertIs(facade_extract_documents, feature_extract_documents)
-        self.assertIs(FacadeRerankerService, FeatureRerankerService)
-
-        for module_name in COMPATIBILITY_MODULE_NAMES:
-            with self.subTest(module_name=module_name):
-                self.assertIsNotNone(import_module(f"rag_pipeline.{module_name}"))
-
-    def test_internal_source_uses_canonical_feature_imports(self) -> None:
-        """Keep compatibility facades out of production dependency paths."""
+    def test_package_root_contains_only_shared_entrypoint_modules(self) -> None:
+        """Keep implementation ownership inside the documented feature packages."""
         source_root = Path(__file__).resolve().parents[1] / "src" / "rag_pipeline"
-        facade_paths = {
-            source_root / f"{module_name}.py"
-            for module_name in COMPATIBILITY_MODULE_NAMES
-        }
-        violations: list[str] = []
+        root_modules = {path.name for path in source_root.glob("*.py")}
 
-        for source_path in sorted(source_root.rglob("*.py")):
-            if source_path in facade_paths:
-                continue
-            syntax_tree = ast.parse(
-                source_path.read_text(encoding="utf-8"),
-                filename=str(source_path),
-            )
-            for node in ast.walk(syntax_tree):
-                if isinstance(node, ast.ImportFrom):
-                    imported_module = node.module
-                    if imported_module in COMPATIBILITY_IMPORT_PATHS:
-                        violations.append(
-                            f"{source_path.relative_to(source_root)}:{node.lineno} "
-                            f"imports {imported_module}"
-                        )
-                elif isinstance(node, ast.Import):
-                    violations.extend(
-                        f"{source_path.relative_to(source_root)}:{node.lineno} "
-                        f"imports {imported_name.name}"
-                        for imported_name in node.names
-                        if imported_name.name in COMPATIBILITY_IMPORT_PATHS
-                    )
+        self.assertEqual(
+            {"__init__.py", "__main__.py", "exceptions.py"},
+            root_modules,
+        )
+        self.assertTrue((source_root / "py.typed").is_file())
 
-        self.assertEqual([], violations)
+    def test_feature_packages_expose_the_canonical_public_api(self) -> None:
+        from rag_pipeline.benchmarking import BenchmarkConfig as PublicBenchmarkConfig
+        from rag_pipeline.benchmarking.config import BenchmarkConfig
+        from rag_pipeline.evaluation import (
+            AnswerEvaluationDataset as PublicAnswerEvaluationDataset,
+        )
+        from rag_pipeline.evaluation.answers import AnswerEvaluationDataset
+        from rag_pipeline.generation import AnswerGenerator as PublicAnswerGenerator
+        from rag_pipeline.generation.service import AnswerGenerator
+        from rag_pipeline.ingestion import extract_documents as public_extract_documents
+        from rag_pipeline.ingestion.extraction import extract_documents
+        from rag_pipeline.retrieval import RetrieverService as PublicRetrieverService
+        from rag_pipeline.retrieval.service import RetrieverService
+
+        self.assertIs(PublicBenchmarkConfig, BenchmarkConfig)
+        self.assertIs(PublicAnswerEvaluationDataset, AnswerEvaluationDataset)
+        self.assertIs(PublicAnswerGenerator, AnswerGenerator)
+        self.assertIs(public_extract_documents, extract_documents)
+        self.assertIs(PublicRetrieverService, RetrieverService)
 
     def test_module_entry_point_runs(self) -> None:
         from rag_pipeline.__main__ import main

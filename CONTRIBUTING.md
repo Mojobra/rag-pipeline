@@ -61,13 +61,13 @@ depend on an existing local Qdrant collection.
   invocation in `rag_pipeline.generation`; and metrics in
   `rag_pipeline.evaluation` or `rag_pipeline.benchmarking` as appropriate.
 - Keep provider and persistence adapters in `rag_pipeline.infrastructure`.
-- Use canonical feature-package imports inside the source tree. Existing
-  top-level compatibility modules preserve downstream imports but should not
-  receive new implementation logic.
+- Use canonical feature-package imports throughout source, tests, and
+  documentation. Do not add root-level re-export modules that hide ownership.
 - Keep the package hierarchy shallow. Add a subpackage when several modules have
   one cohesive owner, not merely to wrap a single class or function.
 - Validate dynamic JSON and provider responses at their boundaries.
-- Preserve stable public imports or provide a compatibility facade.
+- Treat feature-package imports as public API. Document any deliberate breaking
+  change explicitly, especially while the project remains pre-1.0.
 - Add concise docstrings for public APIs, I/O, state mutation, and non-obvious
   algorithms.
 - Add focused regression tests for changed behavior and failure modes.
