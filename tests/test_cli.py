@@ -71,6 +71,58 @@ class CliArchitectureTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 0)
                 self.assertIn("usage:", output.getvalue())
 
+    def test_benchmark_parser_builds_selected_chunking_contract(self) -> None:
+        from rag_pipeline.cli import build_parser
+        from rag_pipeline.cli.config import build_benchmark_config
+        from rag_pipeline.ingestion.chunking import StructureAwareChunkingConfig
+        from rag_pipeline.ingestion.semantic_chunking import SemanticChunkingConfig
+
+        cases = (
+            ("structure-aware", StructureAwareChunkingConfig),
+            ("semantic", SemanticChunkingConfig),
+        )
+        for strategy, expected_type in cases:
+            with self.subTest(strategy=strategy):
+                args = build_parser().parse_args(
+                    [
+                        "benchmark",
+                        "corpus",
+                        "retrieval.json",
+                        "answers.json",
+                        "--output",
+                        "artifact.json",
+                        "--chunking-strategy",
+                        strategy,
+                    ]
+                )
+
+                config = build_benchmark_config(args)
+
+                self.assertIsInstance(config.chunking, expected_type)
+
+    def test_benchmark_config_builder_rejects_unknown_chunking_strategy(self) -> None:
+        from rag_pipeline.cli import build_parser
+        from rag_pipeline.cli.config import build_benchmark_chunking_config
+        from rag_pipeline.exceptions import InvalidChunkingConfigurationError
+
+        args = build_parser().parse_args(
+            [
+                "benchmark",
+                "corpus",
+                "retrieval.json",
+                "answers.json",
+                "--output",
+                "artifact.json",
+            ]
+        )
+        args.chunking_strategy = "unknown"
+
+        with self.assertRaisesRegex(
+            InvalidChunkingConfigurationError,
+            "recursive, structure-aware, or semantic",
+        ):
+            build_benchmark_chunking_config(args)
+
 
 class CliOutputTests(unittest.TestCase):
     """Verify terminal formatting independently from command orchestration."""
@@ -112,9 +164,9 @@ class CliOutputTests(unittest.TestCase):
         )
 
     def test_formats_answer_with_structured_sources(self) -> None:
-        from rag_pipeline.citations import Citation
         from rag_pipeline.cli.output import format_generated_answer
         from rag_pipeline.generation import GeneratedAnswer
+        from rag_pipeline.generation.citations import Citation
 
         answer = GeneratedAnswer(
             answer="Itemized receipts are required.",

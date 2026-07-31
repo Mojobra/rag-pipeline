@@ -141,7 +141,7 @@ def run_answer(
         InvalidVectorStoreConfigurationError,
     )
     from rag_pipeline.generation import create_local_answer_generator
-    from rag_pipeline.prompting import INSUFFICIENT_CONTEXT_ANSWER
+    from rag_pipeline.generation.prompting import INSUFFICIENT_CONTEXT_ANSWER
 
     try:
         runtime_config = build_retrieval_runtime_config(args)

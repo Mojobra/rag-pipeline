@@ -15,13 +15,18 @@ from rag_pipeline.application.indexing import IndexingPipelineConfig
 from rag_pipeline.application.retrieval import RetrievalPipelineConfig
 
 if TYPE_CHECKING:
-    from rag_pipeline.benchmark_config import BenchmarkConfig
-    from rag_pipeline.chunking import ChunkingConfig
-    from rag_pipeline.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.benchmarking.config import (
+        BenchmarkChunkingConfig,
+        BenchmarkConfig,
+    )
     from rag_pipeline.generation import GenerationConfig, LocalGenerationConfig
-    from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
-    from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
-    from rag_pipeline.vector_store import SearchMode
+    from rag_pipeline.infrastructure.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.infrastructure.sparse_embeddings import (
+        LocalSparseEmbeddingConfig,
+    )
+    from rag_pipeline.infrastructure.vector_store import SearchMode
+    from rag_pipeline.ingestion.chunking import ChunkingConfig
+    from rag_pipeline.retrieval.reranking import LocalRerankerConfig, RerankingConfig
 
 # Backward-compatible aliases for callers that imported the pre-refactor CLI
 # configuration names. New code should use the transport-neutral application
@@ -32,7 +37,7 @@ RetrievalRuntimeConfig = RetrievalPipelineConfig
 
 def build_chunking_config(args: argparse.Namespace) -> ChunkingConfig:
     """Build validated character chunking settings from parsed CLI fields."""
-    from rag_pipeline.chunking import ChunkingConfig
+    from rag_pipeline.ingestion.chunking import ChunkingConfig
 
     return ChunkingConfig(
         chunk_size=args.chunk_size,
@@ -40,9 +45,43 @@ def build_chunking_config(args: argparse.Namespace) -> ChunkingConfig:
     )
 
 
+def build_benchmark_chunking_config(
+    args: argparse.Namespace,
+) -> BenchmarkChunkingConfig:
+    """Build the selected isolated-benchmark chunking strategy.
+
+    Recursive and structure-aware policies use both shared size fields.
+    Semantic chunking treats ``chunk_size`` as a hard cap and deliberately does
+    not use overlap; its additional controls are validated only when selected.
+    """
+    from rag_pipeline.ingestion.chunking import StructureAwareChunkingConfig
+    from rag_pipeline.ingestion.semantic_chunking import SemanticChunkingConfig
+
+    if args.chunking_strategy == "recursive":
+        return build_chunking_config(args)
+    if args.chunking_strategy == "structure-aware":
+        return StructureAwareChunkingConfig(
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+        )
+    if args.chunking_strategy == "semantic":
+        return SemanticChunkingConfig(
+            max_chunk_size=args.chunk_size,
+            min_chunk_size=args.semantic_min_chunk_size,
+            breakpoint_percentile=args.semantic_breakpoint_percentile,
+            buffer_size=args.semantic_buffer_size,
+        )
+
+    from rag_pipeline.exceptions import InvalidChunkingConfigurationError
+
+    raise InvalidChunkingConfigurationError(
+        "chunking_strategy must be recursive, structure-aware, or semantic."
+    )
+
+
 def build_embedding_config(args: argparse.Namespace) -> LocalEmbeddingConfig:
     """Build the dense model contract shared by indexing and querying."""
-    from rag_pipeline.embeddings import LocalEmbeddingConfig
+    from rag_pipeline.infrastructure.embeddings import LocalEmbeddingConfig
 
     return LocalEmbeddingConfig(
         model_name=args.model,
@@ -82,7 +121,7 @@ def build_index_command_config(
     created only for hybrid collections, matching the indexing command's
     provider lifecycle.
     """
-    from rag_pipeline.vector_store import (
+    from rag_pipeline.infrastructure.vector_store import (
         SearchMode,
         VectorStoreConfig,
     )
@@ -114,9 +153,9 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
     Every stage is validated here, but the function performs no filesystem
     access, model initialization, inference, or vector-store writes.
     """
-    from rag_pipeline.benchmark_config import BenchmarkConfig
+    from rag_pipeline.benchmarking.config import BenchmarkConfig
+    from rag_pipeline.infrastructure.vector_store import SearchMode
     from rag_pipeline.retrieval import RetrievalConfig, parse_metadata_filter
-    from rag_pipeline.vector_store import SearchMode
 
     embedding_config = build_embedding_config(args)
     search_mode = SearchMode(args.search_mode)
@@ -136,7 +175,7 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
             parse_metadata_filter(value) for value in (args.metadata_filters or ())
         ),
     )
-    chunking_config = build_chunking_config(args)
+    chunking_config = build_benchmark_chunking_config(args)
     local_generation_config, generation_config = build_generation_configs(args)
     return BenchmarkConfig(
         name=args.name,
@@ -163,8 +202,8 @@ def build_retrieval_runtime_config(
     filters, and optional reranking are validated without performing provider
     initialization, downloads, vector-store I/O, or inference.
     """
+    from rag_pipeline.infrastructure.vector_store import SearchMode, VectorStoreConfig
     from rag_pipeline.retrieval import RetrievalConfig, parse_metadata_filter
-    from rag_pipeline.vector_store import SearchMode, VectorStoreConfig
 
     embedding_config = build_embedding_config(args)
     search_mode = SearchMode(args.search_mode)
@@ -205,8 +244,10 @@ def _build_sparse_embedding_config(
     search_mode: SearchMode,
 ) -> LocalSparseEmbeddingConfig | None:
     """Build sparse provider settings only when the selected mode is hybrid."""
-    from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
-    from rag_pipeline.vector_store import SearchMode
+    from rag_pipeline.infrastructure.sparse_embeddings import (
+        LocalSparseEmbeddingConfig,
+    )
+    from rag_pipeline.infrastructure.vector_store import SearchMode
 
     if search_mode != SearchMode.HYBRID:
         return None
@@ -231,7 +272,7 @@ def _build_reranking_configs(
     reranking validates that ``candidate_k`` can satisfy the final result count.
     """
     from rag_pipeline.exceptions import InvalidRerankingConfigurationError
-    from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
+    from rag_pipeline.retrieval.reranking import LocalRerankerConfig, RerankingConfig
 
     if not args.rerank:
         return None, None, args.top_k

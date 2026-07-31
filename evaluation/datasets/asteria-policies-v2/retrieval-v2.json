@@ -1,0 +1,184 @@
+{
+  "schema_version": 2,
+  "name": "asteria-policies-retrieval-v2",
+  "cases": [
+    {
+      "id": "expense-receipt-threshold",
+      "query": "When is an itemized receipt required for an expense?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-reimbursement.md"},
+          "content_contains": "itemized receipt for every purchase above EUR 25"
+        }
+      ]
+    },
+    {
+      "id": "expense-card-slip",
+      "query": "Is a payment-card slip enough evidence for reimbursement?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-reimbursement.md"},
+          "content_contains": "payment-card slip without line-item details"
+        }
+      ]
+    },
+    {
+      "id": "expense-director-approval",
+      "query": "Who must approve an expense claim above EUR 500?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-reimbursement.md"},
+          "content_contains": "Claims above EUR 500 require department-director approval"
+        }
+      ]
+    },
+    {
+      "id": "expense-submission-deadline",
+      "query": "How long does an employee have to submit an expense claim?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-reimbursement.md"},
+          "content_contains": "submit claims within 30 calendar days"
+        }
+      ]
+    },
+    {
+      "id": "travel-booking-channel",
+      "query": "Where must employees book flights and hotels?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "book flights and hotels through the Asteria Travel Portal"
+        }
+      ]
+    },
+    {
+      "id": "travel-flight-cabin",
+      "query": "What are the economy and premium-economy rules based on flight duration?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "Economy class is required for flights shorter than six hours"
+        },
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "permitted for flights of six hours or longer"
+        }
+      ]
+    },
+    {
+      "id": "travel-hotel-limit",
+      "query": "What is the standard nightly hotel limit before local taxes?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "standard hotel limit is EUR 180 per night"
+        }
+      ]
+    },
+    {
+      "id": "security-phishing-response",
+      "query": "How and when should an employee report suspected phishing?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "security portal within 30 minutes of discovery"
+        }
+      ]
+    },
+    {
+      "id": "security-lost-device",
+      "query": "Who must be notified about a lost company device, and by when?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "within one hour"
+        }
+      ]
+    },
+    {
+      "id": "security-policy-identifier",
+      "query": "Which policy has the identifier SEC-210?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "Policy ID: SEC-210"
+        }
+      ]
+    },
+    {
+      "id": "remote-work-days",
+      "query": "How many days per week may an employee work remotely?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "remote-work.md"},
+          "content_contains": "remotely up to three days per week"
+        }
+      ]
+    },
+    {
+      "id": "remote-public-wifi",
+      "query": "What must an employee do before using company systems on public Wi-Fi?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "remote-work.md"},
+          "content_contains": "connect through the company VPN before"
+        }
+      ]
+    },
+    {
+      "id": "retention-support-tickets",
+      "query": "How long are closed customer support tickets retained?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "records-retention.md"},
+          "content_contains": "retained for 24 months after closure"
+        }
+      ]
+    },
+    {
+      "id": "retention-expense-records",
+      "query": "How long must expense records be retained?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "records-retention.md"},
+          "content_contains": "retained for seven years after the end of the fiscal year"
+        }
+      ]
+    },
+    {
+      "id": "retention-security-logs",
+      "query": "What is the normal retention period for security-access logs?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "records-retention.md"},
+          "content_contains": "security-access logs are retained"
+        }
+      ]
+    },
+    {
+      "id": "retention-legal-hold",
+      "query": "What happens to scheduled deletion when a legal hold applies?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "records-retention.md"},
+          "content_contains": "legal hold overrides the standard deletion schedule"
+        }
+      ]
+    },
+    {
+      "id": "cross-policy-travel-meal-receipt",
+      "query": "What evidence is required for a travel meal costing more than EUR 25?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "Travel meals follow the Expense Reimbursement Policy"
+        },
+        {
+          "metadata": {"file_name": "expense-reimbursement.md"},
+          "content_contains": "itemized receipt for every purchase above EUR 25"
+        }
+      ]
+    }
+  ]
+}

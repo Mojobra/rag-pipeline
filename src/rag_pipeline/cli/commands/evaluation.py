@@ -38,8 +38,9 @@ def register_evaluation_commands(
         "dataset",
         help=(
             "UTF-8 JSON file containing schema_version, name, and labeled query "
-            "cases with exact metadata selectors under relevant. Change it to "
-            "evaluate a different corpus or relevance-judgment snapshot."
+            "cases. Schema v1 uses exact metadata selectors; v2 adds source-text "
+            "anchors for chunk-index-independent judgments. Change it for a different "
+            "corpus or relevance snapshot."
         ),
     )
     add_embedding_arguments(retrieval_parser)
@@ -108,6 +109,12 @@ def run_evaluate_retrieval(
         open_local_retrieval_pipeline,
     )
     from rag_pipeline.cli.config import build_retrieval_runtime_config
+    from rag_pipeline.evaluation.retrieval import (
+        evaluate_retrieval,
+        format_retrieval_evaluation_table,
+        load_retrieval_evaluation_dataset,
+        retrieval_evaluation_to_dict,
+    )
     from rag_pipeline.exceptions import (
         InvalidEmbeddingConfigurationError,
         InvalidPipelineConfigurationError,
@@ -115,12 +122,6 @@ def run_evaluate_retrieval(
         InvalidRetrievalConfigurationError,
         InvalidRetrievalEvaluationDatasetError,
         InvalidVectorStoreConfigurationError,
-    )
-    from rag_pipeline.retrieval_evaluation import (
-        evaluate_retrieval,
-        format_retrieval_evaluation_table,
-        load_retrieval_evaluation_dataset,
-        retrieval_evaluation_to_dict,
     )
 
     try:
@@ -160,18 +161,18 @@ def run_evaluate_answer(
     is initialized after the first case is retrieved and reused for all
     remaining cases, including deterministic no-evidence responses.
     """
-    from rag_pipeline.answer_evaluation import (
-        answer_evaluation_to_dict,
-        evaluate_answers,
-        format_answer_evaluation_table,
-        load_answer_evaluation_dataset,
-    )
     from rag_pipeline.application.retrieval import (
         open_local_retrieval_pipeline,
     )
     from rag_pipeline.cli.config import (
         build_generation_configs,
         build_retrieval_runtime_config,
+    )
+    from rag_pipeline.evaluation.answers import (
+        answer_evaluation_to_dict,
+        evaluate_answers,
+        format_answer_evaluation_table,
+        load_answer_evaluation_dataset,
     )
     from rag_pipeline.exceptions import (
         InvalidAnswerEvaluationDatasetError,

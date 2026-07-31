@@ -5,7 +5,7 @@
 1. CLI Transport Adapter
 2. Transport-Neutral Application Use Cases
 3. Document Ingestion, Parsing, and Cleaning
-4. Chunking
+4. Recursive Chunking plus Isolated Structure/Semantic Experiments
 5. Embedding Generation
 6. Vector Database
 7. Hybrid Retrieval Layer (dense + BM25 sparse with RRF)
@@ -38,6 +38,46 @@ Production hardening
 
 Phase 5:
 Enterprise integrations
+
+---
+
+## Package Ownership
+
+The source tree uses shallow feature packages rather than one large flat module
+directory or a deeply nested clean-architecture hierarchy:
+
+- `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
+  rendering.
+- `rag_pipeline.application` owns transport-neutral indexing and retrieval use
+  cases that coordinate multiple pipeline stages.
+- `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
+  recursive and experimental chunking policies, and structural diagnostics.
+- `rag_pipeline.retrieval` owns first-stage search and optional cross-encoder
+  reranking.
+- `rag_pipeline.generation` owns evidence packing, prompt construction, model
+  invocation, abstention, and citations.
+- `rag_pipeline.evaluation` owns versioned retrieval and answer schemas, metrics,
+  and report formatting.
+- `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
+  artifacts, comparisons, and regression thresholds.
+- `rag_pipeline.infrastructure` owns local dense and sparse model adapters plus
+  Qdrant persistence. These modules perform provider or storage I/O but do not
+  own CLI or application workflow decisions.
+- `rag_pipeline.exceptions` remains a shared root module so every layer can use
+  one stable, actionable error hierarchy without depending on another feature.
+
+Internal source imports use these canonical package paths. Thin top-level modules
+such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
+`rag_pipeline.benchmark_artifacts` preserve established imports for downstream
+callers; they contain no business logic and emit no deprecation warnings. Tests
+mirror the same feature boundaries while repository-wide CLI and package smoke
+tests remain at the test root.
+
+This structure adds a small navigation cost compared with a flat package, but it
+keeps related changes together as the pipeline grows. The hierarchy deliberately
+stops at one feature level: additional folders should be introduced only when a
+feature develops multiple cohesive responsibilities, not for every class or
+function.
 
 ---
 
@@ -75,11 +115,11 @@ response, authentication, and error-mapping concerns remain future work.
 
 - LangChain composes the `grounded-v2` prompt with the configured language model
   and string output parser.
-- `rag_pipeline.prompting` owns the versioned template, evidence boundaries,
-  tokenizer protocol, and token-aware packing algorithm.
-- `rag_pipeline.generation` owns model lifecycle, invocation, answer assembly,
-  and deterministic citation integration while re-exporting established prompt
-  APIs for compatibility.
+- `rag_pipeline.generation.prompting` owns the versioned template, evidence
+  boundaries, tokenizer protocol, and token-aware packing algorithm.
+- `rag_pipeline.generation.service` owns model lifecycle, invocation, answer
+  assembly, and deterministic citation integration. The package entry point and
+  `rag_pipeline.prompting` facade preserve established prompt imports.
 - Ranked chunks are packed into numbered evidence blocks under exact character
   and tokenizer limits before a model is invoked.
 - Retrieved text is explicitly treated as untrusted data, and unsupported or
@@ -94,10 +134,38 @@ before production use.
 
 ---
 
+## Current Chunking Strategy Contract
+
+- Normal `chunk`, `embed`, and `index` workflows retain the established
+  LangChain recursive-character policy and its defaults.
+- Isolated benchmarks additionally accept a structure-aware recursive policy.
+  Markdown and HTML use LangChain's language-specific separator priorities;
+  other formats use the baseline separator order.
+- The semantic policy forms punctuation/paragraph units, embeds buffered
+  sentence contexts through LangChain's `Embeddings` interface, and proposes
+  boundaries above a configurable cosine-distance percentile.
+- Semantic output has no overlap. A validated maximum character size remains a
+  hard invariant, and oversized individual units fall back to zero-overlap
+  LangChain recursive splitting.
+- Every policy preserves source metadata, zero-based chunk order, character
+  offsets, chunk counts, and character counts. Experimental chunks also record
+  their strategy and applicable structure language.
+- The benchmark initializes the dense model once. Semantic boundary inference
+  and final chunk embedding share that validated provider and dimension state,
+  although they remain separate inference passes and timing stages.
+
+Semantic chunking can improve topical coherence but adds ingestion latency and
+is sensitive to sentence segmentation, model choice, and threshold calibration.
+The implementation is intentionally benchmark-only until representative quality
+and operational results justify expanding the public indexing workflow.
+
+---
+
 ## Current Retrieval Evaluation Contract
 
-- A strict schema-v1 JSON file supplies named query cases and one or more binary
-  relevance judgments expressed as exact document-metadata selectors.
+- Strict schema-v1 JSON remains supported for exact document-metadata selectors.
+  Schema v2 combines exact metadata with a case-sensitive source-content anchor,
+  allowing one judgment to survive ordinary changes in chunk boundaries.
 - Evaluation runs the same LangChain/Qdrant dense or hybrid retriever, metadata
   filters, score gate, and optional cross-encoder reranker used by interactive
   commands; it never invokes generation or mutates the collection.
@@ -105,14 +173,15 @@ before production use.
   plus macro averages that give every query equal weight.
 - Table output supports local diagnosis and JSON output supports saved
   comparisons.
-- The committed synthetic policy corpus supplies 17 manually cross-checked
-  retrieval cases, including one multi-document judgment.
+- Both committed synthetic policy dataset versions supply 17 manually
+  cross-checked retrieval cases, including one multi-document judgment.
 
-Exact metadata selectors are transparent but depend on stable provenance.
-Portable business datasets should eventually use immutable document and chunk
-version identifiers instead of filenames and chunk positions. The benchmark
-layer now captures latency and immutable input fingerprints around these
-metrics.
+Exact v1 metadata selectors are transparent but depend on stable chunk
+provenance. V2 content anchors support boundary experiments but require a new
+dataset version when source wording changes. Portable business datasets should
+eventually use immutable document/version identifiers and reviewed evidence
+spans. The benchmark captures latency and immutable input fingerprints around
+these metrics.
 
 ---
 
@@ -146,6 +215,9 @@ judge remain future work.
 - `evaluation/datasets/asteria-policies-v1` contains five repository-owned,
   synthetic Markdown policies. No local user documents or customer data are
   part of the benchmark.
+- `asteria-policies-v2` preserves the fictional policy domain in a new immutable
+  asset and replaces chunk-index relevance with file metadata plus exact source
+  anchors for recursive, structure-aware, and semantic comparisons.
 - Retrieval and answer datasets share IDs and query text for all 17 answerable
   cases; the answer dataset adds four unsupported questions.
 - Retrieval labels use `file_name` and zero-based `chunk_index` against the
@@ -153,6 +225,9 @@ judge remain future work.
 - Integrity tests reproduce the ten expected chunks, require each selector to
   match exactly one chunk, align the paired schemas, and check reference
   vocabulary against labeled evidence.
+- V2 integrity tests require every anchor to be unique in its source and resolve
+  under the default configuration of all three strategies, then verify accepted
+  references against each strategy's matched evidence.
 - Dataset versions are repository artifacts and should be treated as immutable
   after benchmark results depend on them.
 
@@ -166,23 +241,26 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
 
 ## Current Benchmark Contract
 
-- `rag_pipeline.benchmarking` is the stable orchestration facade. Configuration,
-  metrics, timing, threshold evaluation, and report construction live in
-  focused internal modules.
-- `rag_pipeline.benchmark_artifacts` remains the stable artifact and comparison
-  facade while threshold schemas and the metric registry live in focused
-  internal modules.
-- `benchmark` starts from one explicit corpus and the paired schema-v1
-  evaluation files, then builds a fresh temporary Qdrant collection. The index
-  is closed and deleted after its storage size is recorded.
+- `rag_pipeline.benchmarking` is the stable orchestration package.
+  `benchmarking.runner` performs execution while configuration, metrics, timing,
+  threshold evaluation, provenance, artifact handling, and report construction
+  live in focused sibling modules.
+- `rag_pipeline.benchmarking.artifacts` is the canonical artifact and comparison
+  module. `rag_pipeline.benchmark_artifacts` remains a compatibility facade for
+  the established import path.
+- `benchmark` starts from one explicit corpus and paired retrieval/answer files,
+  then builds a fresh temporary Qdrant collection. Retrieval schemas v1 and v2
+  are accepted, but v2 is required for valid boundary-strategy comparisons. The
+  index is closed and deleted after its storage size is recorded.
 - Corpus relative paths and bytes plus both dataset files receive SHA-256
   fingerprints. Artifacts omit absolute corpus, cache, output, and work paths.
 - One manifest records chunking, dense and optional sparse models, retrieval,
   filters, reranking, generation, prompt/token limits, devices, batching, Git
   state, package versions, CPU/platform data, and available CUDA devices.
 - Models are initialized once. Reports separate model-load, extraction,
-  chunking, embedding, index, retrieval-evaluation, and answer-evaluation stage
-  durations, with ordered per-case retrieval and end-to-end answer latency.
+  chunking (including semantic boundary inference), final embedding, index,
+  retrieval-evaluation, and answer-evaluation stage durations, with ordered
+  per-case retrieval and end-to-end answer latency.
 - Optional strict threshold profiles apply inclusive minimum or maximum bounds
   to allowlisted quality and operational metrics. Profiles bind to corpus and
   dataset hashes plus final top-k and fail before model loading on a mismatch.
@@ -217,6 +295,9 @@ approved from reviewed baselines; example values are not production defaults.
 - The offline unittest suite uses provider doubles and temporary in-memory or
   local Qdrant stores. It requires no credentials, model downloads, GPU, or
   pre-existing collection.
+- Test modules are grouped by the same application, ingestion, retrieval,
+  generation, evaluation, benchmarking, and infrastructure boundaries used by
+  the source package.
 - Coverage measures branches as well as statements and enforces an 80 percent
   repository floor.
 - GitHub Actions runs the locked environment, format check, lint, strict typing,

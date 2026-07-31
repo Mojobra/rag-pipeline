@@ -52,7 +52,7 @@ def format_retrieval_results(results: Sequence[RetrievalResult]) -> str:
 
 def format_generated_answer(answer: GeneratedAnswer) -> str:
     """Render an answer followed by traceable citations when any are present."""
-    from rag_pipeline.citations import format_citation
+    from rag_pipeline.generation.citations import format_citation
 
     lines = ["Answer:", answer.answer]
     if answer.citations:

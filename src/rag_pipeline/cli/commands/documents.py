@@ -96,10 +96,10 @@ def run_chunk(
     parser: argparse.ArgumentParser,
 ) -> int:
     """Load and split documents, reporting counts without model inference."""
-    from rag_pipeline.chunking import chunk_documents
     from rag_pipeline.cli.config import build_chunking_config
     from rag_pipeline.exceptions import InvalidChunkingConfigurationError
     from rag_pipeline.ingestion import load_documents
+    from rag_pipeline.ingestion.chunking import chunk_documents
 
     try:
         config = build_chunking_config(args)
@@ -117,15 +117,15 @@ def run_chunk_experiment(
     parser: argparse.ArgumentParser,
 ) -> int:
     """Compare structural chunking metrics for one extracted document snapshot."""
-    from rag_pipeline.chunking_experiments import (
+    from rag_pipeline.exceptions import InvalidChunkingExperimentError
+    from rag_pipeline.ingestion import load_documents
+    from rag_pipeline.ingestion.experiments import (
         DEFAULT_CHUNKING_CANDIDATES,
         chunking_experiment_to_dict,
         format_chunking_experiment_table,
         parse_chunking_candidate,
         run_chunking_experiment,
     )
-    from rag_pipeline.exceptions import InvalidChunkingExperimentError
-    from rag_pipeline.ingestion import load_documents
 
     try:
         candidates = (

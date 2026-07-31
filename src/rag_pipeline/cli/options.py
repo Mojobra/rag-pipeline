@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import argparse
 
-from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
-from rag_pipeline.reranking import (
-    DEFAULT_LOCAL_RERANKER_MODEL,
-    DEFAULT_RERANKER_CACHE_DIR,
-)
-from rag_pipeline.sparse_embeddings import (
+from rag_pipeline.infrastructure.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
+from rag_pipeline.infrastructure.sparse_embeddings import (
     DEFAULT_FASTEMBED_CACHE_DIR,
     DEFAULT_LOCAL_SPARSE_MODEL,
+)
+from rag_pipeline.retrieval.reranking import (
+    DEFAULT_LOCAL_RERANKER_MODEL,
+    DEFAULT_RERANKER_CACHE_DIR,
 )
 
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
@@ -381,8 +381,12 @@ def add_vector_store_location_arguments(
     )
 
 
-def add_chunking_arguments(command_parser: argparse.ArgumentParser) -> None:
-    """Attach character-based chunk size and overlap options."""
+def add_chunking_arguments(
+    command_parser: argparse.ArgumentParser,
+    *,
+    include_experimental_strategies: bool = False,
+) -> None:
+    """Attach bounded chunking controls and optional benchmark strategies."""
     command_parser.add_argument(
         "--chunk-size",
         type=int,
@@ -390,7 +394,8 @@ def add_chunking_arguments(command_parser: argparse.ArgumentParser) -> None:
         help=(
             "Maximum characters per retrieval chunk. Smaller chunks can sharpen "
             "matches but create more vectors; larger chunks retain context but may "
-            "dilute relevance. Must exceed --chunk-overlap (default: 1000)."
+            "dilute relevance. Must exceed --chunk-overlap for recursive policies "
+            "(default: 1000)."
         ),
     )
     command_parser.add_argument(
@@ -400,7 +405,56 @@ def add_chunking_arguments(command_parser: argparse.ArgumentParser) -> None:
         help=(
             "Target characters repeated between adjacent chunks. More overlap "
             "preserves boundary context but increases embedding work and storage; "
-            "must be non-negative and below --chunk-size (default: 200)."
+            "must be non-negative and below --chunk-size"
+            + (
+                ". Semantic chunking does not use overlap"
+                if include_experimental_strategies
+                else ""
+            )
+            + " (default: 200)."
+        ),
+    )
+    if not include_experimental_strategies:
+        return
+
+    command_parser.add_argument(
+        "--chunking-strategy",
+        choices=("recursive", "structure-aware", "semantic"),
+        default="recursive",
+        help=(
+            "Policy used to build the isolated benchmark index. Recursive is the "
+            "stable baseline; structure-aware prioritizes Markdown/HTML boundaries; "
+            "semantic adds sentence embedding inference (default: recursive)."
+        ),
+    )
+    command_parser.add_argument(
+        "--semantic-min-chunk-size",
+        type=int,
+        default=200,
+        help=(
+            "Minimum characters preferred before a semantic breakpoint is accepted. "
+            "Larger values reduce tiny chunks but can merge topics; used only with "
+            "--chunking-strategy semantic (default: 200)."
+        ),
+    )
+    command_parser.add_argument(
+        "--semantic-breakpoint-percentile",
+        type=float,
+        default=95.0,
+        help=(
+            "Percentile in (0, 100] above which adjacent sentence distance creates "
+            "a semantic boundary. Lower values create more chunks; used only with "
+            "the semantic strategy (default: 95)."
+        ),
+    )
+    command_parser.add_argument(
+        "--semantic-buffer-size",
+        type=int,
+        default=1,
+        help=(
+            "Neighboring sentences included on each side when embedding a semantic "
+            "unit. More context can stabilize boundaries but increases inference "
+            "input; used only with the semantic strategy (default: 1)."
         ),
     )
 

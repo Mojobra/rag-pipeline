@@ -22,6 +22,7 @@ code was reviewed, adapted, and validated through automated tests.
 
 - Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
 - Configurable recursive chunking with page and character-level provenance
+- Opt-in structure-aware and bounded semantic chunking benchmark strategies
 - Reproducible chunking experiments with distribution and overlap-cost metrics
 - Local normalized MiniLM embeddings through LangChain
 - Optional local BM25 sparse embeddings with native Qdrant RRF hybrid search
@@ -32,6 +33,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Ranked semantic retrieval with configurable top-k and score thresholds
 - Typed exact-match metadata filters pushed into Qdrant before top-k selection
 - Versioned retrieval evaluation datasets with per-query and macro top-k metrics
+- Chunk-index-independent schema-v2 relevance anchors for fair comparisons
 - Versioned answer evaluation with reference, abstention, and citation metrics
 - Committed synthetic business-policy corpus with aligned retrieval, answer,
   and abstention labels plus automated drift checks
@@ -75,6 +77,8 @@ flowchart LR
 | --- | --- |
 | Preserve provenance during extraction and chunking | Citations cannot be reconstructed reliably after metadata is lost. |
 | Compare chunking candidates on one document snapshot | Keeps input variance from being mistaken for a chunking effect. |
+| Keep semantic chunking opt-in and benchmarked | Sentence embeddings add ingestion latency, so measured retrieval gains must justify the cost. |
+| Label source evidence instead of experimental chunk indices | The same relevance judgment remains valid when chunk boundaries change. |
 | Use deterministic chunk IDs | Re-indexing updates logical chunks instead of creating duplicates. |
 | Record collection model and dimension | Incompatible query vectors fail before corrupting retrieval behavior. |
 | Version dense and hybrid collection schemas separately | Prevents queries from silently using collections that do not contain the required sparse vectors. |
@@ -213,6 +217,8 @@ Useful options include:
   `--sparse-threads` for local hybrid indexing and queries
 - repeatable `--filter KEY=VALUE` for exact metadata filters with AND semantics
 - repeatable `--candidate SIZE:OVERLAP` for chunking experiments
+- benchmark-only `--chunking-strategy recursive|structure-aware|semantic` plus
+  semantic breakpoint, minimum-size, and sentence-buffer controls
 - `--output-format table|json` for human or machine-readable experiment and
   evaluation reports
 - `--output`, optional `--thresholds`, and `--work-dir` for isolated benchmark
@@ -417,6 +423,13 @@ manually cross-checked but have not received independent annotator review.
 Task 18 runs and records comparable configurations; the dataset itself remains
 independent of benchmark settings, thresholds, or a declared winning setup.
 
+[`asteria-policies-v2`](evaluation/datasets/asteria-policies-v2/README.md) keeps
+the same synthetic domain but uses schema-v2 `metadata` plus
+`content_contains` judgments. Those exact source anchors remain valid when
+chunk indices change, making v2 the appropriate dataset for chunking-strategy
+benchmarks. The v1 assets remain unchanged for backward compatibility and
+default-policy regression tests.
+
 ## Reproducible Benchmarking
 
 The `benchmark` command measures a complete configuration from raw documents to
@@ -536,6 +549,36 @@ runs, concurrency, confidence intervals, memory telemetry, and representative
 service traffic. `runtime.total_seconds` covers benchmark preparation and
 execution through provenance capture; JSON serialization and artifact writing
 occur afterward and are not included.
+
+### Comparing Chunking Strategies
+
+The `benchmark` command keeps recursive chunking as its default and exposes two
+opt-in alternatives:
+
+- `structure-aware` uses LangChain's Markdown and HTML separator priorities,
+  with the normal recursive splitter as a fallback for other formats.
+- `semantic` embeds sentence contexts, creates boundaries at unusually large
+  cosine-distance changes, and enforces `--chunk-size` as a hard character cap.
+  It emits no overlap and reuses the benchmark's dense model for final vectors.
+
+Run every candidate against the v2 source-anchor labels and keep all unrelated
+settings fixed:
+
+```powershell
+uv run python -m rag_pipeline benchmark `
+  evaluation/datasets/asteria-policies-v2/documents `
+  evaluation/datasets/asteria-policies-v2/retrieval-v2.json `
+  evaluation/datasets/asteria-policies-v2/answers-v2.json `
+  --chunking-strategy semantic `
+  --name asteria-v2-semantic `
+  --output .rag_data/benchmarks/asteria-v2-semantic.json
+```
+
+Repeat with `recursive` and `structure-aware`, then use `compare-benchmarks`.
+Review retrieval and answer quality together with chunk count, index bytes,
+chunking time, dense-embedding time, and per-case failures. Semantic chunking
+performs extra embedding inference during ingestion and is not assumed to be
+better; representative reviewed results must justify changing a default.
 
 ## Metadata Filters
 
@@ -733,27 +776,22 @@ commands.
 |-- evaluation/
 |   |-- README.md
 |   `-- datasets/
-|       `-- asteria-policies-v1/
-|           |-- documents/
-|           |-- answers-v1.json
-|           |-- retrieval-v1.json
-|           `-- README.md
+|       |-- asteria-policies-v1/
+|       `-- asteria-policies-v2/
 |-- src/
 |   `-- rag_pipeline/
-|       |-- __main__.py
 |       |-- application/
 |       |   |-- indexing.py
 |       |   `-- retrieval.py
-|       |-- answer_evaluation.py
-|       |-- benchmark_artifacts.py
-|       |-- benchmark_config.py
-|       |-- benchmark_metrics.py
-|       |-- benchmark_provenance.py
-|       |-- benchmark_reporting.py
-|       |-- benchmark_thresholds.py
-|       |-- benchmark_timing.py
-|       |-- benchmarking.py
-|       |-- citations.py
+|       |-- benchmarking/
+|       |   |-- artifacts.py
+|       |   |-- config.py
+|       |   |-- metrics.py
+|       |   |-- provenance.py
+|       |   |-- reporting.py
+|       |   |-- runner.py
+|       |   |-- thresholds.py
+|       |   `-- timing.py
 |       |-- cli/
 |       |   |-- commands/
 |       |   |   |-- benchmarks.py
@@ -765,40 +803,39 @@ commands.
 |       |   |-- config.py
 |       |   |-- options.py
 |       |   `-- output.py
-|       |-- chunking.py
-|       |-- chunking_experiments.py
-|       |-- embeddings.py
+|       |-- evaluation/
+|       |   |-- answers.py
+|       |   `-- retrieval.py
+|       |-- generation/
+|       |   |-- citations.py
+|       |   |-- prompting.py
+|       |   `-- service.py
+|       |-- infrastructure/
+|       |   |-- embeddings.py
+|       |   |-- sparse_embeddings.py
+|       |   `-- vector_store.py
+|       |-- ingestion/
+|       |   |-- chunking.py
+|       |   |-- experiments.py
+|       |   |-- extraction.py
+|       |   |-- loading.py
+|       |   `-- semantic_chunking.py
+|       |-- retrieval/
+|       |   |-- reranking.py
+|       |   `-- service.py
+|       |-- __main__.py
 |       |-- exceptions.py
-|       |-- extraction.py
-|       |-- generation.py
-|       |-- ingestion.py
-|       |-- prompting.py
-|       |-- py.typed
-|       |-- reranking.py
-|       |-- retrieval.py
-|       |-- retrieval_evaluation.py
-|       |-- sparse_embeddings.py
-|       `-- vector_store.py
+|       `-- py.typed
 |-- tests/
-|   |-- test_application.py
-|   |-- test_answer_evaluation.py
-|   |-- test_benchmark_config.py
-|   |-- test_benchmarking.py
+|   |-- application/
+|   |-- benchmarking/
+|   |-- evaluation/
+|   |-- generation/
+|   |-- infrastructure/
+|   |-- ingestion/
+|   |-- retrieval/
 |   |-- test_cli.py
-|   |-- test_citations.py
-|   |-- test_chunking.py
-|   |-- test_chunking_experiments.py
-|   |-- test_embeddings.py
-|   |-- test_evaluation_datasets.py
-|   |-- test_extraction.py
-|   |-- test_generation.py
-|   |-- test_ingestion.py
-|   |-- test_package.py
-|   |-- test_reranking.py
-|   |-- test_retrieval.py
-|   |-- test_retrieval_evaluation.py
-|   |-- test_sparse_embeddings.py
-|   `-- test_vector_store.py
+|   `-- test_package.py
 |-- ARCHITECTURE.md
 |-- CONTRIBUTING.md
 |-- MANIFEST.in
@@ -807,6 +844,11 @@ commands.
 |-- pyproject.toml
 `-- uv.lock
 ```
+
+The tree shows canonical implementation modules. Thin top-level compatibility
+facades such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
+`rag_pipeline.benchmark_artifacts` remain packaged so existing imports continue
+to work; new code uses the feature-package paths above.
 
 ## Current Limitations
 
@@ -821,6 +863,9 @@ commands.
   calibration and approval from representative benchmark runs.
 - Retrieval evaluation currently uses binary exact-match labels and macro
   averages; graded relevance and confidence intervals remain future work.
+- Semantic chunking is an English-style, punctuation-based experiment. It adds
+  sentence embedding work and still needs representative multilingual, layout,
+  and poorly punctuated document evaluation before production adoption.
 - Benchmark latency is one local wall-clock pass. It does not yet provide
   warmups, repetitions, concurrency, memory peaks, confidence intervals, remote
   model cost, or service-level load testing.

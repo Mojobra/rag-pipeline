@@ -56,8 +56,16 @@ depend on an existing local Qdrant collection.
 
 - Keep CLI parsing and terminal rendering in `rag_pipeline.cli`.
 - Put transport-neutral workflow orchestration in `rag_pipeline.application`.
-- Keep extraction, chunking, embedding, retrieval, reranking, generation, and
-  evaluation behavior in their focused domain modules.
+- Put document discovery, extraction, and chunking in `rag_pipeline.ingestion`;
+  search and reranking in `rag_pipeline.retrieval`; prompts, citations, and model
+  invocation in `rag_pipeline.generation`; and metrics in
+  `rag_pipeline.evaluation` or `rag_pipeline.benchmarking` as appropriate.
+- Keep provider and persistence adapters in `rag_pipeline.infrastructure`.
+- Use canonical feature-package imports inside the source tree. Existing
+  top-level compatibility modules preserve downstream imports but should not
+  receive new implementation logic.
+- Keep the package hierarchy shallow. Add a subpackage when several modules have
+  one cohesive owner, not merely to wrap a single class or function.
 - Validate dynamic JSON and provider responses at their boundaries.
 - Preserve stable public imports or provide a compatibility facade.
 - Add concise docstrings for public APIs, I/O, state mutation, and non-obvious

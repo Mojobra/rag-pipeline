@@ -42,8 +42,8 @@ def register_benchmark_commands(
     benchmark_parser.add_argument(
         "retrieval_dataset",
         help=(
-            "Schema-v1 retrieval evaluation JSON whose queries and exact "
-            "metadata selectors score the freshly indexed corpus."
+            "Schema-v1 or v2 retrieval evaluation JSON used to score the fresh "
+            "index. Use v2 content anchors when comparing chunking strategies."
         ),
     )
     benchmark_parser.add_argument(
@@ -95,7 +95,10 @@ def register_benchmark_commands(
             "storage location can affect latency."
         ),
     )
-    add_chunking_arguments(benchmark_parser)
+    add_chunking_arguments(
+        benchmark_parser,
+        include_experimental_strategies=True,
+    )
     add_embedding_arguments(
         benchmark_parser,
         isolated_collection=True,
@@ -167,15 +170,15 @@ def run_benchmark(
     Validation protects input files before corpus processing or model loading.
     A failed configured metric gate still writes the report and returns status 1.
     """
-    from rag_pipeline.benchmark_reporting import (
+    from rag_pipeline.benchmarking import run_benchmark as execute_benchmark
+    from rag_pipeline.benchmarking.reporting import (
         format_benchmark_summary,
         validate_benchmark_output_path,
         write_benchmark_report,
     )
-    from rag_pipeline.benchmark_thresholds import (
+    from rag_pipeline.benchmarking.thresholds import (
         load_benchmark_threshold_profile,
     )
-    from rag_pipeline.benchmarking import run_benchmark as execute_benchmark
     from rag_pipeline.cli.config import build_benchmark_config
     from rag_pipeline.exceptions import (
         AnswerEvaluationError,
@@ -262,7 +265,7 @@ def run_compare_benchmarks(
     parser: argparse.ArgumentParser,
 ) -> int:
     """Validate and compare two benchmark artifacts without running models."""
-    from rag_pipeline.benchmark_artifacts import (
+    from rag_pipeline.benchmarking.artifacts import (
         benchmark_comparison_to_dict,
         compare_benchmark_artifacts,
         format_benchmark_comparison_table,
