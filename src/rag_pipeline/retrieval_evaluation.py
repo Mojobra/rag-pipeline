@@ -1,7 +1,9 @@
 """Compatibility exports for deterministic retrieval evaluation."""
 
 from rag_pipeline.evaluation.retrieval import (
+    LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION,
     RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+    SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS,
     RelevantDocument,
     RetrievalAggregateMetrics,
     RetrievalCaseMetrics,
@@ -15,7 +17,9 @@ from rag_pipeline.evaluation.retrieval import (
 )
 
 __all__ = [
+    "LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION",
     "RETRIEVAL_EVALUATION_SCHEMA_VERSION",
+    "SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS",
     "RelevantDocument",
     "RetrievalAggregateMetrics",
     "RetrievalCaseMetrics",

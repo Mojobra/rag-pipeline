@@ -13,7 +13,9 @@ from rag_pipeline.evaluation.answers import (
     load_answer_evaluation_dataset,
 )
 from rag_pipeline.evaluation.retrieval import (
+    LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION,
     RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+    SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS,
     RelevantDocument,
     RetrievalAggregateMetrics,
     RetrievalCaseMetrics,
@@ -28,7 +30,9 @@ from rag_pipeline.evaluation.retrieval import (
 
 __all__ = [
     "ANSWER_EVALUATION_SCHEMA_VERSION",
+    "LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION",
     "RETRIEVAL_EVALUATION_SCHEMA_VERSION",
+    "SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS",
     "AnswerAggregateMetrics",
     "AnswerCaseMetrics",
     "AnswerEvaluationCase",

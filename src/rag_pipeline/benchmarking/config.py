@@ -9,15 +9,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeAlias
 
 from rag_pipeline.exceptions import InvalidBenchmarkConfigurationError
 from rag_pipeline.generation import GenerationConfig, LocalGenerationConfig
 from rag_pipeline.infrastructure.embeddings import LocalEmbeddingConfig
 from rag_pipeline.infrastructure.sparse_embeddings import LocalSparseEmbeddingConfig
 from rag_pipeline.infrastructure.vector_store import SearchMode
-from rag_pipeline.ingestion.chunking import ChunkingConfig
+from rag_pipeline.ingestion.chunking import (
+    ChunkingConfig,
+    StructureAwareChunkingConfig,
+)
+from rag_pipeline.ingestion.semantic_chunking import SemanticChunkingConfig
 from rag_pipeline.retrieval import RetrievalConfig
 from rag_pipeline.retrieval.reranking import LocalRerankerConfig, RerankingConfig
+
+BenchmarkChunkingConfig: TypeAlias = (
+    ChunkingConfig | StructureAwareChunkingConfig | SemanticChunkingConfig
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +41,7 @@ class BenchmarkConfig:
     """
 
     name: str
-    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    chunking: BenchmarkChunkingConfig = field(default_factory=ChunkingConfig)
     embedding: LocalEmbeddingConfig = field(default_factory=LocalEmbeddingConfig)
     search_mode: SearchMode | str = SearchMode.DENSE
     sparse_embedding: LocalSparseEmbeddingConfig | None = None
@@ -83,8 +92,15 @@ class BenchmarkConfig:
 
 def _validate_config_types(config: BenchmarkConfig) -> None:
     """Reject invalid component objects when callers bypass static typing."""
+    if not isinstance(
+        config.chunking,
+        (ChunkingConfig, StructureAwareChunkingConfig, SemanticChunkingConfig),
+    ):
+        raise TypeError(
+            "chunking must be a ChunkingConfig, StructureAwareChunkingConfig, "
+            "or SemanticChunkingConfig."
+        )
     expected_types = (
-        ("chunking", config.chunking, ChunkingConfig),
         ("embedding", config.embedding, LocalEmbeddingConfig),
         ("retrieval", config.retrieval, RetrievalConfig),
         ("local_generation", config.local_generation, LocalGenerationConfig),

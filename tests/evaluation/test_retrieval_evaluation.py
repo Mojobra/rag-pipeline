@@ -105,6 +105,106 @@ class RetrievalEvaluationTests(unittest.TestCase):
             )
         )
 
+    def test_loads_v2_content_anchors_independent_of_chunk_index(self) -> None:
+        from rag_pipeline.evaluation.retrieval import (
+            LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+            RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+            load_retrieval_evaluation_dataset,
+        )
+
+        payload = {
+            "schema_version": 2,
+            "name": "policy-queries-v2",
+            "cases": [
+                {
+                    "id": "expense-receipts",
+                    "query": "Which receipts are required?",
+                    "relevant": [
+                        {
+                            "metadata": {"file_name": "expenses.pdf"},
+                            "content_contains": "itemized receipt",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dataset_path = Path(temp_dir) / "retrieval-v2.json"
+            dataset_path.write_text(json.dumps(payload), encoding="utf-8")
+            dataset = load_retrieval_evaluation_dataset(dataset_path)
+
+        selector = dataset.cases[0].relevant_documents[0]
+        self.assertEqual(RETRIEVAL_EVALUATION_SCHEMA_VERSION, 1)
+        self.assertEqual(LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION, 2)
+        self.assertEqual(dataset.schema_version, 2)
+        self.assertEqual(selector.content_contains, "itemized receipt")
+        self.assertTrue(
+            selector.matches(
+                Document(
+                    page_content="Claims require an itemized receipt above EUR 25.",
+                    metadata={"file_name": "expenses.pdf", "chunk_index": 9},
+                )
+            )
+        )
+        self.assertFalse(
+            selector.matches(
+                Document(
+                    page_content="Claims require a manager approval.",
+                    metadata={"file_name": "expenses.pdf", "chunk_index": 0},
+                )
+            )
+        )
+
+    def test_dataset_schema_rejects_incompatible_relevance_selectors(self) -> None:
+        from rag_pipeline.evaluation.retrieval import (
+            RelevantDocument,
+            RetrievalEvaluationCase,
+            RetrievalEvaluationDataset,
+        )
+        from rag_pipeline.exceptions import InvalidRetrievalEvaluationDatasetError
+
+        def build_dataset(
+            schema_version: int,
+            relevant_document: RelevantDocument,
+        ) -> RetrievalEvaluationDataset:
+            return RetrievalEvaluationDataset(
+                name=f"schema-{schema_version}",
+                schema_version=schema_version,
+                cases=(
+                    RetrievalEvaluationCase(
+                        case_id="expense",
+                        query="Which receipts are required?",
+                        relevant_documents=(relevant_document,),
+                    ),
+                ),
+            )
+
+        incompatible_selectors = (
+            (
+                "v1-content-anchor",
+                1,
+                RelevantDocument(
+                    {"file_name": "expenses.pdf"},
+                    content_contains="itemized receipt",
+                ),
+            ),
+            (
+                "v2-missing-anchor",
+                2,
+                RelevantDocument({"file_name": "expenses.pdf"}),
+            ),
+            (
+                "v2-missing-metadata",
+                2,
+                RelevantDocument({}, content_contains="itemized receipt"),
+            ),
+        )
+        for label, schema_version, relevant_document in incompatible_selectors:
+            with self.subTest(label=label):
+                with self.assertRaises(InvalidRetrievalEvaluationDatasetError):
+                    build_dataset(schema_version, relevant_document)
+
     def test_calculates_per_case_and_macro_metrics_at_fixed_cutoff(self) -> None:
         from rag_pipeline.evaluation.retrieval import (
             RelevantDocument,
@@ -180,7 +280,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
 
         invalid_payloads = (
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "name": "wrong-version",
                 "cases": [],
             },
@@ -201,6 +301,17 @@ class RetrievalEvaluationTests(unittest.TestCase):
                             {"chunk_id": "same"},
                             {"chunk_id": "same"},
                         ],
+                    }
+                ],
+            },
+            {
+                "schema_version": 2,
+                "name": "missing-content-anchor",
+                "cases": [
+                    {
+                        "id": "case-1",
+                        "query": "Question",
+                        "relevant": [{"metadata": {"file_name": "expenses.pdf"}}],
                     }
                 ],
             },

@@ -9,7 +9,12 @@ from langchain_core.documents import Document
 from rag_pipeline.exceptions import (
     InvalidChunkingConfigurationError,
 )
-from rag_pipeline.ingestion.chunking import ChunkingConfig, chunk_documents
+from rag_pipeline.ingestion.chunking import (
+    ChunkingConfig,
+    StructureAwareChunkingConfig,
+    chunk_documents,
+    chunk_documents_with_structure,
+)
 
 
 class DocumentChunkingTests(unittest.TestCase):
@@ -86,6 +91,38 @@ class DocumentChunkingTests(unittest.TestCase):
     def test_rejects_non_document_inputs(self) -> None:
         with self.assertRaisesRegex(TypeError, "LangChain Document"):
             chunk_documents(["plain text"])  # type: ignore[list-item]
+
+    def test_structure_aware_policy_prioritizes_markdown_headings(self) -> None:
+        text = (
+            "# Intro\n\nAlpha policy text stays in this section.\n\n"
+            "## Rules\n\nBeta rule text stays in the rules section."
+        )
+        document = Document(
+            page_content=text,
+            metadata={"source": "policy.md", "file_extension": ".md"},
+        )
+
+        chunks = chunk_documents_with_structure(
+            [document],
+            config=StructureAwareChunkingConfig(chunk_size=55, chunk_overlap=0),
+        )
+
+        self.assertEqual(
+            [chunk.page_content for chunk in chunks],
+            [
+                "# Intro\n\nAlpha policy text stays in this section.",
+                "## Rules\n\nBeta rule text stays in the rules section.",
+            ],
+        )
+        self.assertEqual(
+            [chunk.metadata["structure_language"] for chunk in chunks],
+            ["markdown", "markdown"],
+        )
+        for chunk in chunks:
+            start = chunk.metadata["start_index"]
+            end = chunk.metadata["end_index"]
+            self.assertEqual(chunk.page_content, text[start:end])
+            self.assertEqual(chunk.metadata["chunking_strategy"], "structure_aware")
 
 
 if __name__ == "__main__":

@@ -81,6 +81,22 @@ class EmbeddingServiceTests(unittest.TestCase):
         self.assertEqual(model.document_requests, [])
         self.assertIsNone(service.dimension)
 
+    def test_langchain_adapter_reuses_validation_and_dimension_state(self) -> None:
+        model = StubEmbeddings(
+            document_vectors=[[1.0, 0.0], [0.0, 1.0]],
+            query_vector=[0.5, 0.5],
+        )
+        service = EmbeddingService(model, model_name="test-model")
+        adapter = service.as_langchain_embeddings()
+
+        document_vectors = adapter.embed_documents(["First", "Second"])
+        query_vector = adapter.embed_query("Question")
+
+        self.assertEqual(document_vectors, [[1.0, 0.0], [0.0, 1.0]])
+        self.assertEqual(query_vector, [0.5, 0.5])
+        self.assertEqual(model.document_requests, [["First", "Second"]])
+        self.assertEqual(service.dimension, 2)
+
     def test_rejects_blank_document_and_query_content(self) -> None:
         service = EmbeddingService(
             StubEmbeddings(document_vectors=[]),

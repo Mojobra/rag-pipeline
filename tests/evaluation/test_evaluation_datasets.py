@@ -8,11 +8,17 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from langchain_core.embeddings import Embeddings
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATASET_ROOT = PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v1"
 DOCUMENTS_ROOT = DATASET_ROOT / "documents"
 RETRIEVAL_DATASET_PATH = DATASET_ROOT / "retrieval-v1.json"
 ANSWER_DATASET_PATH = DATASET_ROOT / "answers-v1.json"
+DATASET_V2_ROOT = PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v2"
+DOCUMENTS_V2_ROOT = DATASET_V2_ROOT / "documents"
+RETRIEVAL_V2_PATH = DATASET_V2_ROOT / "retrieval-v2.json"
+ANSWERS_V2_PATH = DATASET_V2_ROOT / "answers-v2.json"
 
 _WORD_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
@@ -133,6 +139,114 @@ class CommittedEvaluationDatasetTests(unittest.TestCase):
                     reference=reference,
                 ):
                     self.assertLessEqual(_tokens(reference), evidence_tokens)
+
+
+class UniformEmbeddings(Embeddings):
+    """Return one nonzero direction so semantic output depends only on hard caps."""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] for _ in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return [1.0, 0.0]
+
+
+class ChunkingIndependentEvaluationDatasetTests(unittest.TestCase):
+    """Protect v2 source anchors across every benchmark chunking strategy."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from rag_pipeline.evaluation.answers import load_answer_evaluation_dataset
+        from rag_pipeline.evaluation.retrieval import (
+            load_retrieval_evaluation_dataset,
+        )
+        from rag_pipeline.ingestion import load_documents
+        from rag_pipeline.ingestion.chunking import (
+            StructureAwareChunkingConfig,
+            chunk_documents,
+            chunk_documents_with_structure,
+        )
+        from rag_pipeline.ingestion.semantic_chunking import (
+            SemanticChunkingConfig,
+            chunk_documents_semantically,
+        )
+
+        cls.documents = load_documents([DOCUMENTS_V2_ROOT])
+        cls.retrieval_dataset = load_retrieval_evaluation_dataset(RETRIEVAL_V2_PATH)
+        cls.answer_dataset = load_answer_evaluation_dataset(ANSWERS_V2_PATH)
+        cls.chunks_by_strategy = {
+            "recursive": tuple(chunk_documents(cls.documents)),
+            "structure-aware": tuple(
+                chunk_documents_with_structure(
+                    cls.documents,
+                    config=StructureAwareChunkingConfig(),
+                )
+            ),
+            "semantic": tuple(
+                chunk_documents_semantically(
+                    cls.documents,
+                    embeddings=UniformEmbeddings(),
+                    config=SemanticChunkingConfig(),
+                )
+            ),
+        }
+
+    def test_v2_identities_and_case_alignment_are_explicit(self) -> None:
+        self.assertEqual(self.retrieval_dataset.schema_version, 2)
+        self.assertEqual(
+            self.retrieval_dataset.name,
+            "asteria-policies-retrieval-v2",
+        )
+        self.assertEqual(self.answer_dataset.name, "asteria-policies-answers-v2")
+        retrieval_cases = {case.case_id: case for case in self.retrieval_dataset.cases}
+        answerable_cases = {
+            case.case_id: case
+            for case in self.answer_dataset.cases
+            if not case.should_abstain
+        }
+        self.assertEqual(set(retrieval_cases), set(answerable_cases))
+        for case_id, answer_case in answerable_cases.items():
+            self.assertEqual(answer_case.query, retrieval_cases[case_id].query)
+
+    def test_each_anchor_is_unique_in_source_and_resolves_for_every_strategy(
+        self,
+    ) -> None:
+        for case in self.retrieval_dataset.cases:
+            for selector in case.relevant_documents:
+                anchor = selector.content_contains
+                self.assertIsNotNone(anchor)
+                source_matches = [
+                    document
+                    for document in self.documents
+                    if selector.matches(document)
+                ]
+                with self.subTest(case_id=case.case_id, stage="source"):
+                    self.assertEqual(len(source_matches), 1)
+
+                for strategy, chunks in self.chunks_by_strategy.items():
+                    matches = [chunk for chunk in chunks if selector.matches(chunk)]
+                    with self.subTest(case_id=case.case_id, strategy=strategy):
+                        self.assertGreaterEqual(len(matches), 1)
+
+    def test_references_remain_grounded_under_each_chunking_strategy(self) -> None:
+        retrieval_cases = {case.case_id: case for case in self.retrieval_dataset.cases}
+        for strategy, chunks in self.chunks_by_strategy.items():
+            for answer_case in self.answer_dataset.cases:
+                if answer_case.should_abstain:
+                    continue
+                selectors = retrieval_cases[answer_case.case_id].relevant_documents
+                evidence = " ".join(
+                    chunk.page_content
+                    for chunk in chunks
+                    if any(selector.matches(chunk) for selector in selectors)
+                )
+                evidence_tokens = _tokens(evidence)
+                for reference in answer_case.reference_answers:
+                    with self.subTest(
+                        strategy=strategy,
+                        case_id=answer_case.case_id,
+                    ):
+                        self.assertLessEqual(_tokens(reference), evidence_tokens)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,10 @@ from rag_pipeline.application.indexing import IndexingPipelineConfig
 from rag_pipeline.application.retrieval import RetrievalPipelineConfig
 
 if TYPE_CHECKING:
-    from rag_pipeline.benchmarking.config import BenchmarkConfig
+    from rag_pipeline.benchmarking.config import (
+        BenchmarkChunkingConfig,
+        BenchmarkConfig,
+    )
     from rag_pipeline.generation import GenerationConfig, LocalGenerationConfig
     from rag_pipeline.infrastructure.embeddings import LocalEmbeddingConfig
     from rag_pipeline.infrastructure.sparse_embeddings import (
@@ -39,6 +42,40 @@ def build_chunking_config(args: argparse.Namespace) -> ChunkingConfig:
     return ChunkingConfig(
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
+    )
+
+
+def build_benchmark_chunking_config(
+    args: argparse.Namespace,
+) -> BenchmarkChunkingConfig:
+    """Build the selected isolated-benchmark chunking strategy.
+
+    Recursive and structure-aware policies use both shared size fields.
+    Semantic chunking treats ``chunk_size`` as a hard cap and deliberately does
+    not use overlap; its additional controls are validated only when selected.
+    """
+    from rag_pipeline.ingestion.chunking import StructureAwareChunkingConfig
+    from rag_pipeline.ingestion.semantic_chunking import SemanticChunkingConfig
+
+    if args.chunking_strategy == "recursive":
+        return build_chunking_config(args)
+    if args.chunking_strategy == "structure-aware":
+        return StructureAwareChunkingConfig(
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+        )
+    if args.chunking_strategy == "semantic":
+        return SemanticChunkingConfig(
+            max_chunk_size=args.chunk_size,
+            min_chunk_size=args.semantic_min_chunk_size,
+            breakpoint_percentile=args.semantic_breakpoint_percentile,
+            buffer_size=args.semantic_buffer_size,
+        )
+
+    from rag_pipeline.exceptions import InvalidChunkingConfigurationError
+
+    raise InvalidChunkingConfigurationError(
+        "chunking_strategy must be recursive, structure-aware, or semantic."
     )
 
 
@@ -138,7 +175,7 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
             parse_metadata_filter(value) for value in (args.metadata_filters or ())
         ),
     )
-    chunking_config = build_chunking_config(args)
+    chunking_config = build_benchmark_chunking_config(args)
     local_generation_config, generation_config = build_generation_configs(args)
     return BenchmarkConfig(
         name=args.name,
