@@ -66,10 +66,11 @@ directory or a deeply nested clean-architecture hierarchy:
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
   one stable, actionable error hierarchy without depending on another feature.
 
-Internal source imports use these canonical package paths. Thin top-level modules
-such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
-`rag_pipeline.benchmark_artifacts` preserve established imports for downstream
-callers; they contain no business logic and emit no deprecation warnings. Tests
+Source, tests, and public examples use these canonical package paths. The package
+root contains only metadata, the module entry point, the shared exception
+hierarchy, and the typing marker; implementation and re-export ownership stays
+inside feature packages. The pre-1.0 project deliberately removed its temporary
+flat import aliases instead of carrying a migration layer into Phase 4. Tests
 mirror the same feature boundaries while repository-wide CLI and package smoke
 tests remain at the test root.
 
@@ -118,8 +119,8 @@ response, authentication, and error-mapping concerns remain future work.
 - `rag_pipeline.generation.prompting` owns the versioned template, evidence
   boundaries, tokenizer protocol, and token-aware packing algorithm.
 - `rag_pipeline.generation.service` owns model lifecycle, invocation, answer
-  assembly, and deterministic citation integration. The package entry point and
-  `rag_pipeline.prompting` facade preserve established prompt imports.
+  assembly, and deterministic citation integration. The
+  `rag_pipeline.generation` package exposes the supported feature-level API.
 - Ranked chunks are packed into numbered evidence blocks under exact character
   and tokenizer limits before a model is invoked.
 - Retrieved text is explicitly treated as untrusted data, and unsupported or
@@ -245,9 +246,8 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
   `benchmarking.runner` performs execution while configuration, metrics, timing,
   threshold evaluation, provenance, artifact handling, and report construction
   live in focused sibling modules.
-- `rag_pipeline.benchmarking.artifacts` is the canonical artifact and comparison
-  module. `rag_pipeline.benchmark_artifacts` remains a compatibility facade for
-  the established import path.
+- `rag_pipeline.benchmarking.artifacts` owns artifact validation, regression
+  gates, and comparison behavior under the canonical benchmark package.
 - `benchmark` starts from one explicit corpus and paired retrieval/answer files,
   then builds a fresh temporary Qdrant collection. Retrieval schemas v1 and v2
   are accepted, but v2 is required for valid boundary-strategy comparisons. The

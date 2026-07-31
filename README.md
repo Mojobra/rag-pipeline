@@ -40,8 +40,7 @@ code was reviewed, adapted, and validated through automated tests.
 - Isolated full-pipeline benchmarks with input hashes, stage and case latency,
   environment manifests, regression gates, and compatible-run comparisons
 - Thin CLI adapters over transport-neutral indexing and retrieval use cases
-- Focused benchmark, prompt-construction, and reporting modules with stable
-  compatibility facades
+- Focused feature packages without legacy root-level compatibility facades
 - Tokenizer-bounded local generation with a versioned grounding and abstention
   prompt
 - Deterministic citations built from retrieval metadata, never model output
@@ -93,7 +92,7 @@ flowchart LR
 | Gate allowlisted metrics from a separate versioned profile | Keeps ground-truth labels independent of deployment policy and makes CI failures explicit and reviewable. |
 | Dispatch CLI commands through explicit adapter handlers | Keeps parsing and terminal formatting separate from reusable application behavior. |
 | Put indexing and retrieval lifecycles in an application layer | Gives future transports one validated orchestration boundary without coupling domain services to argparse. |
-| Keep compatibility facades while splitting large modules | Improves navigation and ownership without breaking established imports or public behavior. |
+| Keep APIs under their owning feature package | Keeps ownership visible and prevents a pre-1.0 migration layer from obscuring the real architecture. |
 | Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
 | Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
 | Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
@@ -823,6 +822,7 @@ commands.
 |       |-- retrieval/
 |       |   |-- reranking.py
 |       |   `-- service.py
+|       |-- __init__.py
 |       |-- __main__.py
 |       |-- exceptions.py
 |       `-- py.typed
@@ -845,10 +845,13 @@ commands.
 `-- uv.lock
 ```
 
-The tree shows canonical implementation modules. Thin top-level compatibility
-facades such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
-`rag_pipeline.benchmark_artifacts` remain packaged so existing imports continue
-to work; new code uses the feature-package paths above.
+Subpackage `__init__.py` files are omitted from the tree for readability. The
+tracked package root otherwise matches this layout: implementation and public
+imports live under their owning feature package, without legacy root-level
+re-export modules. This pre-1.0 cleanup intentionally removed flat imports such
+as `rag_pipeline.embeddings`; use canonical paths such as
+`rag_pipeline.infrastructure.embeddings`. CLI commands and behavior are
+unchanged.
 
 ## Current Limitations
 
