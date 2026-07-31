@@ -1,1 +1,2 @@
 recursive-include evaluation *.json *.md
+recursive-include tests *.py

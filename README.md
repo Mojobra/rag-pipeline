@@ -740,20 +740,18 @@ commands.
 |           `-- README.md
 |-- src/
 |   `-- rag_pipeline/
-|       |-- __main__.py
 |       |-- application/
 |       |   |-- indexing.py
 |       |   `-- retrieval.py
-|       |-- answer_evaluation.py
-|       |-- benchmark_artifacts.py
-|       |-- benchmark_config.py
-|       |-- benchmark_metrics.py
-|       |-- benchmark_provenance.py
-|       |-- benchmark_reporting.py
-|       |-- benchmark_thresholds.py
-|       |-- benchmark_timing.py
-|       |-- benchmarking.py
-|       |-- citations.py
+|       |-- benchmarking/
+|       |   |-- artifacts.py
+|       |   |-- config.py
+|       |   |-- metrics.py
+|       |   |-- provenance.py
+|       |   |-- reporting.py
+|       |   |-- runner.py
+|       |   |-- thresholds.py
+|       |   `-- timing.py
 |       |-- cli/
 |       |   |-- commands/
 |       |   |   |-- benchmarks.py
@@ -765,40 +763,38 @@ commands.
 |       |   |-- config.py
 |       |   |-- options.py
 |       |   `-- output.py
-|       |-- chunking.py
-|       |-- chunking_experiments.py
-|       |-- embeddings.py
+|       |-- evaluation/
+|       |   |-- answers.py
+|       |   `-- retrieval.py
+|       |-- generation/
+|       |   |-- citations.py
+|       |   |-- prompting.py
+|       |   `-- service.py
+|       |-- infrastructure/
+|       |   |-- embeddings.py
+|       |   |-- sparse_embeddings.py
+|       |   `-- vector_store.py
+|       |-- ingestion/
+|       |   |-- chunking.py
+|       |   |-- experiments.py
+|       |   |-- extraction.py
+|       |   `-- loading.py
+|       |-- retrieval/
+|       |   |-- reranking.py
+|       |   `-- service.py
+|       |-- __main__.py
 |       |-- exceptions.py
-|       |-- extraction.py
-|       |-- generation.py
-|       |-- ingestion.py
-|       |-- prompting.py
-|       |-- py.typed
-|       |-- reranking.py
-|       |-- retrieval.py
-|       |-- retrieval_evaluation.py
-|       |-- sparse_embeddings.py
-|       `-- vector_store.py
+|       `-- py.typed
 |-- tests/
-|   |-- test_application.py
-|   |-- test_answer_evaluation.py
-|   |-- test_benchmark_config.py
-|   |-- test_benchmarking.py
+|   |-- application/
+|   |-- benchmarking/
+|   |-- evaluation/
+|   |-- generation/
+|   |-- infrastructure/
+|   |-- ingestion/
+|   |-- retrieval/
 |   |-- test_cli.py
-|   |-- test_citations.py
-|   |-- test_chunking.py
-|   |-- test_chunking_experiments.py
-|   |-- test_embeddings.py
-|   |-- test_evaluation_datasets.py
-|   |-- test_extraction.py
-|   |-- test_generation.py
-|   |-- test_ingestion.py
-|   |-- test_package.py
-|   |-- test_reranking.py
-|   |-- test_retrieval.py
-|   |-- test_retrieval_evaluation.py
-|   |-- test_sparse_embeddings.py
-|   `-- test_vector_store.py
+|   `-- test_package.py
 |-- ARCHITECTURE.md
 |-- CONTRIBUTING.md
 |-- MANIFEST.in
@@ -807,6 +803,11 @@ commands.
 |-- pyproject.toml
 `-- uv.lock
 ```
+
+The tree shows canonical implementation modules. Thin top-level compatibility
+facades such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
+`rag_pipeline.benchmark_artifacts` remain packaged so existing imports continue
+to work; new code uses the feature-package paths above.
 
 ## Current Limitations
 

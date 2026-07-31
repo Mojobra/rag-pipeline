@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import argparse
 
-from rag_pipeline.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
-from rag_pipeline.reranking import (
-    DEFAULT_LOCAL_RERANKER_MODEL,
-    DEFAULT_RERANKER_CACHE_DIR,
-)
-from rag_pipeline.sparse_embeddings import (
+from rag_pipeline.infrastructure.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
+from rag_pipeline.infrastructure.sparse_embeddings import (
     DEFAULT_FASTEMBED_CACHE_DIR,
     DEFAULT_LOCAL_SPARSE_MODEL,
+)
+from rag_pipeline.retrieval.reranking import (
+    DEFAULT_LOCAL_RERANKER_MODEL,
+    DEFAULT_RERANKER_CACHE_DIR,
 )
 
 DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2

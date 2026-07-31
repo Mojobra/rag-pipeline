@@ -41,6 +41,46 @@ Enterprise integrations
 
 ---
 
+## Package Ownership
+
+The source tree uses shallow feature packages rather than one large flat module
+directory or a deeply nested clean-architecture hierarchy:
+
+- `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
+  rendering.
+- `rag_pipeline.application` owns transport-neutral indexing and retrieval use
+  cases that coordinate multiple pipeline stages.
+- `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
+  chunking, and chunking experiments.
+- `rag_pipeline.retrieval` owns first-stage search and optional cross-encoder
+  reranking.
+- `rag_pipeline.generation` owns evidence packing, prompt construction, model
+  invocation, abstention, and citations.
+- `rag_pipeline.evaluation` owns versioned retrieval and answer schemas, metrics,
+  and report formatting.
+- `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
+  artifacts, comparisons, and regression thresholds.
+- `rag_pipeline.infrastructure` owns local dense and sparse model adapters plus
+  Qdrant persistence. These modules perform provider or storage I/O but do not
+  own CLI or application workflow decisions.
+- `rag_pipeline.exceptions` remains a shared root module so every layer can use
+  one stable, actionable error hierarchy without depending on another feature.
+
+Internal source imports use these canonical package paths. Thin top-level modules
+such as `rag_pipeline.chunking`, `rag_pipeline.embeddings`, and
+`rag_pipeline.benchmark_artifacts` preserve established imports for downstream
+callers; they contain no business logic and emit no deprecation warnings. Tests
+mirror the same feature boundaries while repository-wide CLI and package smoke
+tests remain at the test root.
+
+This structure adds a small navigation cost compared with a flat package, but it
+keeps related changes together as the pipeline grows. The hierarchy deliberately
+stops at one feature level: additional folders should be introduced only when a
+feature develops multiple cohesive responsibilities, not for every class or
+function.
+
+---
+
 ## Current Adapter And Application Contract
 
 - `rag_pipeline.__main__` remains the stable module entry point and re-exports
@@ -75,11 +115,11 @@ response, authentication, and error-mapping concerns remain future work.
 
 - LangChain composes the `grounded-v2` prompt with the configured language model
   and string output parser.
-- `rag_pipeline.prompting` owns the versioned template, evidence boundaries,
-  tokenizer protocol, and token-aware packing algorithm.
-- `rag_pipeline.generation` owns model lifecycle, invocation, answer assembly,
-  and deterministic citation integration while re-exporting established prompt
-  APIs for compatibility.
+- `rag_pipeline.generation.prompting` owns the versioned template, evidence
+  boundaries, tokenizer protocol, and token-aware packing algorithm.
+- `rag_pipeline.generation.service` owns model lifecycle, invocation, answer
+  assembly, and deterministic citation integration. The package entry point and
+  `rag_pipeline.prompting` facade preserve established prompt imports.
 - Ranked chunks are packed into numbered evidence blocks under exact character
   and tokenizer limits before a model is invoked.
 - Retrieved text is explicitly treated as untrusted data, and unsupported or
@@ -166,12 +206,13 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
 
 ## Current Benchmark Contract
 
-- `rag_pipeline.benchmarking` is the stable orchestration facade. Configuration,
-  metrics, timing, threshold evaluation, and report construction live in
-  focused internal modules.
-- `rag_pipeline.benchmark_artifacts` remains the stable artifact and comparison
-  facade while threshold schemas and the metric registry live in focused
-  internal modules.
+- `rag_pipeline.benchmarking` is the stable orchestration package.
+  `benchmarking.runner` performs execution while configuration, metrics, timing,
+  threshold evaluation, provenance, artifact handling, and report construction
+  live in focused sibling modules.
+- `rag_pipeline.benchmarking.artifacts` is the canonical artifact and comparison
+  module. `rag_pipeline.benchmark_artifacts` remains a compatibility facade for
+  the established import path.
 - `benchmark` starts from one explicit corpus and the paired schema-v1
   evaluation files, then builds a fresh temporary Qdrant collection. The index
   is closed and deleted after its storage size is recorded.
@@ -217,6 +258,9 @@ approved from reviewed baselines; example values are not production defaults.
 - The offline unittest suite uses provider doubles and temporary in-memory or
   local Qdrant stores. It requires no credentials, model downloads, GPU, or
   pre-existing collection.
+- Test modules are grouped by the same application, ingestion, retrieval,
+  generation, evaluation, benchmarking, and infrastructure boundaries used by
+  the source package.
 - Coverage measures branches as well as statements and enforces an 80 percent
   repository floor.
 - GitHub Actions runs the locked environment, format check, lint, strict typing,

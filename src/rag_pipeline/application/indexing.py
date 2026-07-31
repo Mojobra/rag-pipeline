@@ -11,17 +11,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from rag_pipeline.chunking import ChunkingConfig, chunk_documents
-from rag_pipeline.embeddings import EmbeddedDocument, LocalEmbeddingConfig
 from rag_pipeline.exceptions import InvalidPipelineConfigurationError
-from rag_pipeline.ingestion import load_documents
-from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
-from rag_pipeline.vector_store import (
+from rag_pipeline.infrastructure.embeddings import (
+    EmbeddedDocument,
+    LocalEmbeddingConfig,
+)
+from rag_pipeline.infrastructure.sparse_embeddings import LocalSparseEmbeddingConfig
+from rag_pipeline.infrastructure.vector_store import (
     IndexingResult,
     LocalVectorStore,
     SearchMode,
     VectorStoreConfig,
 )
+from rag_pipeline.ingestion import load_documents
+from rag_pipeline.ingestion.chunking import ChunkingConfig, chunk_documents
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +109,8 @@ def index_local_documents(
 
     # Import factories at execution time so constructing application objects
     # remains side-effect free and provider boundaries stay replaceable in tests.
-    from rag_pipeline.embeddings import create_local_embedding_service
-    from rag_pipeline.sparse_embeddings import (
+    from rag_pipeline.infrastructure.embeddings import create_local_embedding_service
+    from rag_pipeline.infrastructure.sparse_embeddings import (
         create_local_sparse_embedding_service,
     )
 
@@ -146,7 +149,7 @@ def _prepare_dense_embeddings(
     if not isinstance(embedding, LocalEmbeddingConfig):
         raise TypeError("embedding must be a LocalEmbeddingConfig.")
 
-    from rag_pipeline.embeddings import create_local_embedding_service
+    from rag_pipeline.infrastructure.embeddings import create_local_embedding_service
 
     documents = load_documents(paths, recursive=recursive)
     chunks = chunk_documents(documents, config=chunking)

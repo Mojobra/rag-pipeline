@@ -2,14 +2,41 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import json
 import re
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
+
+COMPATIBILITY_MODULE_NAMES = (
+    "answer_evaluation",
+    "benchmark_artifacts",
+    "benchmark_config",
+    "benchmark_metrics",
+    "benchmark_provenance",
+    "benchmark_reporting",
+    "benchmark_thresholds",
+    "benchmark_timing",
+    "chunking",
+    "chunking_experiments",
+    "citations",
+    "embeddings",
+    "extraction",
+    "prompting",
+    "reranking",
+    "retrieval_evaluation",
+    "sparse_embeddings",
+    "vector_store",
+)
+
+COMPATIBILITY_IMPORT_PATHS = frozenset(
+    f"rag_pipeline.{module_name}" for module_name in COMPATIBILITY_MODULE_NAMES
+)
 
 
 class PromptTokenizerStub:
@@ -34,6 +61,9 @@ class PackageSmokeTests(unittest.TestCase):
         self.assertRegex(rag_pipeline.__version__, re.compile(r"^\d+\.\d+\.\d+$"))
 
     def test_refactored_modules_preserve_established_public_imports(self) -> None:
+        from rag_pipeline.answer_evaluation import (
+            AnswerEvaluationDataset as FacadeAnswerDataset,
+        )
         from rag_pipeline.benchmark_artifacts import (
             BenchmarkThresholdProfile as FacadeThresholdProfile,
         )
@@ -44,19 +74,86 @@ class PackageSmokeTests(unittest.TestCase):
             BenchmarkThresholdProfile as SplitThresholdProfile,
         )
         from rag_pipeline.benchmarking import BenchmarkConfig as FacadeBenchmarkConfig
+        from rag_pipeline.chunking import ChunkingConfig as FacadeChunkingConfig
+        from rag_pipeline.citations import Citation as FacadeCitation
+        from rag_pipeline.embeddings import EmbeddingService as FacadeEmbeddingService
+        from rag_pipeline.evaluation.answers import (
+            AnswerEvaluationDataset as FeatureAnswerDataset,
+        )
         from rag_pipeline.generation import (
             GROUNDED_ANSWER_PROMPT as FACADE_PROMPT,
         )
         from rag_pipeline.generation import (
             PromptTokenizer as FacadePromptTokenizer,
         )
+        from rag_pipeline.generation.citations import Citation as FeatureCitation
+        from rag_pipeline.infrastructure.embeddings import (
+            EmbeddingService as FeatureEmbeddingService,
+        )
+        from rag_pipeline.ingestion import (
+            extract_documents as facade_extract_documents,
+        )
+        from rag_pipeline.ingestion.chunking import (
+            ChunkingConfig as FeatureChunkingConfig,
+        )
+        from rag_pipeline.ingestion.extraction import (
+            extract_documents as feature_extract_documents,
+        )
         from rag_pipeline.prompting import GROUNDED_ANSWER_PROMPT as SPLIT_PROMPT
         from rag_pipeline.prompting import PromptTokenizer as SplitPromptTokenizer
+        from rag_pipeline.reranking import RerankerService as FacadeRerankerService
+        from rag_pipeline.retrieval.reranking import (
+            RerankerService as FeatureRerankerService,
+        )
 
         self.assertIs(FacadeBenchmarkConfig, SplitBenchmarkConfig)
         self.assertIs(FacadeThresholdProfile, SplitThresholdProfile)
         self.assertIs(FACADE_PROMPT, SPLIT_PROMPT)
         self.assertIs(FacadePromptTokenizer, SplitPromptTokenizer)
+        self.assertIs(FacadeAnswerDataset, FeatureAnswerDataset)
+        self.assertIs(FacadeChunkingConfig, FeatureChunkingConfig)
+        self.assertIs(FacadeCitation, FeatureCitation)
+        self.assertIs(FacadeEmbeddingService, FeatureEmbeddingService)
+        self.assertIs(facade_extract_documents, feature_extract_documents)
+        self.assertIs(FacadeRerankerService, FeatureRerankerService)
+
+        for module_name in COMPATIBILITY_MODULE_NAMES:
+            with self.subTest(module_name=module_name):
+                self.assertIsNotNone(import_module(f"rag_pipeline.{module_name}"))
+
+    def test_internal_source_uses_canonical_feature_imports(self) -> None:
+        """Keep compatibility facades out of production dependency paths."""
+        source_root = Path(__file__).resolve().parents[1] / "src" / "rag_pipeline"
+        facade_paths = {
+            source_root / f"{module_name}.py"
+            for module_name in COMPATIBILITY_MODULE_NAMES
+        }
+        violations: list[str] = []
+
+        for source_path in sorted(source_root.rglob("*.py")):
+            if source_path in facade_paths:
+                continue
+            syntax_tree = ast.parse(
+                source_path.read_text(encoding="utf-8"),
+                filename=str(source_path),
+            )
+            for node in ast.walk(syntax_tree):
+                if isinstance(node, ast.ImportFrom):
+                    imported_module = node.module
+                    if imported_module in COMPATIBILITY_IMPORT_PATHS:
+                        violations.append(
+                            f"{source_path.relative_to(source_root)}:{node.lineno} "
+                            f"imports {imported_module}"
+                        )
+                elif isinstance(node, ast.Import):
+                    violations.extend(
+                        f"{source_path.relative_to(source_root)}:{node.lineno} "
+                        f"imports {imported_name.name}"
+                        for imported_name in node.names
+                        if imported_name.name in COMPATIBILITY_IMPORT_PATHS
+                    )
+
+        self.assertEqual([], violations)
 
     def test_module_entry_point_runs(self) -> None:
         from rag_pipeline.__main__ import main
@@ -227,7 +324,7 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.embeddings import DeterministicFakeEmbedding
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
 
         service = EmbeddingService(
             DeterministicFakeEmbedding(size=4),
@@ -240,7 +337,7 @@ class PackageSmokeTests(unittest.TestCase):
             output = io.StringIO()
 
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=service,
             ):
                 with redirect_stdout(output):
@@ -266,8 +363,11 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.embeddings import DeterministicFakeEmbedding
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
 
         service = EmbeddingService(
             DeterministicFakeEmbedding(size=4),
@@ -281,7 +381,7 @@ class PackageSmokeTests(unittest.TestCase):
             output = io.StringIO()
 
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=service,
             ):
                 with redirect_stdout(output):
@@ -316,8 +416,10 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_qdrant import SparseEmbeddings, SparseVector
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
-        from rag_pipeline.sparse_embeddings import SparseEmbeddingService
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.sparse_embeddings import (
+            SparseEmbeddingService,
+        )
 
         class HybridDenseEmbeddings(Embeddings):
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -362,11 +464,11 @@ class PackageSmokeTests(unittest.TestCase):
             store_path = Path(temp_dir) / "qdrant"
 
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=dense_service,
             ):
                 with patch(
-                    "rag_pipeline.sparse_embeddings."
+                    "rag_pipeline.infrastructure.sparse_embeddings."
                     "create_local_sparse_embedding_service",
                     return_value=sparse_service,
                 ):
@@ -419,8 +521,11 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.embeddings import DeterministicFakeEmbedding
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
 
         service = EmbeddingService(
             DeterministicFakeEmbedding(size=4),
@@ -459,7 +564,7 @@ class PackageSmokeTests(unittest.TestCase):
 
             output = io.StringIO()
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=service,
             ):
                 with redirect_stdout(output):
@@ -491,10 +596,13 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.language_models.fake import FakeListLLM
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
         from rag_pipeline.generation import AnswerGenerator
-        from rag_pipeline.reranking import RerankerService
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
+        from rag_pipeline.retrieval.reranking import RerankerService
 
         class CandidateEmbeddings(Embeddings):
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -554,10 +662,10 @@ class PackageSmokeTests(unittest.TestCase):
                 )
 
             reranker_factory_target = (
-                "rag_pipeline.reranking.create_local_reranker_service"
+                "rag_pipeline.retrieval.reranking.create_local_reranker_service"
             )
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=embedding_service,
             ):
                 with patch(
@@ -629,9 +737,12 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.language_models.fake import FakeListLLM
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
         from rag_pipeline.generation import AnswerGenerator
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
 
         embedding_service = EmbeddingService(
             DeterministicFakeEmbedding(size=4),
@@ -675,7 +786,7 @@ class PackageSmokeTests(unittest.TestCase):
 
             output = io.StringIO()
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=embedding_service,
             ):
                 with patch(
@@ -708,9 +819,12 @@ class PackageSmokeTests(unittest.TestCase):
         from langchain_core.embeddings import Embeddings
 
         from rag_pipeline.__main__ import main
-        from rag_pipeline.embeddings import EmbeddingService
         from rag_pipeline.generation import INSUFFICIENT_CONTEXT_ANSWER
-        from rag_pipeline.vector_store import LocalVectorStore, VectorStoreConfig
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
 
         class OrthogonalEmbeddings(Embeddings):
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -736,11 +850,11 @@ class PackageSmokeTests(unittest.TestCase):
 
             output = io.StringIO()
             with patch(
-                "rag_pipeline.embeddings.create_local_embedding_service",
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
                 return_value=embedding_service,
             ):
                 with patch(
-                    "rag_pipeline.reranking.create_local_reranker_service"
+                    "rag_pipeline.retrieval.reranking.create_local_reranker_service"
                 ) as reranker_factory:
                     with patch(
                         "rag_pipeline.generation.create_local_answer_generator"

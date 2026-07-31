@@ -112,9 +112,9 @@ class CliOutputTests(unittest.TestCase):
         )
 
     def test_formats_answer_with_structured_sources(self) -> None:
-        from rag_pipeline.citations import Citation
         from rag_pipeline.cli.output import format_generated_answer
         from rag_pipeline.generation import GeneratedAnswer
+        from rag_pipeline.generation.citations import Citation
 
         answer = GeneratedAnswer(
             answer="Itemized receipts are required.",

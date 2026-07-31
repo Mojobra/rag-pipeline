@@ -12,16 +12,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
 
-from rag_pipeline.embeddings import LocalEmbeddingConfig
 from rag_pipeline.exceptions import InvalidPipelineConfigurationError
-from rag_pipeline.reranking import LocalRerankerConfig, RerankingConfig
-from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
-from rag_pipeline.sparse_embeddings import LocalSparseEmbeddingConfig
-from rag_pipeline.vector_store import (
+from rag_pipeline.infrastructure.embeddings import LocalEmbeddingConfig
+from rag_pipeline.infrastructure.sparse_embeddings import LocalSparseEmbeddingConfig
+from rag_pipeline.infrastructure.vector_store import (
     LocalVectorStore,
     SearchMode,
     VectorStoreConfig,
 )
+from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
+from rag_pipeline.retrieval.reranking import LocalRerankerConfig, RerankingConfig
 
 
 class _Retriever(Protocol):
@@ -167,12 +167,12 @@ def open_local_retrieval_pipeline(
 
     # Lazy imports keep module import and CLI help free from model or database
     # initialization, while preserving explicit provider factory boundaries.
-    from rag_pipeline.embeddings import create_local_embedding_service
-    from rag_pipeline.reranking import create_local_reranker_service
-    from rag_pipeline.retrieval import RetrieverService
-    from rag_pipeline.sparse_embeddings import (
+    from rag_pipeline.infrastructure.embeddings import create_local_embedding_service
+    from rag_pipeline.infrastructure.sparse_embeddings import (
         create_local_sparse_embedding_service,
     )
+    from rag_pipeline.retrieval import RetrieverService
+    from rag_pipeline.retrieval.reranking import create_local_reranker_service
 
     embedding_service = create_local_embedding_service(config.embedding)
     sparse_service = (
