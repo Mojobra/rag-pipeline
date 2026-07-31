@@ -23,3 +23,4 @@ application data and not training data.
 | Dataset | Purpose |
 | --- | --- |
 | [`asteria-policies-v1`](datasets/asteria-policies-v1/README.md) | Synthetic English business policies with paired retrieval and answer labels. |
+| [`asteria-policies-v2`](datasets/asteria-policies-v2/README.md) | The same policy domain with source-anchor relevance labels for chunking-strategy comparisons. |

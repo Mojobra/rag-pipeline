@@ -120,6 +120,16 @@ class EmbeddingService:
     def dimension(self) -> int | None:
         return self._dimension
 
+    def as_langchain_embeddings(self) -> Embeddings:
+        """Expose this service through LangChain's text embedding interface.
+
+        The adapter shares the service's provider and dimension state, allowing
+        components such as semantic chunking to reuse one loaded model while
+        retaining the same response validation. Constructing it performs no
+        inference or external I/O.
+        """
+        return _EmbeddingServiceAdapter(self)
+
     def embed_documents(self, documents: Iterable[Document]) -> list[EmbeddedDocument]:
         """Embed non-empty documents and preserve their input order.
 
@@ -213,6 +223,28 @@ class EmbeddingService:
             raise EmbeddingProviderError(
                 f"Embedding dimension changed from {self._dimension} to {dimension}."
             )
+
+
+class _EmbeddingServiceAdapter(Embeddings):
+    """Adapt validated document embeddings to LangChain's text-only contract."""
+
+    def __init__(self, service: EmbeddingService) -> None:
+        self._service = service
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed text through the shared service and return mutable LangChain vectors."""
+        documents = []
+        for index, value in enumerate(texts):
+            if not isinstance(value, str):
+                raise TypeError(f"texts[{index}] must be a string.")
+            documents.append(Document(page_content=value))
+        return [
+            list(item.embedding) for item in self._service.embed_documents(documents)
+        ]
+
+    def embed_query(self, text: str) -> list[float]:
+        """Embed one query through the service's shared dimension contract."""
+        return list(self._service.embed_query(text))
 
 
 def create_local_embedding_service(

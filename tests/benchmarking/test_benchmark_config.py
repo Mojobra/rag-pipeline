@@ -8,6 +8,8 @@ from rag_pipeline.benchmarking.config import BenchmarkConfig
 from rag_pipeline.exceptions import InvalidBenchmarkConfigurationError
 from rag_pipeline.infrastructure.sparse_embeddings import LocalSparseEmbeddingConfig
 from rag_pipeline.infrastructure.vector_store import SearchMode
+from rag_pipeline.ingestion.chunking import StructureAwareChunkingConfig
+from rag_pipeline.ingestion.semantic_chunking import SemanticChunkingConfig
 from rag_pipeline.retrieval import RetrievalConfig
 from rag_pipeline.retrieval.reranking import LocalRerankerConfig, RerankingConfig
 
@@ -76,6 +78,28 @@ class BenchmarkConfigTests(unittest.TestCase):
                     local_reranker=local_config,
                     reranking=reranking,
                 )
+
+    def test_accepts_explicit_experimental_chunking_contracts(self) -> None:
+        structure_config = BenchmarkConfig(
+            name="structure",
+            chunking=StructureAwareChunkingConfig(
+                chunk_size=600,
+                chunk_overlap=100,
+            ),
+        )
+        semantic_config = BenchmarkConfig(
+            name="semantic",
+            chunking=SemanticChunkingConfig(
+                max_chunk_size=600,
+                min_chunk_size=100,
+            ),
+        )
+
+        self.assertIsInstance(
+            structure_config.chunking,
+            StructureAwareChunkingConfig,
+        )
+        self.assertIsInstance(semantic_config.chunking, SemanticChunkingConfig)
 
     def test_rejects_invalid_scalar_and_component_values(self) -> None:
         invalid_settings = (

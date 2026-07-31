@@ -42,8 +42,8 @@ def register_benchmark_commands(
     benchmark_parser.add_argument(
         "retrieval_dataset",
         help=(
-            "Schema-v1 retrieval evaluation JSON whose queries and exact "
-            "metadata selectors score the freshly indexed corpus."
+            "Schema-v1 or v2 retrieval evaluation JSON used to score the fresh "
+            "index. Use v2 content anchors when comparing chunking strategies."
         ),
     )
     benchmark_parser.add_argument(
@@ -95,7 +95,10 @@ def register_benchmark_commands(
             "storage location can affect latency."
         ),
     )
-    add_chunking_arguments(benchmark_parser)
+    add_chunking_arguments(
+        benchmark_parser,
+        include_experimental_strategies=True,
+    )
     add_embedding_arguments(
         benchmark_parser,
         isolated_collection=True,

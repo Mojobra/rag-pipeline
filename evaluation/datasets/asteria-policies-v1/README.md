@@ -69,6 +69,10 @@ Changing chunking settings invalidates the current selectors. Use a new
 collection name for a clean comparison because indexing updates matching chunk
 IDs but does not define a benchmark-run lifecycle.
 
+Use [`asteria-policies-v2`](../asteria-policies-v2/README.md) for recursive,
+structure-aware, or semantic chunking comparisons. Its schema-v2 relevance
+anchors identify source evidence without depending on chunk indices.
+
 Run an isolated benchmark without creating or reusing a persistent collection:
 
 ```powershell

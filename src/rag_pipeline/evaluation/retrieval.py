@@ -23,7 +23,10 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.retrieval import RetrievalResult
 
+# Preserve the original public constructor default while exposing v2 explicitly.
 RETRIEVAL_EVALUATION_SCHEMA_VERSION = 1
+LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION = 2
+SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS = frozenset({1, 2})
 
 MetadataScalar: TypeAlias = str | int | float | bool | None
 RetrievalFunction: TypeAlias = Callable[[str], Sequence[RetrievalResult]]
@@ -31,28 +34,30 @@ RetrievalFunction: TypeAlias = Callable[[str], Sequence[RetrievalResult]]
 _MISSING = object()
 _DATASET_FIELDS = frozenset({"schema_version", "name", "cases"})
 _CASE_FIELDS = frozenset({"id", "query", "relevant"})
+_CONTENT_SELECTOR_FIELDS = frozenset({"metadata", "content_contains"})
 
 
 @dataclass(frozen=True, slots=True)
 class RelevantDocument:
-    """Exact metadata selector representing relevant evidence for one query.
+    """Metadata and optional source-text selector for one relevant evidence span.
 
     Every key-value pair must occur on a returned LangChain document for the
-    selector to match. Selectors can use current fields such as ``file_name``,
-    ``page``, or ``chunk_id`` and later adopt stable business document IDs.
+    selector to match. Schema-v2 datasets additionally require an exact content
+    anchor, keeping judgments valid when an experiment changes chunk boundaries.
     """
 
     metadata: Mapping[str, MetadataScalar]
+    content_contains: str | None = None
 
     def __post_init__(self) -> None:
-        """Validate and freeze a non-empty map of JSON scalar metadata values."""
+        """Validate and freeze metadata plus an optional exact content anchor."""
         if not isinstance(self.metadata, Mapping):
             raise InvalidRetrievalEvaluationDatasetError(
                 "relevant selectors must be JSON objects."
             )
-        if not self.metadata:
+        if not self.metadata and self.content_contains is None:
             raise InvalidRetrievalEvaluationDatasetError(
-                "relevant selectors cannot be empty."
+                "relevant selectors require metadata or a content anchor."
             )
 
         normalized_metadata: dict[str, MetadataScalar] = {}
@@ -74,12 +79,19 @@ class RelevantDocument:
             "metadata",
             MappingProxyType(normalized_metadata),
         )
+        if self.content_contains is not None:
+            content_anchor = _validate_non_empty_string(
+                "content_contains",
+                self.content_contains,
+            )
+            object.__setattr__(self, "content_contains", content_anchor)
 
     def matches(self, document: Document) -> bool:
-        """Return whether a document contains every selector value exactly.
+        """Return whether metadata and source content satisfy this judgment.
 
         Value types must also match, preventing Python's equality rules from
-        treating metadata such as boolean ``true`` as integer ``1``.
+        treating metadata such as boolean ``true`` as integer ``1``. Content
+        anchors use deterministic, case-sensitive substring matching.
         """
         if not isinstance(document, Document):
             raise TypeError("document must be a LangChain Document object.")
@@ -92,7 +104,10 @@ class RelevantDocument:
                 return False
             if actual_value != expected_value:
                 return False
-        return True
+        return (
+            self.content_contains is None
+            or self.content_contains in document.page_content
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +145,10 @@ class RetrievalEvaluationCase:
                     "relevant must contain RelevantDocument objects."
                 )
             canonical_selector = json.dumps(
-                dict(relevant_document.metadata),
+                {
+                    "metadata": dict(relevant_document.metadata),
+                    "content_contains": relevant_document.content_contains,
+                },
                 ensure_ascii=True,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -153,7 +171,8 @@ class RetrievalEvaluationDataset:
     """Versioned collection of labeled queries evaluated as one snapshot.
 
     Dataset names make persisted reports identifiable. Unique case IDs and a
-    fixed schema version keep comparisons reproducible across retrieval changes.
+    fixed schema version keep comparisons reproducible; schema v1 remains the
+    programmatic default for backward compatibility.
     """
 
     name: str
@@ -165,11 +184,10 @@ class RetrievalEvaluationDataset:
         if (
             isinstance(self.schema_version, bool)
             or not isinstance(self.schema_version, int)
-            or self.schema_version != RETRIEVAL_EVALUATION_SCHEMA_VERSION
+            or self.schema_version not in SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS
         ):
             raise InvalidRetrievalEvaluationDatasetError(
-                "unsupported retrieval evaluation schema_version; expected "
-                f"{RETRIEVAL_EVALUATION_SCHEMA_VERSION}."
+                "unsupported retrieval evaluation schema_version; expected 1 or 2."
             )
         normalized_name = _validate_non_empty_string("dataset name", self.name)
         try:
@@ -193,6 +211,20 @@ class RetrievalEvaluationDataset:
                 raise InvalidRetrievalEvaluationDatasetError(
                     f"duplicate retrieval evaluation case id {case.case_id!r}."
                 )
+            for relevant_document in case.relevant_documents:
+                has_content_anchor = relevant_document.content_contains is not None
+                if self.schema_version == 1 and has_content_anchor:
+                    raise InvalidRetrievalEvaluationDatasetError(
+                        "schema_version 1 does not support content anchors."
+                    )
+                if self.schema_version == 2 and not has_content_anchor:
+                    raise InvalidRetrievalEvaluationDatasetError(
+                        "schema_version 2 requires content anchors."
+                    )
+                if self.schema_version == 2 and not relevant_document.metadata:
+                    raise InvalidRetrievalEvaluationDatasetError(
+                        "schema_version 2 requires non-empty metadata selectors."
+                    )
             seen_case_ids.add(case.case_id)
 
         object.__setattr__(self, "name", normalized_name)
@@ -425,6 +457,15 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
     raw_cases = dataset_object["cases"]
     if not isinstance(raw_cases, list):
         raise InvalidRetrievalEvaluationDatasetError("cases must be a list.")
+    schema_version = dataset_object["schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS
+    ):
+        raise InvalidRetrievalEvaluationDatasetError(
+            "unsupported retrieval evaluation schema_version; expected 1 or 2."
+        )
 
     cases: list[RetrievalEvaluationCase] = []
     for index, raw_case in enumerate(raw_cases):
@@ -444,14 +485,10 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
                 case_id=cast(str, case_object["id"]),
                 query=cast(str, case_object["query"]),
                 relevant_documents=tuple(
-                    RelevantDocument(
-                        cast(
-                            dict[str, MetadataScalar],
-                            _require_object(
-                                selector,
-                                context=(f"cases[{index}].relevant[{selector_index}]"),
-                            ),
-                        )
+                    _parse_relevant_selector(
+                        selector,
+                        schema_version=schema_version,
+                        context=f"cases[{index}].relevant[{selector_index}]",
                     )
                     for selector_index, selector in enumerate(raw_relevant)
                 ),
@@ -461,7 +498,34 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
     return RetrievalEvaluationDataset(
         name=cast(str, dataset_object["name"]),
         cases=tuple(cases),
-        schema_version=cast(int, dataset_object["schema_version"]),
+        schema_version=schema_version,
+    )
+
+
+def _parse_relevant_selector(
+    raw_selector: object,
+    *,
+    schema_version: int,
+    context: str,
+) -> RelevantDocument:
+    """Parse a legacy metadata selector or a v2 metadata-plus-anchor selector."""
+    selector = _require_object(raw_selector, context=context)
+    if schema_version == 1:
+        return RelevantDocument(cast(dict[str, MetadataScalar], selector))
+
+    _validate_object_fields(
+        selector,
+        expected=_CONTENT_SELECTOR_FIELDS,
+        context=context,
+    )
+    metadata = _require_object(selector["metadata"], context=f"{context}.metadata")
+    if not metadata:
+        raise InvalidRetrievalEvaluationDatasetError(
+            f"{context}.metadata cannot be empty."
+        )
+    return RelevantDocument(
+        cast(dict[str, MetadataScalar], metadata),
+        content_contains=cast(str, selector["content_contains"]),
     )
 
 

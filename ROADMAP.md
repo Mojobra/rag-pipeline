@@ -27,10 +27,11 @@ Task 16 - Answer evaluation
 Task 17 - Test datasets: versioned synthetic corpus and paired labels
 Task 18 - Benchmarking: isolated indexes, manifests, latency, comparisons, and gates
 
-Planned quality follow-up - Semantic chunking experiment
+Completed quality follow-up - Semantic chunking experiment
 
-Compare semantic and structure-aware chunking with the recursive baseline only
-after Tasks 15-18 provide labeled retrieval metrics and reproducible benchmarks.
+The isolated benchmark can compare bounded semantic and structure-aware
+chunking with the recursive baseline using chunk-index-independent schema-v2
+relevance anchors. Recursive chunking remains the default outside experiments.
 
 ## Phase 4: Production
 

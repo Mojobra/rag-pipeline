@@ -396,6 +396,7 @@ class BenchmarkCliTests(unittest.TestCase):
         threshold_checks: list[dict[str, object]],
         output_name: str,
         hybrid: bool = False,
+        chunking_strategy: str = "recursive",
     ) -> tuple[int, dict[str, object], str, Path]:
         """Run the CLI with local providers and return its saved artifact."""
         from rag_pipeline.__main__ import main
@@ -517,6 +518,8 @@ class BenchmarkCliTests(unittest.TestCase):
             "--output",
             str(output_path),
         ]
+        if chunking_strategy != "recursive":
+            command.extend(["--chunking-strategy", chunking_strategy])
         if hybrid:
             command.extend(
                 [
@@ -639,6 +642,35 @@ class BenchmarkCliTests(unittest.TestCase):
             artifact["index"]["sparse_embedding_model"],
             "benchmark-test-sparse",
         )
+
+    def test_cli_records_opt_in_chunking_strategy_contracts(self) -> None:
+        expected_strategies = {
+            "structure-aware": "structure_aware_recursive",
+            "semantic": "semantic",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for cli_strategy, artifact_strategy in expected_strategies.items():
+                with self.subTest(strategy=cli_strategy):
+                    exit_code, artifact, _, _ = self._run_benchmark(
+                        temp_dir,
+                        threshold_checks=[
+                            {
+                                "metric": "retrieval.hit_rate_at_k",
+                                "operator": "minimum",
+                                "value": 0.0,
+                            }
+                        ],
+                        output_name=cli_strategy,
+                        chunking_strategy=cli_strategy,
+                    )
+
+                    self.assertEqual(exit_code, 0)
+                    self.assertEqual(
+                        artifact["configuration"]["chunking"]["strategy"],
+                        artifact_strategy,
+                    )
+                    self.assertEqual(artifact["index"]["chunk_count"], 1)
 
     def test_compare_cli_outputs_compatible_metric_deltas_as_json(self) -> None:
         from rag_pipeline.__main__ import main

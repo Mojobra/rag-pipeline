@@ -21,7 +21,7 @@ from langchain_core.documents import Document
 from rag_pipeline.benchmarking.artifacts import (
     evaluate_benchmark_thresholds,
 )
-from rag_pipeline.benchmarking.config import BenchmarkConfig
+from rag_pipeline.benchmarking.config import BenchmarkChunkingConfig, BenchmarkConfig
 from rag_pipeline.benchmarking.provenance import (
     CorpusFingerprint,
     DatasetFingerprint,
@@ -92,7 +92,16 @@ from rag_pipeline.infrastructure.vector_store import (
     VectorStoreConfig,
 )
 from rag_pipeline.ingestion import load_documents
-from rag_pipeline.ingestion.chunking import chunk_documents
+from rag_pipeline.ingestion.chunking import (
+    ChunkingConfig,
+    StructureAwareChunkingConfig,
+    chunk_documents,
+    chunk_documents_with_structure,
+)
+from rag_pipeline.ingestion.semantic_chunking import (
+    SemanticChunkingConfig,
+    chunk_documents_semantically,
+)
 from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult, RetrieverService
 from rag_pipeline.retrieval.reranking import (
     RerankerService,
@@ -121,7 +130,7 @@ Now: TypeAlias = Callable[[], datetime]
 
 @dataclass(frozen=True, slots=True)
 class _PreparedInputs:
-    """Validated datasets, fingerprints, documents, and chunks for one run."""
+    """Validated datasets, fingerprints, and extracted documents for one run."""
 
     retrieval_dataset: RetrievalEvaluationDataset
     answer_dataset: AnswerEvaluationDataset
@@ -129,13 +138,13 @@ class _PreparedInputs:
     answer_fingerprint: DatasetFingerprint
     corpus_fingerprint: CorpusFingerprint
     documents: tuple[Document, ...]
-    chunks: tuple[Document, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class _PreparedPipeline:
     """Loaded shared model services and corpus vectors used by both suites."""
 
+    chunks: tuple[Document, ...]
     embedding_service: EmbeddingService
     embedded_documents: tuple[EmbeddedDocument, ...]
     sparse_embedding_service: SparseEmbeddingService | None
@@ -186,7 +195,6 @@ def run_benchmark(
         corpus_path,
         retrieval_dataset_path,
         answer_dataset_path,
-        config=config,
         stages=stages,
     )
     if thresholds is not None:
@@ -226,7 +234,7 @@ def run_benchmark(
         configuration=_configuration_to_dict(config),
         index={
             "document_count": len(inputs.documents),
-            "chunk_count": len(inputs.chunks),
+            "chunk_count": len(pipeline.chunks),
             "point_count": execution.indexing.total_count,
             "embedding_model": execution.indexing.embedding_model,
             "embedding_dimension": execution.indexing.embedding_dimension,
@@ -260,10 +268,9 @@ def _prepare_inputs(
     retrieval_dataset_path: str | Path,
     answer_dataset_path: str | Path,
     *,
-    config: BenchmarkConfig,
     stages: _StageRecorder,
 ) -> _PreparedInputs:
-    """Load, fingerprint, extract, and chunk all benchmark inputs once."""
+    """Load, fingerprint, and extract all benchmark inputs once."""
     with stages.measure("dataset_load"):
         retrieval_dataset = load_retrieval_evaluation_dataset(retrieval_dataset_path)
         answer_dataset = load_answer_evaluation_dataset(answer_dataset_path)
@@ -287,11 +294,9 @@ def _prepare_inputs(
         raise BenchmarkInputError(
             "benchmark corpus did not produce any extracted documents."
         )
-    with stages.measure("chunking"):
-        chunks = tuple(chunk_documents(documents, config=config.chunking))
-    if not chunks:
+    if not any(document.page_content.strip() for document in documents):
         raise BenchmarkInputError(
-            "benchmark corpus did not produce any non-empty chunks."
+            "benchmark corpus did not contain any non-empty extracted text."
         )
     return _PreparedInputs(
         retrieval_dataset=retrieval_dataset,
@@ -300,8 +305,29 @@ def _prepare_inputs(
         answer_fingerprint=answer_fingerprint,
         corpus_fingerprint=corpus_fingerprint,
         documents=documents,
-        chunks=chunks,
     )
+
+
+def _chunk_for_benchmark(
+    documents: tuple[Document, ...],
+    *,
+    config: BenchmarkChunkingConfig,
+    embedding_service: EmbeddingService,
+) -> tuple[Document, ...]:
+    """Dispatch an explicit strategy while reusing the benchmark's dense model."""
+    if isinstance(config, SemanticChunkingConfig):
+        return tuple(
+            chunk_documents_semantically(
+                documents,
+                embeddings=embedding_service.as_langchain_embeddings(),
+                config=config,
+            )
+        )
+    if isinstance(config, StructureAwareChunkingConfig):
+        return tuple(chunk_documents_with_structure(documents, config=config))
+    if isinstance(config, ChunkingConfig):
+        return tuple(chunk_documents(documents, config=config))
+    raise TypeError("unsupported benchmark chunking configuration.")
 
 
 def _prepare_pipeline(
@@ -310,11 +336,21 @@ def _prepare_pipeline(
     inputs: _PreparedInputs,
     stages: _StageRecorder,
 ) -> _PreparedPipeline:
-    """Initialize each configured provider once and embed the corpus."""
+    """Initialize each provider once, chunk the corpus, and embed its output."""
     with stages.measure("embedding_model_load"):
         embedding_service = create_local_embedding_service(config.embedding)
+    with stages.measure("chunking"):
+        chunks = _chunk_for_benchmark(
+            inputs.documents,
+            config=config.chunking,
+            embedding_service=embedding_service,
+        )
+    if not chunks:
+        raise BenchmarkInputError(
+            "benchmark corpus did not produce any non-empty chunks."
+        )
     with stages.measure("dense_embedding"):
-        embedded_documents = tuple(embedding_service.embed_documents(inputs.chunks))
+        embedded_documents = tuple(embedding_service.embed_documents(chunks))
 
     sparse_service = None
     sparse_vectors = None
@@ -324,7 +360,7 @@ def _prepare_pipeline(
                 config.sparse_embedding
             )
         with stages.measure("sparse_embedding"):
-            sparse_vectors = tuple(sparse_service.embed_documents(inputs.chunks))
+            sparse_vectors = tuple(sparse_service.embed_documents(chunks))
 
     reranker = None
     if config.local_reranker is not None:
@@ -333,6 +369,7 @@ def _prepare_pipeline(
     with stages.measure("generation_model_load"):
         answer_generator = create_local_answer_generator(config.local_generation)
     return _PreparedPipeline(
+        chunks=chunks,
         embedding_service=embedding_service,
         embedded_documents=embedded_documents,
         sparse_embedding_service=sparse_service,
@@ -521,11 +558,7 @@ def _configuration_to_dict(config: BenchmarkConfig) -> dict[str, object]:
     sparse = config.sparse_embedding
     reranker = config.local_reranker
     return {
-        "chunking": {
-            "strategy": "recursive_character",
-            "chunk_size_characters": config.chunking.chunk_size,
-            "chunk_overlap_characters": config.chunking.chunk_overlap,
-        },
+        "chunking": _chunking_configuration_to_dict(config.chunking),
         "embedding": {
             "provider": "local_hugging_face",
             "model": config.embedding.model_name,
@@ -586,6 +619,34 @@ def _configuration_to_dict(config: BenchmarkConfig) -> dict[str, object]:
             "max_input_tokens": config.generation.max_input_tokens,
             "token_safety_margin": config.generation.token_safety_margin,
         },
+    }
+
+
+def _chunking_configuration_to_dict(
+    config: BenchmarkChunkingConfig,
+) -> dict[str, object]:
+    """Serialize only controls that affect the selected chunking strategy."""
+    if isinstance(config, SemanticChunkingConfig):
+        return {
+            "strategy": "semantic",
+            "max_chunk_size_characters": config.max_chunk_size,
+            "min_chunk_size_characters": config.min_chunk_size,
+            "breakpoint_percentile": config.breakpoint_percentile,
+            "sentence_buffer_size": config.buffer_size,
+            "chunk_overlap_characters": 0,
+        }
+    if isinstance(config, StructureAwareChunkingConfig):
+        return {
+            "strategy": "structure_aware_recursive",
+            "chunk_size_characters": config.chunk_size,
+            "chunk_overlap_characters": config.chunk_overlap,
+            "recognized_markup": ["html", "markdown"],
+            "fallback": "recursive_character",
+        }
+    return {
+        "strategy": "recursive_character",
+        "chunk_size_characters": config.chunk_size,
+        "chunk_overlap_characters": config.chunk_overlap,
     }
 
 
