@@ -28,6 +28,18 @@ uv run python -m rag_pipeline --help
 
 Both entry points execute the same CLI adapter.
 
+## Releases And Versioning
+
+`project.version` in `pyproject.toml` is the only editable runtime version
+source. Package imports, `--version`, and benchmark provenance read the installed
+distribution metadata; do not add a second version literal to Python modules.
+
+A release pull request must update `project.version`, `uv.lock`, and
+`CHANGELOG.md`, then pass the complete quality suite and package inspection.
+After that pull request is merged and `main` is current, create an annotated
+`vMAJOR.MINOR.PATCH` tag on the validated `main` commit and push that tag. Never
+tag an unmerged feature-branch commit.
+
 ## Quality Checks
 
 Run the same checks used by CI before opening a pull request:

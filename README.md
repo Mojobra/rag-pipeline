@@ -18,6 +18,13 @@ used AI as a development partner for implementation support while defining the
 architecture, requirements, tests, and design decisions myself. All generated
 code was reviewed, adapted, and validated through automated tests.
 
+## Releases
+
+The CLI and benchmark manifests read the installed distribution version whose
+single editable source is `project.version` in `pyproject.toml`. Release tags use
+`vMAJOR.MINOR.PATCH` and point to validated commits on `main`. See
+[CHANGELOG.md](CHANGELOG.md) for milestone notes.
+
 ## Highlights
 
 - Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
@@ -837,6 +844,7 @@ commands.
 |   |-- test_cli.py
 |   `-- test_package.py
 |-- ARCHITECTURE.md
+|-- CHANGELOG.md
 |-- CONTRIBUTING.md
 |-- MANIFEST.in
 |-- PROJECT_BRIEF.md
