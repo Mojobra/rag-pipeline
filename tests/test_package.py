@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import io
 import json
-import re
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,10 +29,30 @@ class PromptTokenizerStub:
 
 
 class PackageSmokeTests(unittest.TestCase):
-    def test_package_exposes_semantic_version(self) -> None:
+    def test_package_version_matches_project_and_distribution_metadata(self) -> None:
         import rag_pipeline
 
-        self.assertRegex(rag_pipeline.__version__, re.compile(r"^\d+\.\d+\.\d+$"))
+        project_root = Path(__file__).resolve().parents[1]
+        project_metadata = tomllib.loads(
+            (project_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        installed_version = version("rag-pipeline")
+
+        self.assertEqual(project_metadata["project"]["version"], installed_version)
+        self.assertEqual(rag_pipeline.__version__, installed_version)
+
+    def test_version_flag_reports_installed_distribution_version(self) -> None:
+        from rag_pipeline.__main__ import main
+
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(
+            output.getvalue().strip(),
+            f"rag-pipeline {version('rag-pipeline')}",
+        )
 
     def test_package_root_contains_only_shared_entrypoint_modules(self) -> None:
         """Keep implementation ownership inside the documented feature packages."""

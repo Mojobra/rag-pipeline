@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stdout
 from copy import deepcopy
 from hashlib import sha256
+from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -119,7 +120,7 @@ def make_artifact(
                     "cuda_version": None,
                     "device_names": [],
                 },
-                "packages": {"rag-pipeline": "0.1.0"},
+                "packages": {"rag-pipeline": version("rag-pipeline")},
             },
         },
         "configuration": {
@@ -151,6 +152,15 @@ def make_artifact(
 
 class BenchmarkUtilityTests(unittest.TestCase):
     """Verify deterministic identities, timing math, profiles, and comparisons."""
+
+    def test_runtime_environment_records_installed_project_version(self) -> None:
+        from rag_pipeline.benchmarking.provenance import runtime_environment
+
+        environment = runtime_environment()
+        packages = environment["packages"]
+
+        self.assertIsInstance(packages, dict)
+        self.assertEqual(packages["rag-pipeline"], version("rag-pipeline"))
 
     def test_fingerprints_corpus_by_relative_path_and_content(self) -> None:
         from rag_pipeline.benchmarking.provenance import fingerprint_corpus
