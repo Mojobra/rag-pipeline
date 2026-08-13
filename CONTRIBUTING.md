@@ -84,6 +84,20 @@ depend on an existing local Qdrant collection.
   algorithms.
 - Add focused regression tests for changed behavior and failure modes.
 
+## Documentation Maintenance
+
+Review `TECHNICAL_MANUAL.md` with every coding change. Update it in the same
+pull request when a change affects dependencies, supported runtimes, models,
+providers, persistent storage, data flow, package ownership, CLI or API
+surfaces, evaluation behavior, build tooling, tests, CI, or deployment. Also
+update its `Last verified` date when documented facts change.
+
+An internal implementation change that leaves every documented fact unchanged
+does not require wording churn, but the pull-request self-review must still
+confirm that the manual remains accurate. Keep delivered behavior separate from
+roadmap plans and use `pyproject.toml`, `uv.lock`, source code, and CI
+configuration as the authoritative inputs.
+
 Use a short-lived feature branch and a focused Conventional Commit-style
 message. Pull requests should explain the behavior, design trade-offs, tests
 run, compatibility risks, and any deliberate breaking change.

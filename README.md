@@ -25,6 +25,14 @@ single editable source is `project.version` in `pyproject.toml`. Release tags us
 `vMAJOR.MINOR.PATCH` and point to validated commits on `main`. See
 [CHANGELOG.md](CHANGELOG.md) for milestone notes.
 
+## Documentation
+
+- [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) inventories the current technology
+  stack, model backends, architecture boundaries, tooling, and known omissions.
+- [ARCHITECTURE.md](ARCHITECTURE.md) defines package ownership and behavioral
+  contracts.
+- [CONTRIBUTING.md](CONTRIBUTING.md) defines development and review practices.
+
 ## Highlights
 
 - Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
@@ -849,6 +857,7 @@ commands.
 |-- MANIFEST.in
 |-- PROJECT_BRIEF.md
 |-- ROADMAP.md
+|-- TECHNICAL_MANUAL.md
 |-- pyproject.toml
 `-- uv.lock
 ```
