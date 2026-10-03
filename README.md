@@ -25,6 +25,11 @@ single editable source is `project.version` in `pyproject.toml`. Release tags us
 `vMAJOR.MINOR.PATCH` and point to validated commits on `main`. See
 [CHANGELOG.md](CHANGELOG.md) for milestone notes.
 
+Development starts on `develop` or task branches created from it. Reviewed
+features enter `develop` before an approved promotion to `main`. Releases are
+built from `main` and recorded as immutable `release/rag-v<version>` snapshots.
+See [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow) for the branch workflow.
+
 ## Documentation
 
 - [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) inventories the current technology

@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.2.0
-- **Last verified:** 2026-08-13
+- **Last verified:** 2026-10-03
 - **Current product surface:** Local Python CLI
 
 ## How To Read Version Information
@@ -46,8 +46,8 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Formatting and linting | Ruff | Enforces formatting, imports, naming, correctness, and selected performance rules. |
 | Static typing | mypy | Checks all production modules in strict mode. |
 | Coverage | Coverage.py | Measures branch coverage and enforces an 80 percent minimum. |
-| CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests and `main`. |
-| Version control | Git and GitHub | Provide reviewable branch history, pull requests, release tags, and benchmark commit provenance. |
+| CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests, `develop`, and `main`. |
+| Version control | Git and GitHub | Integrate development through `develop`, promote reviewed work to `main`, and retain immutable release snapshots and benchmark commit provenance. |
 
 ## Direct Dependencies
 
@@ -381,14 +381,36 @@ source in strict mode. Coverage measures branches and fails below 80 percent.
 
 ### Continuous Integration
 
-GitHub Actions runs on pull requests and pushes to `main` with read-only
-repository permissions, concurrency cancellation, and a 30-minute timeout. The
-quality job uses Ubuntu, Python 3.11, uv 0.11.32, locked dependencies, Ruff,
-mypy, `unittest`, branch coverage, and package builds.
+GitHub Actions runs on pull requests and pushes to `develop` and `main` with
+read-only repository permissions, concurrency cancellation, and a 30-minute
+timeout. The quality job uses Ubuntu, Python 3.11, uv 0.11.32, locked
+dependencies, Ruff, mypy, `unittest`, branch coverage, and package builds.
 
 The package advertises Python 3.11, 3.12, and 3.13 classifiers, but CI currently
 executes only Python 3.11. Additional matrix jobs would be required to claim
 continuous verification on every advertised interpreter.
+
+### Development And Release Branches
+
+`develop` is the shared development and integration branch, initially created
+from `main`. Coding, documentation, configuration, and hotfix tasks use branches
+created from the latest `develop`, with task pull requests targeting `develop`.
+After a completed feature is reviewed and integrated, an approved pull request
+promotes `develop` to `main`. Promotion retains shared history through a merge
+commit; shared branches are not rebased. See
+[CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow) for the working commands.
+
+`main` is the reviewed release source. `release/rag-v<version>` records an exact
+approved `main` commit, including its package version. Release branches remain
+immutable after their initial creation and push: no development, commits,
+merges, rebases, resets, force-pushes, or deletion. Fixes use the development
+workflow and a new release version. Release preparation also happens through
+`develop`; artifacts and optional annotated tags originate from approved `main`
+commits.
+
+These are contributor workflow rules. They do not automatically configure
+GitHub branch protections or release builds; the current CI remains a quality
+and packaging workflow, and release creation is manual.
 
 ## Deliberately Project-Owned Logic
 

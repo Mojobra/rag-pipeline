@@ -28,17 +28,49 @@ uv run python -m rag_pipeline --help
 
 Both entry points execute the same CLI adapter.
 
+## Branch Workflow
+
+`develop` is the development and integration branch. Start every coding,
+documentation, configuration, and hotfix task on a short-lived branch from the
+latest `develop`:
+
+```powershell
+git switch develop
+git pull --ff-only origin develop
+git switch -c codex/<task-name>
+```
+
+Open the task pull request against `develop`. After review and passing checks,
+merge the finished feature into `develop`, then propose a `develop` to `main`
+pull request. Each merge requires explicit approval. Squash task branches into
+`develop` when appropriate; preserve shared history with a merge commit when
+promoting `develop` to `main`. Synchronize `develop` with approved `main` merges
+without rebasing the shared branch.
+
+`main` accepts reviewed, completed work from `develop` and is the only source
+for release snapshots. Never develop, edit files, or create task commits on
+`main` or `release/*`.
+
+`release/rag-v<version>` branches are immutable snapshots of an approved `main`
+commit. After their initial creation and push, never add commits, merge, rebase,
+reset, force-push, or delete them. Corrections go through the development
+workflow and produce a new release version and snapshot.
+
 ## Releases And Versioning
 
 `project.version` in `pyproject.toml` is the only editable runtime version
 source. Package imports, `--version`, and benchmark provenance read the installed
 distribution metadata; do not add a second version literal to Python modules.
 
-A release pull request must update `project.version`, `uv.lock`, and
-`CHANGELOG.md`, then pass the complete quality suite and package inspection.
-After that pull request is merged and `main` is current, create an annotated
-`vMAJOR.MINOR.PATCH` tag on the validated `main` commit and push that tag. Never
-tag an unmerged feature-branch commit.
+Prepare version changes on a task branch from `develop`: update
+`project.version`, `uv.lock`, `CHANGELOG.md`, and affected manual sections, then
+pass the complete quality suite and package inspection. Review the task into
+`develop` and promote the approved development state to `main`.
+
+From the validated `main` commit, create and push a new
+`release/rag-vMAJOR.MINOR.PATCH` snapshot and, when publishing a tag, an annotated
+`vMAJOR.MINOR.PATCH` tag. Build release artifacts from that commit. Never prepare
+release changes directly on `main` or edit an existing release branch.
 
 ## Quality Checks
 
@@ -98,6 +130,7 @@ confirm that the manual remains accurate. Keep delivered behavior separate from
 roadmap plans and use `pyproject.toml`, `uv.lock`, source code, and CI
 configuration as the authoritative inputs.
 
-Use a short-lived feature branch and a focused Conventional Commit-style
-message. Pull requests should explain the behavior, design trade-offs, tests
-run, compatibility risks, and any deliberate breaking change.
+Use a short-lived task branch from `develop` and a focused Conventional
+Commit-style message. Task pull requests target `develop` and explain the
+behavior, design trade-offs, tests run, compatibility risks, and any deliberate
+breaking change.
