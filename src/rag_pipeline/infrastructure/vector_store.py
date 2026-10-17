@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Collection, Iterable, Iterator
+from dataclasses import dataclass, replace
 from enum import Enum
 from hashlib import sha256
 from math import isfinite
 from numbers import Real
 from pathlib import Path
 from typing import Any, cast
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -123,8 +123,8 @@ class VectorStoreConfig:
 class IndexingResult:
     """Immutable summary of one vector-store indexing operation.
 
-    The result exposes affected point IDs, collection totals, and dense/sparse
-    model contracts so command and future service layers can report what changed.
+    The result exposes affected point IDs, collection totals, removed stale
+    points, and dense/sparse model contracts for command and service reporting.
     """
 
     collection_name: str
@@ -135,6 +135,7 @@ class IndexingResult:
     embedding_dimension: int | None
     search_mode: SearchMode
     sparse_embedding_model: str | None
+    removed_count: int = 0
 
 
 class LocalVectorStore:
@@ -253,6 +254,167 @@ class LocalVectorStore:
             search_mode=cast(SearchMode, self.config.search_mode),
             sparse_embedding_model=sparse_model_identifier,
         )
+
+    def replace_sources(
+        self,
+        embedded_documents: Iterable[EmbeddedDocument],
+        *,
+        sources: Collection[str],
+        model_identifier: str,
+        sparse_vectors: Iterable[SparseEmbeddingVector] | None = None,
+        sparse_model_identifier: str | None = None,
+    ) -> IndexingResult:
+        """Replace indexed chunks only for the explicitly named sources.
+
+        Snapshots existing IDs before upserting all new points, then deletes
+        obsolete IDs after a successful write. Empty sources remove all their
+        points. Multi-batch writes and deletion are not atomic; a provider
+        failure can leave a partially updated collection for a retry.
+        """
+        source_list = list(sources)
+        if not source_list or any(
+            not isinstance(source, str) or not source.strip() for source in source_list
+        ):
+            raise VectorStoreInputError("sources must contain non-empty strings.")
+        source_set = set(source_list)
+        records = list(embedded_documents)
+        for index, record in enumerate(records):
+            if not isinstance(record, EmbeddedDocument):
+                raise TypeError(
+                    f"embedded_documents[{index}] must be an EmbeddedDocument."
+                )
+            source = record.document.metadata.get("source")
+            if not isinstance(source, str) or source not in source_set:
+                raise VectorStoreInputError(
+                    f"embedded_documents[{index}] has a source outside the "
+                    "replacement scope."
+                )
+
+        collection_exists = self._collection_exists()
+        if not records and collection_exists:
+            self._validate_empty_replacement_contract(
+                model_identifier=model_identifier,
+                sparse_model_identifier=sparse_model_identifier,
+            )
+
+        existing_ids: set[int | str | UUID] = set()
+        if collection_exists:
+            for source in sorted(source_set):
+                source_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key=f"{QdrantVectorStore.METADATA_KEY}.source",
+                            match=models.MatchValue(value=source),
+                        )
+                    ]
+                )
+                existing_ids.update(
+                    record.id for record in self._scroll_points(source_filter)
+                )
+
+        result = self.index(
+            records,
+            model_identifier=model_identifier,
+            sparse_vectors=sparse_vectors,
+            sparse_model_identifier=sparse_model_identifier,
+        )
+        obsolete_ids = existing_ids.difference(result.point_ids)
+        try:
+            for point_ids in _batched_ids(
+                obsolete_ids, batch_size=self.config.write_batch_size
+            ):
+                self._client.delete(
+                    collection_name=self.config.collection_name,
+                    points_selector=models.PointIdsList(points=point_ids),
+                    wait=True,
+                )
+        except Exception as exc:
+            raise VectorStoreProviderError(
+                f"Failed to remove obsolete vectors from {self.config.collection_name}."
+            ) from exc
+
+        return replace(
+            result,
+            total_count=self.count(),
+            removed_count=len(obsolete_ids),
+        )
+
+    def list_sources(self) -> set[str]:
+        """Read distinct source paths from point metadata without mutating data.
+
+        Points without a string source are ignored; callers must explicitly
+        decide which paths are in scope before requesting replacement.
+        """
+        if not self._collection_exists():
+            return set()
+        sources = set()
+        for record in self._scroll_points():
+            payload = record.payload or {}
+            metadata = payload.get(QdrantVectorStore.METADATA_KEY)
+            if isinstance(metadata, dict):
+                source = metadata.get("source")
+                if isinstance(source, str) and source:
+                    sources.add(source)
+        return sources
+
+    def _collection_exists(self) -> bool:
+        try:
+            return bool(self._client.collection_exists(self.config.collection_name))
+        except Exception as exc:
+            raise VectorStoreProviderError(
+                f"Failed to inspect collection {self.config.collection_name}."
+            ) from exc
+
+    def _validate_empty_replacement_contract(
+        self,
+        *,
+        model_identifier: str,
+        sparse_model_identifier: str | None,
+    ) -> None:
+        """Check model and schema compatibility even with no new vectors.
+
+        The stored dimension is only used to invoke the same full collection
+        validation as non-empty indexing; malformed metadata fails closed.
+        """
+        try:
+            info = self._client.get_collection(self.config.collection_name)
+        except Exception as exc:
+            raise VectorStoreProviderError(
+                f"Failed to inspect collection {self.config.collection_name}."
+            ) from exc
+        dimension = (info.config.metadata or {}).get("embedding_dimension")
+        if isinstance(dimension, bool) or not isinstance(dimension, int):
+            raise VectorStoreCompatibilityError(
+                "Collection embedding_dimension metadata is missing or invalid."
+            )
+        self.validate_compatibility(
+            model_identifier=model_identifier,
+            dimension=dimension,
+            sparse_model_identifier=sparse_model_identifier,
+        )
+
+    def _scroll_points(
+        self, scroll_filter: models.Filter | None = None
+    ) -> Iterator[models.Record]:
+        """Page through point metadata, wrapping provider read failures."""
+        offset: int | str | UUID | None = None
+        try:
+            while True:
+                records, offset = self._client.scroll(
+                    collection_name=self.config.collection_name,
+                    scroll_filter=scroll_filter,
+                    limit=self.config.write_batch_size,
+                    offset=offset,
+                    with_payload=[QdrantVectorStore.METADATA_KEY],
+                    with_vectors=False,
+                )
+                yield from records
+                if offset is None:
+                    break
+        except Exception as exc:
+            raise VectorStoreProviderError(
+                f"Failed to read vectors from {self.config.collection_name}."
+            ) from exc
 
     def count(self) -> int:
         """Read the exact point count for the configured collection.
@@ -699,6 +861,14 @@ def build_chunk_point_id(document: Document) -> str:
         default=str,
     )
     return str(uuid5(_POINT_ID_NAMESPACE, canonical_identity))
+
+
+def _batched_ids(
+    point_ids: Collection[int | str | UUID], *, batch_size: int
+) -> Iterator[list[int | str | UUID]]:
+    ordered_ids = sorted(point_ids, key=str)
+    for start in range(0, len(ordered_ids), batch_size):
+        yield ordered_ids[start : start + batch_size]
 
 
 def _validate_vector(vector: Iterable[object], *, index: int) -> list[float]:

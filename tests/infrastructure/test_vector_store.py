@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import UUID
 
 from langchain_core.documents import Document
@@ -13,6 +14,7 @@ from rag_pipeline.exceptions import (
     InvalidVectorStoreConfigurationError,
     VectorStoreCompatibilityError,
     VectorStoreInputError,
+    VectorStoreProviderError,
 )
 from rag_pipeline.infrastructure.embeddings import EmbeddedDocument
 from rag_pipeline.infrastructure.sparse_embeddings import SparseEmbeddingVector
@@ -111,6 +113,181 @@ class LocalVectorStoreTests(unittest.TestCase):
         self.assertEqual(second_result.point_ids, changed_result.point_ids)
         self.assertEqual(changed_result.total_count, 1)
         self.assertEqual(stored[0].page_content, "New policy wording.")
+
+    def test_source_replacement_removes_stale_chunks_and_keeps_other_sources(
+        self,
+    ) -> None:
+        initial = [
+            make_embedded_document("Old first chunk"),
+            make_embedded_document("Old second chunk", chunk_index=1),
+            make_embedded_document("Other source", source="other.txt"),
+        ]
+        updated = make_embedded_document("New first chunk")
+
+        with LocalVectorStore(VectorStoreConfig(path=None)) as store:
+            store.index(initial, model_identifier="test-model")
+            result = store.replace_sources(
+                [updated], sources={"policy.txt"}, model_identifier="test-model"
+            )
+            repeated = store.replace_sources(
+                [updated], sources={"policy.txt"}, model_identifier="test-model"
+            )
+            stored = store.as_langchain_vector_store().get_by_ids(
+                [build_chunk_point_id(record.document) for record in initial]
+            )
+
+        self.assertEqual(result.removed_count, 1)
+        self.assertEqual(result.total_count, 2)
+        self.assertEqual(repeated.removed_count, 0)
+        self.assertEqual(repeated.total_count, 2)
+        self.assertEqual(
+            {document.page_content for document in stored},
+            {"New first chunk", "Other source"},
+        )
+
+    def test_empty_replacement_removes_only_named_source(self) -> None:
+        with LocalVectorStore(VectorStoreConfig(path=None)) as store:
+            store.index(
+                [
+                    make_embedded_document("Old source"),
+                    make_embedded_document("Keep", source="other.txt"),
+                ],
+                model_identifier="test-model",
+            )
+            result = store.replace_sources(
+                [], sources={"policy.txt"}, model_identifier="test-model"
+            )
+            remaining = store.list_sources()
+
+        self.assertEqual(result.removed_count, 1)
+        self.assertEqual(result.total_count, 1)
+        self.assertEqual(remaining, {"other.txt"})
+
+    def test_replacement_handles_multiple_pdf_pages(self) -> None:
+        first = make_embedded_document(
+            "First page", source="policy.pdf", extra_metadata={"page": 0}
+        )
+        second = make_embedded_document(
+            "Second page", source="policy.pdf", extra_metadata={"page": 1}
+        )
+        with LocalVectorStore(VectorStoreConfig(path=None)) as store:
+            store.index([first, second], model_identifier="test-model")
+            result = store.replace_sources(
+                [first], sources={"policy.pdf"}, model_identifier="test-model"
+            )
+            stored = store.as_langchain_vector_store().get_by_ids(
+                [
+                    build_chunk_point_id(first.document),
+                    build_chunk_point_id(second.document),
+                ]
+            )
+
+        self.assertEqual(result.removed_count, 1)
+        self.assertEqual([document.metadata["page"] for document in stored], [0])
+
+    def test_replacement_rejects_invalid_scope_and_incompatible_empty_model(
+        self,
+    ) -> None:
+        with LocalVectorStore(VectorStoreConfig(path=None)) as store:
+            store.index(
+                [make_embedded_document("Original")], model_identifier="test-model"
+            )
+            with self.assertRaisesRegex(VectorStoreInputError, "outside"):
+                store.replace_sources(
+                    [make_embedded_document("Other", source="other.txt")],
+                    sources={"policy.txt"},
+                    model_identifier="test-model",
+                )
+            with self.assertRaisesRegex(
+                VectorStoreCompatibilityError, "embedding_model"
+            ):
+                store.replace_sources(
+                    [], sources={"policy.txt"}, model_identifier="wrong-model"
+                )
+            self.assertEqual(store.count(), 1)
+
+    def test_failed_upsert_does_not_delete_old_source_points(self) -> None:
+        with LocalVectorStore(VectorStoreConfig(path=None)) as store:
+            original = [
+                make_embedded_document("First"),
+                make_embedded_document("Second", chunk_index=1),
+            ]
+            store.index(original, model_identifier="test-model")
+            with patch.object(
+                store._client, "upsert", side_effect=RuntimeError("write")
+            ):
+                with self.assertRaises(VectorStoreProviderError):
+                    store.replace_sources(
+                        [original[0]],
+                        sources={"policy.txt"},
+                        model_identifier="test-model",
+                    )
+            self.assertEqual(store.count(), 2)
+
+    def test_failed_snapshot_does_not_write_and_failed_delete_is_retryable(
+        self,
+    ) -> None:
+        with LocalVectorStore(
+            VectorStoreConfig(path=None, write_batch_size=1)
+        ) as store:
+            original = [
+                make_embedded_document("First"),
+                make_embedded_document("Second", chunk_index=1),
+            ]
+            store.index(original, model_identifier="test-model")
+            with patch.object(
+                store._client, "scroll", side_effect=RuntimeError("read")
+            ):
+                with self.assertRaises(VectorStoreProviderError):
+                    store.replace_sources(
+                        [original[0]],
+                        sources={"policy.txt"},
+                        model_identifier="test-model",
+                    )
+            self.assertEqual(store.count(), 2)
+
+            with patch.object(
+                store._client, "delete", side_effect=RuntimeError("delete")
+            ):
+                with self.assertRaises(VectorStoreProviderError):
+                    store.replace_sources(
+                        [original[0]],
+                        sources={"policy.txt"},
+                        model_identifier="test-model",
+                    )
+            self.assertEqual(store.count(), 2)
+            retry = store.replace_sources(
+                [original[0]], sources={"policy.txt"}, model_identifier="test-model"
+            )
+            self.assertEqual(retry.removed_count, 1)
+            self.assertEqual(retry.total_count, 1)
+
+    def test_hybrid_replacement_prunes_stale_sparse_points(self) -> None:
+        with LocalVectorStore(
+            VectorStoreConfig(path=None, search_mode=SearchMode.HYBRID)
+        ) as store:
+            original = [
+                make_embedded_document("First"),
+                make_embedded_document("Second", chunk_index=1),
+            ]
+            store.index(
+                original,
+                model_identifier="dense-model",
+                sparse_vectors=[
+                    SparseEmbeddingVector(indices=(1,), values=(1.0,)),
+                    SparseEmbeddingVector(indices=(2,), values=(1.0,)),
+                ],
+                sparse_model_identifier="sparse-model",
+            )
+            result = store.replace_sources(
+                [original[0]],
+                sources={"policy.txt"},
+                model_identifier="dense-model",
+                sparse_vectors=[SparseEmbeddingVector(indices=(1,), values=(1.0,))],
+                sparse_model_identifier="sparse-model",
+            )
+            self.assertEqual(result.removed_count, 1)
+            self.assertEqual(result.total_count, 1)
 
     def test_indexes_hybrid_vectors_with_versioned_compatible_schema(self) -> None:
         records = [

@@ -32,11 +32,12 @@ def register_indexing_commands(
 
     index_parser = subparsers.add_parser(
         "index",
-        help="Build or update a persistent local Qdrant collection.",
+        help="Replace indexed chunks for supplied sources in local Qdrant.",
         description=(
-            "Extract, chunk, and embed documents, then upsert deterministic points "
-            "into local Qdrant. Model and search-mode settings become part of the "
-            "collection compatibility contract."
+            "Extract, chunk, and embed documents, then replace all indexed chunks "
+            "for each supplied source in local Qdrant. Other sources remain "
+            "untouched unless --prune-missing is selected. Model and search-mode "
+            "settings must match the collection contract."
         ),
     )
     add_document_input_arguments(index_parser)
@@ -45,13 +46,23 @@ def register_indexing_commands(
     add_vector_store_location_arguments(index_parser)
     add_hybrid_search_arguments(index_parser)
     index_parser.add_argument(
+        "--prune-missing",
+        action="store_true",
+        help=(
+            "Also remove indexed sources no longer found under the supplied "
+            "directory. Requires exactly one directory and recursive scanning; "
+            "review the scope because points for missing files are deleted "
+            "from the collection (not the source files)."
+        ),
+    )
+    index_parser.add_argument(
         "--write-batch-size",
         type=int,
         default=64,
         help=(
-            "Number of chunk vectors sent in each synchronous Qdrant upsert. "
-            "Larger batches reduce write calls but use more memory; reduce after "
-            "memory-related write failures (default: 64)."
+            "Maximum points per synchronous Qdrant upsert or stale-point "
+            "deletion; also sets source-scan page size. Larger batches reduce "
+            "calls but use more memory (default: 64)."
         ),
     )
     index_parser.set_defaults(_handler=run_index)
@@ -108,7 +119,7 @@ def run_index(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
 ) -> int:
-    """Build dense or hybrid vectors and upsert them into local Qdrant.
+    """Replace source chunks in local Qdrant and optionally prune a directory.
 
     The handler performs document and model I/O and mutates the selected
     collection. Configuration validation occurs before those side effects.
@@ -132,15 +143,21 @@ def run_index(
     ) as exc:
         parser.error(str(exc))
 
-    result = index_local_documents(
-        args.paths,
-        recursive=args.recursive,
-        config=config,
-    )
+    try:
+        result = index_local_documents(
+            args.paths,
+            recursive=args.recursive,
+            config=config,
+            prune_missing=args.prune_missing,
+        )
+    except InvalidPipelineConfigurationError as exc:
+        parser.error(str(exc))
 
     print(
         f"Indexed {result.indexed_count} chunk(s) into "
         f"{result.collection_name!r}; collection now contains "
         f"{result.total_count} point(s)."
     )
+    if result.removed_count:
+        print(f"Removed {result.removed_count} obsolete point(s).")
     return 0
