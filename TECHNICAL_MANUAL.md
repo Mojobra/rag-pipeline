@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.2.0
-- **Last verified:** 2026-08-13
+- **Last verified:** 2026-10-17
 - **Current product surface:** Local Python CLI
 
 ## How To Read Version Information
@@ -49,6 +49,64 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests and `main`. |
 | Version control | Git and GitHub | Provide reviewable branch history, pull requests, release tags, and benchmark commit provenance. |
 
+## Library Inventory
+
+This consolidated table lists every runtime, development, and build dependency
+declared in `pyproject.toml`, plus directly imported or operationally important
+transitive libraries. Package names are distribution names used by the package
+manager, which can differ from Python import names.
+
+- **Direct runtime:** explicitly declared application dependencies, even when
+  their functionality is reached through another library's adapter.
+- **Transitive:** installed through another dependency rather than separately
+  declared by this project. Inclusion here does not make it a direct dependency.
+- **Development:** tools declared in the `dev` dependency group.
+- **Build:** the backend declared under `[build-system]`.
+
+| Library / package | Dependency type | Purpose and use in this project |
+| --- | --- | --- |
+| `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
+| `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
+| `langchain-huggingface` | Direct runtime | Provides `HuggingFaceEmbeddings` for dense vectors and `HuggingFacePipeline` for local answer generation. |
+| `langchain-qdrant` | Direct runtime | Adapts Qdrant retrieval and supplies sparse-vector contracts and the `FastEmbedSparse` provider. |
+| `langchain-text-splitters` | Direct runtime | Creates bounded recursive chunks, including language-aware separator policies for structure-aware experiments. |
+| `qdrant-client` | Direct runtime | Opens embedded Qdrant, manages collections and point writes, and defines vector, query, and metadata-filter models. |
+| `sentence-transformers` | Direct runtime | Executes dense embedding models through the Hugging Face adapter and the optional `CrossEncoder` reranker. |
+| `transformers` | Direct runtime | Loads local text-to-text models and tokenizers through the generation adapter. |
+| `sentencepiece` | Direct runtime | Supplies tokenizer support for the default T5-family generation model. |
+| `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
+| `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
+| `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
+| `torch` (PyTorch) | Transitive | Executes dense embedding, generation, and reranking models; benchmark provenance also inspects its CUDA information lazily. |
+| `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
+| `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
+| `onnxruntime` | Transitive | Supplies FastEmbed's ONNX model support; the current BM25 sparse path is lexical, not neural ONNX inference. |
+| `pydantic` | Transitive | Supports LangChain/Qdrant model contracts; generation tests import `Field` for an LLM test double. It is not a project-owned HTTP schema layer. |
+| `ruff` | Development | Checks and formats source and tests, including imports and the configured correctness rules. |
+| `mypy` | Development | Statically checks production code with the project's strict typing configuration. |
+| `coverage[toml]` (Coverage.py) | Development | Measures statement and branch coverage for the offline test suite and enforces the configured coverage floor. |
+| `setuptools` | Build | Implements the `setuptools.build_meta` backend that packages the typed `src` layout into wheels and source distributions. |
+
+Python standard-library modules such as `argparse`, `pathlib`, `dataclasses`,
+`json`, `sqlite3`, and `unittest` do not require separate package installation.
+Python, uv, Git, GitHub, and GitHub Actions are tools or platforms, not additional
+application libraries; their responsibilities appear in **Stack At A Glance**
+and **Engineering Toolchain**.
+
+The table is an application-stack inventory, not an exhaustive software bill of
+materials. Indirect implementation dependencies remain authoritative in
+`uv.lock`; do not mistake every locked package for a library imported by project
+code. Inspect the complete graph, including development tools, without changing
+the lockfile or accessing the network:
+
+```powershell
+uv tree --locked --offline --all-groups
+```
+
+The default tree is filtered for the current interpreter and platform. Add
+`--universal` to inspect the lockfile graph across supported environments;
+platform-specific packages in that graph are not necessarily installed locally.
+
 ## Direct Dependencies
 
 These are the runtime dependencies declared by the project. The locked snapshot
@@ -76,13 +134,19 @@ transitive runtime snapshot is:
 | --- | --- | --- |
 | `langchain-core` | 1.4.9 | Defines the document, embedding, prompt, model, parser, and runnable contracts imported by project code. |
 | `torch` | 2.13.0 | Executes Sentence Transformers and Hugging Face model inference on CPU or CUDA. |
-| `numpy` | 2.5.1 | Supplies array operations used by the ML provider stack and provider score outputs. |
+| `numpy` | 2.4.6 on Python 3.11; 2.5.1 on Python 3.12+ | Supplies array operations used by the ML provider stack and provider score outputs. |
 | `tokenizers` | 0.22.2 | Provides optimized Hugging Face tokenization where supported by a model. |
-| `onnxruntime` | 1.27.0 | Executes FastEmbed's local ONNX models. |
+| `onnxruntime` | 1.27.0 | Supplies FastEmbed's ONNX model support; the current BM25 path is lexical. |
+| `pydantic` | 2.13.4 | Supports LangChain/Qdrant contracts and the `Field` import in generation test doubles, not project-owned API schemas. |
 
 These packages are locked in `uv.lock` rather than maintained as independent
 application APIs. The full transitive graph contains additional implementation
 dependencies and can be inspected with `uv tree`.
+
+The build requirement is `setuptools>=68` with the `setuptools.build_meta`
+backend. Its isolated build-environment version is not pinned in
+`pyproject.toml`; a transitive setuptools entry in `uv.lock` is not a separate
+exact build-backend pin.
 
 Development tools are deliberately pinned exactly:
 
@@ -447,6 +511,9 @@ For an affected change:
 1. Inspect `pyproject.toml`, `uv.lock`, the changed implementation, and
    `.github/workflows/ci.yml` as applicable.
 2. Update the relevant section and the `Last verified` date.
+   When libraries change, also reconcile **Library Inventory**, the dependency
+   tables, and actual imports; preserve the distinction between direct,
+   transitive, development, and build dependencies.
 3. Keep implemented behavior separate from roadmap plans.
 4. Check consistency with `README.md`, `ARCHITECTURE.md`, and
    `CONTRIBUTING.md`.
