@@ -112,6 +112,23 @@ response, authentication, and error-mapping concerns remain future work.
 
 ---
 
+## Current Index Synchronization Contract
+
+- The CLI `index` use case discovers the complete file set before extraction and
+  passes explicit source paths to Qdrant, including files yielding no chunks.
+- `LocalVectorStore.replace_sources()` validates scope, snapshots old IDs by
+  exact source, verifies collection compatibility before writing, upserts new
+  points, then deletes obsolete IDs. `LocalVectorStore.index()` keeps its
+  general upsert contract for other callers, including isolated benchmarks.
+- Files no longer present in a directory are retained unless `--prune-missing`
+  is explicitly requested for one recursively scanned directory. Sources
+  outside that resolved directory are never included in directory pruning.
+- A failure before upsert leaves the collection unchanged. Multiple upsert and
+  delete calls are not atomic; a database failure may require retrying the same
+  source scope to finish synchronization.
+
+---
+
 ## Current Generation Contract
 
 - LangChain composes the `grounded-v2` prompt with the configured language model

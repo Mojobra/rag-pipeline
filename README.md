@@ -24,8 +24,8 @@ CLI, not a hosted application or production service.
   Reciprocal Rank Fusion, exact metadata filters, and cross-encoder reranking.
 - **Grounded generation:** tokenizer-bounded prompts, deterministic source
   citations assembled outside the model, and abstention without usable evidence.
-- **Persistent indexing:** embedded Qdrant, deterministic point IDs, idempotent
-  upserts, and collection compatibility checks.
+- **Persistent indexing:** embedded Qdrant, deterministic point IDs,
+  source-scoped replacement, and collection compatibility checks.
 - **Evaluation:** versioned synthetic corpora, retrieval and answer metrics, and
   isolated benchmarks with provenance, latency reports, and regression gates.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
@@ -94,6 +94,14 @@ uv run rag-pipeline retrieve "When must expense claims be submitted?" --collecti
 Document inputs can be files or directories. Directories are scanned recursively
 by default. Keep separate collection names for unrelated corpora, and use the
 same collection and embedding settings for indexing and queries.
+
+Re-running `index` replaces all chunks for each supplied file, including a file
+that now produces no chunks. Other indexed sources remain untouched. To remove
+sources that have disappeared from one directory, run `index` on that directory
+with `--prune-missing`; this requires recursive scanning and deletes only points
+whose source path is inside that directory. Index updates use multiple Qdrant
+operations and are not atomic; after an interrupted run, repeat the command to
+finish synchronization.
 
 ### Enable Hybrid Search And Reranking
 

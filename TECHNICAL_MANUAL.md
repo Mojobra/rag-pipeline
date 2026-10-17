@@ -264,6 +264,19 @@ default BM25 model's tokenization and stemming also need corpus-specific review.
 - Writes: synchronous, validated, and batched
 - Identity: deterministic UUID-based point IDs for idempotent upserts
 
+The CLI `index` workflow now replaces the full point set for each discovered
+source. It snapshots existing source IDs, writes all new chunk vectors, then
+deletes IDs absent from the new set. Empty sources therefore clear their old
+points. `--prune-missing` explicitly adds absent files from one recursively
+scanned directory to the replacement scope; sources outside that directory
+remain untouched. The lower-level `LocalVectorStore.index()` method remains a
+general upsert for benchmark and programmatic callers.
+
+Replacement requires extra Qdrant reads and deletes. The synchronous batches
+are not transactional as a group: extraction and embedding failures happen
+before any write, while a Qdrant write or deletion failure may leave a partial
+update. Repeating the same indexing operation reconciles the source scope.
+
 The collection contract records and validates schema version, model identity,
 vector dimension, named-vector layout, distance metric, and sparse settings.
 Incompatible indexing or retrieval fails explicitly rather than mixing vectors

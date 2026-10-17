@@ -23,7 +23,7 @@ from rag_pipeline.infrastructure.vector_store import (
     SearchMode,
     VectorStoreConfig,
 )
-from rag_pipeline.ingestion import load_documents
+from rag_pipeline.ingestion import discover_files, load_documents
 from rag_pipeline.ingestion.chunking import ChunkingConfig, chunk_documents
 
 
@@ -93,18 +93,38 @@ def index_local_documents(
     *,
     recursive: bool,
     config: IndexingPipelineConfig,
+    prune_missing: bool = False,
 ) -> IndexingResult:
-    """Build and persist dense or hybrid vectors for local documents.
+    """Replace indexed chunks for discovered sources in a local collection.
 
     The use case performs filesystem reads, model initialization and inference,
-    creates or validates the configured Qdrant collection, and synchronously
-    upserts deterministic points. Lower-level services enforce input,
-    provenance, and collection-compatibility invariants.
+    then writes new points before deleting obsolete ones. Optional directory
+    pruning also removes indexed sources missing from one recursively scanned
+    directory; it never removes points outside that resolved directory.
     """
     if not isinstance(config, IndexingPipelineConfig):
         raise TypeError("config must be an IndexingPipelineConfig.")
 
-    documents = load_documents(paths, recursive=recursive)
+    prune_root: Path | None = None
+    if prune_missing:
+        if len(paths) != 1 or not recursive:
+            raise InvalidPipelineConfigurationError(
+                "prune_missing requires exactly one recursively scanned directory."
+            )
+        prune_root = Path(paths[0]).expanduser().resolve()
+        if not prune_root.is_dir():
+            raise InvalidPipelineConfigurationError(
+                "prune_missing requires an existing directory path."
+            )
+
+    source_paths = discover_files(paths, recursive=recursive)
+    if prune_root is not None and any(
+        not path.is_relative_to(prune_root) for path in source_paths
+    ):
+        raise InvalidPipelineConfigurationError(
+            "prune_missing cannot index a file resolved outside its directory."
+        )
+    documents = load_documents(source_paths, recursive=False)
     chunks = chunk_documents(documents, config=config.chunking)
 
     # Import factories at execution time so constructing application objects
@@ -126,8 +146,26 @@ def index_local_documents(
     )
 
     with LocalVectorStore(config.vector_store) as vector_store:
-        return vector_store.index(
+        sources = {str(path) for path in source_paths}
+        if prune_root is not None:
+            sources.update(
+                source
+                for source in vector_store.list_sources()
+                if Path(source).is_absolute()
+                and Path(source).is_relative_to(prune_root)
+            )
+        if not sources:
+            return vector_store.index(
+                embedded_documents,
+                model_identifier=embedding_service.model_identifier,
+                sparse_vectors=sparse_vectors,
+                sparse_model_identifier=(
+                    None if sparse_service is None else sparse_service.model_identifier
+                ),
+            )
+        return vector_store.replace_sources(
             embedded_documents,
+            sources=sources,
             model_identifier=embedding_service.model_identifier,
             sparse_vectors=sparse_vectors,
             sparse_model_identifier=(

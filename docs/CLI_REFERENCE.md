@@ -6,6 +6,30 @@ Run all commands from the repository root; multiline commands use PowerShell
 continuation syntax. The schemas shown below are JSON examples, not
 additional files installed by the application.
 
+## Index Synchronization
+
+`index` replaces the complete indexed chunk set for each discovered file. This
+removes stale chunks after content shrinks, a chunk-size change, or an empty
+document. Other files in the same collection are not removed. The underlying
+`LocalVectorStore.index()` API remains an ordinary deterministic upsert for
+callers such as isolated benchmarks; it does not prune old points.
+
+To reconcile files deleted from a directory, opt in explicitly:
+
+```powershell
+uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents `
+  --collection-name asteria_demo --prune-missing
+```
+
+`--prune-missing` accepts exactly one existing directory with recursive scanning
+(the default); it cannot be combined with `--no-recursive`. It removes only
+indexed sources whose resolved absolute paths are inside that directory and
+are no longer discovered there. Check the directory and collection before
+using it; missing files are removed from the index. A failed extraction or
+embedding run performs no database write. Qdrant upserts and deletions are
+synchronous but not one atomic transaction: if a batch or deletion fails, the
+collection may be partly updated; rerun the same command to reconcile it.
+
 ## Evaluation Setup
 
 The standalone evaluation examples use the committed v1 corpus. Index it first:
