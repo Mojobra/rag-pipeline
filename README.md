@@ -1,908 +1,290 @@
-# Production-Minded RAG Pipeline
+# RAG Pipeline
+
+A local Python CLI that turns business documents into searchable evidence and
+source-cited answers using LangChain, Hugging Face models, and Qdrant.
 
 [![CI](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml)
 
-An end-to-end Retrieval-Augmented Generation pipeline for question answering
-over business documents. The project uses LangChain, Hugging Face models, and a
-persistent local Qdrant vector store to turn PDF, DOCX, Markdown, HTML, and text
-files into grounded answers with deterministic source citations.
+## Overview
 
-The implementation starts with a local, reproducible baseline while preserving
-the contracts needed to evolve toward hosted models, production APIs,
-evaluation, observability, and enterprise data sources.
+Retrieval-Augmented Generation (RAG) gives a language model relevant document
+excerpts before it answers a question. This project implements that workflow
+locally, from document extraction and indexing to retrieval, generation, and
+evaluation.
 
-## Development Approach
+It is intended for developers and AI engineers who want to inspect, test, and
+compare RAG components on a reproducible baseline. The current interface is a
+CLI, not a hosted application or production service.
 
-This project was developed using AI-assisted software engineering with Codex. I
-used AI as a development partner for implementation support while defining the
-architecture, requirements, tests, and design decisions myself. All generated
-code was reviewed, adapted, and validated through automated tests.
+## Features
 
-## Releases
-
-The CLI and benchmark manifests read the installed distribution version whose
-single editable source is `project.version` in `pyproject.toml`. Release tags use
-`vMAJOR.MINOR.PATCH` and point to validated commits on `main`. See
-[CHANGELOG.md](CHANGELOG.md) for milestone notes.
-
-## Documentation
-
-- [TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md) inventories the current technology
-  stack, model backends, architecture boundaries, tooling, and known omissions.
-- [ARCHITECTURE.md](ARCHITECTURE.md) defines package ownership and behavioral
-  contracts.
-- [CONTRIBUTING.md](CONTRIBUTING.md) defines development and review practices.
-
-## Highlights
-
-- Multi-format ingestion and extraction for PDF, DOCX, Markdown, HTML, and text
-- Configurable recursive chunking with page and character-level provenance
-- Opt-in structure-aware and bounded semantic chunking benchmark strategies
-- Reproducible chunking experiments with distribution and overlap-cost metrics
-- Local normalized MiniLM embeddings through LangChain
-- Optional local BM25 sparse embeddings with native Qdrant RRF hybrid search
-- Optional local cross-encoder reranking with first-stage score provenance
-- Persistent Qdrant storage with deterministic IDs and idempotent upserts
-- Collection compatibility checks for embedding model, vector dimension,
-  distance metric, and schema version
-- Ranked semantic retrieval with configurable top-k and score thresholds
-- Typed exact-match metadata filters pushed into Qdrant before top-k selection
-- Versioned retrieval evaluation datasets with per-query and macro top-k metrics
-- Chunk-index-independent schema-v2 relevance anchors for fair comparisons
-- Versioned answer evaluation with reference, abstention, and citation metrics
-- Committed synthetic business-policy corpus with aligned retrieval, answer,
-  and abstention labels plus automated drift checks
-- Isolated full-pipeline benchmarks with input hashes, stage and case latency,
-  environment manifests, regression gates, and compatible-run comparisons
-- Thin CLI adapters over transport-neutral indexing and retrieval use cases
-- Focused feature packages without legacy root-level compatibility facades
-- Tokenizer-bounded local generation with a versioned grounding and abstention
-  prompt
-- Deterministic citations built from retrieval metadata, never model output
-- Strictly typed source code, stage-specific exceptions, branch coverage, and
-  pinned automated quality checks
-
-## Architecture
-
-```mermaid
-flowchart LR
-    CLI["CLI adapters"] --> APP["Application use cases"]
-    CLI --> BENCH["Benchmark orchestration"]
-    APP --> ING["Ingestion and chunking"]
-    APP --> RET["Retrieval and reranking"]
-    APP --> GEN["Prompting and generation"]
-    BENCH --> ING
-    BENCH --> RET
-    BENCH --> GEN
-    DOCS["PDF / DOCX / Markdown / HTML / Text"] --> ING
-    ING --> EMB["Dense and sparse embeddings"]
-    EMB --> DB["Persistent Qdrant index"]
-    DB --> RET
-    FILTERS["Typed metadata filters"] --> RET
-    RET --> GEN
-    GEN --> ANSWER["Grounded answer and deterministic citations"]
-    DATA["Versioned synthetic datasets"] --> BENCH
-    BENCH --> REPORT["Metrics, manifests, comparisons, and gates"]
-```
-
-## Engineering Decisions
-
-| Decision | Production rationale |
-| --- | --- |
-| Preserve provenance during extraction and chunking | Citations cannot be reconstructed reliably after metadata is lost. |
-| Compare chunking candidates on one document snapshot | Keeps input variance from being mistaken for a chunking effect. |
-| Keep semantic chunking opt-in and benchmarked | Sentence embeddings add ingestion latency, so measured retrieval gains must justify the cost. |
-| Label source evidence instead of experimental chunk indices | The same relevance judgment remains valid when chunk boundaries change. |
-| Use deterministic chunk IDs | Re-indexing updates logical chunks instead of creating duplicates. |
-| Record collection model and dimension | Incompatible query vectors fail before corrupting retrieval behavior. |
-| Version dense and hybrid collection schemas separately | Prevents queries from silently using collections that do not contain the required sparse vectors. |
-| Fuse dense and sparse ranks with RRF | Combines semantic and exact-term retrieval without mixing incomparable raw scores. |
-| Push metadata filters into Qdrant | Selects top-k only from eligible chunks and avoids leaking excluded candidates into application code. |
-| Overfetch before optional cross-encoder reranking | Lets the first stage optimize recall while the second stage improves precision without scoring the entire corpus. |
-| Preserve first-stage rank and score after reranking | Keeps retrieval behavior auditable and avoids presenting incomparable scores as one metric. |
-| Evaluate exact metadata relevance labels at a fixed cutoff | Makes retrieval regressions measurable without involving nondeterministic answer generation. |
-| Score references and abstention separately | Prevents correct refusals from being treated as bad answers and exposes models that always answer or always abstain. |
-| Commit a synthetic corpus with its labels | Makes evaluation reproducible without exposing customer data, personal files, or copyrighted source material. |
-| Rebuild a temporary index for each full benchmark | Binds quality and latency to an exact corpus and configuration instead of trusting potentially stale collection state. |
-| Gate allowlisted metrics from a separate versioned profile | Keeps ground-truth labels independent of deployment policy and makes CI failures explicit and reviewable. |
-| Dispatch CLI commands through explicit adapter handlers | Keeps parsing and terminal formatting separate from reusable application behavior. |
-| Put indexing and retrieval lifecycles in an application layer | Gives future transports one validated orchestration boundary without coupling domain services to argparse. |
-| Keep APIs under their owning feature package | Keeps ownership visible and prevents a pre-1.0 migration layer from obscuring the real architecture. |
-| Skip generation without evidence | Avoids unnecessary inference and unsupported answers. |
-| Version the generation prompt and return its identifier | Makes answer behavior reproducible across evaluation runs, deployments, and incident analysis. |
-| Delimit and number retrieved evidence independently of citations | Gives the model clear evidence boundaries while citation records remain deterministic application data. |
-| Budget the complete prompt with the model tokenizer | Prevents input overflow while keeping citations aligned with the exact evidence sent. |
-| Build citations outside the LLM | Prevents fabricated filenames, pages, and source identifiers. |
-| Keep provider boundaries behind LangChain interfaces | Makes later model and infrastructure changes less invasive. |
+- **Document ingestion:** PDF, DOCX, Markdown, HTML, and plain text, with source
+  metadata and page-level provenance for PDFs.
+- **Retrieval:** dense semantic search, optional BM25 hybrid search with
+  Reciprocal Rank Fusion, exact metadata filters, and cross-encoder reranking.
+- **Grounded generation:** tokenizer-bounded prompts, deterministic source
+  citations assembled outside the model, and abstention without usable evidence.
+- **Persistent indexing:** embedded Qdrant, deterministic point IDs, idempotent
+  upserts, and collection compatibility checks.
+- **Evaluation:** versioned synthetic corpora, retrieval and answer metrics, and
+  isolated benchmarks with provenance, latency reports, and regression gates.
+- **Chunking experiments:** recursive chunk diagnostics plus opt-in
+  structure-aware and semantic strategies in isolated benchmarks.
 
 ## Quick Start
 
-Requirements:
-
-- Python 3.11 or newer
-- [uv](https://docs.astral.sh/uv/)
-
-Install the locked environment:
+With [the prerequisites](#requirements) installed, run:
 
 ```powershell
-uv sync --locked --no-dev
+git clone https://github.com/Mojobra/rag-pipeline.git
+cd rag-pipeline
+uv sync --locked
+uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents --collection-name asteria_demo
+uv run rag-pipeline answer "When must expense claims be submitted?" --collection-name asteria_demo
 ```
 
-The installed `uv run rag-pipeline` command and
-`uv run python -m rag_pipeline` module entry point are equivalent.
+This indexes five fictional business policies included in the repository, then
+asks about their expense-submission deadline. No private documents or API keys
+are needed. The first run downloads the embedding and generation models.
 
-Index one file or an entire directory:
+Answers include a `Sources` section identifying the evidence used. The small
+default model is a functional baseline, not a guarantee of answer quality. Use
+`retrieve` to inspect evidence independently of generation.
+
+## Requirements
+
+- Python **3.11 or newer**; CI currently runs Python 3.11.
+- [uv](https://docs.astral.sh/uv/) for dependency management and execution.
+- Git to clone the repository.
+- Network access for initial dependency installation and uncached model
+  downloads; disk space for dependencies, model caches, and the local index.
+
+The defaults run on CPU. A GPU, separate Qdrant server, Docker, and API keys are
+not required. After dependencies and model artifacts are cached, inference runs
+locally.
+
+## Installation
+
+The Quick Start installs from the repository using `uv sync --locked`. This
+creates a `.venv` with the dependencies recorded in [uv.lock](uv.lock),
+including the default development tools. Run subsequent commands from the
+repository root.
+
+Check the installation and available commands:
 
 ```powershell
-uv run python -m rag_pipeline index path/to/documents
+uv run rag-pipeline --version
+uv run rag-pipeline --help
 ```
 
-Ask a question against the persisted collection:
+`uv run python -m rag_pipeline` is the equivalent module entry point; it accepts
+the same subcommands and flags.
+
+## Usage
+
+### Inspect Retrieved Evidence
+
+Query the collection created in the Quick Start, without loading an answer
+model:
 
 ```powershell
-uv run python -m rag_pipeline answer "Which vector database does this project use?"
+uv run rag-pipeline retrieve "When must expense claims be submitted?" --collection-name asteria_demo --top-k 3
 ```
 
-Use separate collection names for unrelated corpora. For example, index an
-expense-policy corpus with `--collection-name expense_policies` and pass the
-same option to `retrieve` and `answer`; local Qdrant collections persist across
-commands.
+Document inputs can be files or directories. Directories are scanned recursively
+by default. Keep separate collection names for unrelated corpora, and use the
+same collection and embedding settings for indexing and queries.
 
-The first embedding, reranking, and generation runs download their configured
-Hugging Face model weights when those stages are enabled. Public local models
-do not require an API key.
+### Enable Hybrid Search And Reranking
 
-## Example Output
-
-```text
-Answer:
-The project uses a persistent local Qdrant vector store.
-
-Sources:
-[1] README.md (chunk 3, characters 1740-2050)
-    The local prototype stores vectors in Qdrant under .rag_data/qdrant...
-```
-
-Citation records also retain the stable chunk ID, retrieval rank, and retrieval
-score for programmatic use. Scores are intentionally not presented as answer
-confidence values.
-
-## CLI Workflow
+Build a separate collection because hybrid search requires both dense and sparse
+vectors. These multiline examples use PowerShell continuation syntax:
 
 ```powershell
-# Inspect supported commands
-uv run python -m rag_pipeline -h
+uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents `
+  --collection-name asteria_hybrid --search-mode hybrid
 
-# Load supported documents
-uv run python -m rag_pipeline ingest path/to/documents
-
-# Inspect chunk counts
-uv run python -m rag_pipeline chunk path/to/documents
-
-# Compare several chunking configurations without model calls or indexing
-uv run python -m rag_pipeline chunk-experiment path/to/documents --candidate 500:100 --candidate 1000:200 --candidate 1500:300
-
-# Verify local embedding output
-uv run python -m rag_pipeline embed path/to/documents
-
-# Build or update the persistent Qdrant collection
-uv run python -m rag_pipeline index path/to/documents
-
-# Build a separate dual-vector collection for hybrid search
-uv run python -m rag_pipeline index path/to/documents --collection-name policies_hybrid --search-mode hybrid
-
-# Inspect ranked evidence without generation
-uv run python -m rag_pipeline retrieve "What is the policy?" --top-k 3
-
-# Retrieve 20 candidates, then return the best 3 after local reranking
-uv run python -m rag_pipeline retrieve "What is the policy?" --rerank --candidate-k 20 --top-k 3
-
-# Restrict retrieval before semantic top-k selection
-uv run python -m rag_pipeline retrieve "What is the policy?" --filter file_extension=.pdf
-
-# Evaluate ranked retrieval against labeled queries without generation
-uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json --top-k 5
-
-# Evaluate full generated-answer behavior against references and abstention labels
-uv run python -m rag_pipeline evaluate-answer answer-evaluation.json --top-k 3
-
-# Rebuild a corpus in isolation and save a full quality/latency benchmark
-uv run python -m rag_pipeline benchmark path/to/documents retrieval-evaluation.json answer-evaluation.json --output .rag_data/benchmarks/local-v1.json
-
-# Compare two compatible saved benchmark artifacts
-uv run python -m rag_pipeline compare-benchmarks baseline.json candidate.json
-
-# Retrieve evidence and generate a cited answer
-uv run python -m rag_pipeline answer "What is the policy?" --top-k 3
+uv run rag-pipeline retrieve "What does EXP-042 require?" `
+  --collection-name asteria_hybrid --search-mode hybrid `
+  --rerank --candidate-k 20 --top-k 4
 ```
 
-Useful options include:
+Hybrid search adds a sparse model and index storage; reranking adds model
+inference for each candidate. Neither is assumed to improve every corpus.
 
-- `--model` and `--model-revision` for the embedding model
-- `--generation-model` and `--generation-model-revision` for the local LLM
-- `--device` and `--generation-device` for CPU or CUDA placement
-- `--top-k` and `--score-threshold` for retrieval behavior
-- `--rerank` and `--candidate-k` for optional second-stage reranking
-- `--reranker-model`, `--reranker-model-revision`, `--reranker-device`,
-  `--reranker-cache-dir`, `--reranker-batch-size`, and
-  `--reranker-max-length` for the local cross-encoder
-- `--search-mode dense|hybrid` for the collection and retrieval strategy
-- `--sparse-model`, `--sparse-cache-dir`, `--sparse-batch-size`, and
-  `--sparse-threads` for local hybrid indexing and queries
-- repeatable `--filter KEY=VALUE` for exact metadata filters with AND semantics
-- repeatable `--candidate SIZE:OVERLAP` for chunking experiments
-- benchmark-only `--chunking-strategy recursive|structure-aware|semantic` plus
-  semantic breakpoint, minimum-size, and sentence-buffer controls
-- `--output-format table|json` for human or machine-readable experiment and
-  evaluation reports
-- `--output`, optional `--thresholds`, and `--work-dir` for isolated benchmark
-  artifacts, regression gates, and temporary-index disk placement
-- `--max-input-tokens` for an optional limit below the tokenizer model maximum
-- `--max-context-characters` as a secondary generation context guard
-- `--collection-name` and `--store-path` for Qdrant persistence
+### Evaluate The Pipeline
 
-## Chunking Experiments
-
-The `chunk-experiment` command materializes one document snapshot and runs every
-candidate against that same input. With no `--candidate` options, it compares
-`500:100`, `1000:200`, and `1500:300`; each pair represents maximum chunk
-characters and target overlap characters.
-
-The report includes chunk count, min/mean/p95/max chunk length, total emitted
-characters, and duplicated characters. Duplication is calculated from the
-actual provenance intervals emitted by LangChain, because separator-aware
-splitting does not always produce the configured overlap exactly. Chunk count
-and total characters are useful cost proxies; the length distribution exposes
-undersized tails and context pressure.
-
-Use JSON when recording or comparing runs:
+Measure the existing demo collection against its committed retrieval labels:
 
 ```powershell
-uv run python -m rag_pipeline chunk-experiment path/to/documents --output-format json
+uv run rag-pipeline evaluate-retrieval evaluation/datasets/asteria-policies-v2/retrieval-v2.json --collection-name asteria_demo
 ```
 
-These are structural diagnostics, not retrieval-quality scores. A candidate
-with fewer chunks or less duplication is not automatically better. Use the
-retrieval evaluator below to compare candidates with representative queries and
-relevance labels, then use the benchmark command to record end-to-end quality,
-latency, and index size for promising policies.
-
-## Retrieval Evaluation
-
-The `evaluate-retrieval` command measures an existing collection without
-calling the generation model or modifying the index. It reuses the same dense
-or hybrid retrieval, exact metadata filters, score threshold, and optional
-cross-encoder reranking as `retrieve` and `answer`.
-
-Evaluation datasets are UTF-8 JSON with a strict, versioned schema:
-
-```json
-{
-  "schema_version": 1,
-  "name": "expense-policies-v1",
-  "cases": [
-    {
-      "id": "itemized-receipts",
-      "query": "What evidence is required for an expense claim?",
-      "relevant": [
-        {
-          "file_name": "expense-policy.pdf",
-          "page": 2,
-          "chunk_index": 0
-        }
-      ]
-    }
-  ]
-}
-```
-
-Each object under `relevant` is an exact metadata selector: every listed field
-and value must match a returned LangChain document. `page` and `chunk_index`
-use the zero-based values stored in Qdrant. Use an application-level stable
-`document_id` when datasets must survive file renames or path changes; the
-current `chunk_id` remains stable only while source provenance is unchanged.
-Each selector should identify one distinct relevant chunk as narrowly as
-possible. Broad selectors can match several chunks and make precision look more
-optimistic than the underlying evidence quality.
+For an isolated end-to-end benchmark, build a temporary index and save a report:
 
 ```powershell
-uv run python -m rag_pipeline evaluate-retrieval retrieval-evaluation.json `
-  --collection-name expense_policies `
-  --top-k 5 `
-  --output-format json
-```
-
-The report includes these binary metrics at the selected cutoff:
-
-- **Hit@k:** `1` when at least one relevant chunk is returned, otherwise `0`.
-- **Precision@k:** relevant returned chunks divided by `k`; missing result slots
-  caused by filtering or thresholds count as misses.
-- **Recall@k:** relevance selectors matched by at least one returned chunk,
-  divided by all selectors for that query.
-- **RR@k / MRR@k:** reciprocal rank of the first relevant chunk for each query,
-  or `0` for a miss; MRR is the macro average across queries.
-
-Aggregate values are macro averages, so every query has equal weight. The
-committed Task 17 dataset provides manually cross-checked project labels for
-this command. The benchmark runner reuses these exact metrics in versioned,
-comparable run artifacts.
-
-## Answer Evaluation
-
-The `evaluate-answer` command runs labeled questions through the same dense or
-hybrid retrieval, filters, score threshold, optional reranker, `grounded-v2`
-LangChain prompt, and generation model used by `answer`. It reuses provider
-instances across the dataset and reads the existing collection without changing
-it. The default score threshold is the same conservative `0.2` used by
-`answer`, and the default generation temperature is deterministic `0`.
-
-Answer datasets use a separate strict schema because answerability and accepted
-wording are different labels from retrieval relevance:
-
-```json
-{
-  "schema_version": 1,
-  "name": "expense-policy-answers-v1",
-  "cases": [
-    {
-      "id": "itemized-receipts",
-      "query": "What evidence is required for an expense claim?",
-      "should_abstain": false,
-      "reference_answers": [
-        "Expense claims require itemized receipts."
-      ]
-    },
-    {
-      "id": "unsupported-founder",
-      "query": "Who founded the company?",
-      "should_abstain": true,
-      "reference_answers": []
-    }
-  ]
-}
-```
-
-Answerable cases require one or more accepted references. Cases expected to
-abstain require an empty reference list. This explicit combination catches
-contradictory labels before models or Qdrant are initialized.
-
-```powershell
-uv run python -m rag_pipeline evaluate-answer answer-evaluation.json `
-  --collection-name expense_policies `
-  --top-k 3 `
-  --output-format json
-```
-
-The report includes:
-
-- **Exact-match rate:** normalized case-, punctuation-, and whitespace-insensitive
-  matches, taking the best result across accepted references.
-- **Mean token F1:** multiset word overlap with the best accepted reference,
-  using Unicode-aware normalization.
-- **Abstention accuracy, precision, and recall:** classification metrics for the
-  pipeline's one exact insufficient-context response.
-- **Answerable response rate:** the share of answerable cases the pipeline did
-  not incorrectly refuse.
-- **Citation-behavior rate:** whether answered cases contain citations and
-  abstentions contain none.
-
-Lexical overlap is reproducible and useful for regression testing, but it can
-penalize valid paraphrases and reward unsupported wording that resembles a
-reference. Citation behavior checks presence, not whether each claim is entailed
-by its cited evidence. These metrics therefore do not prove semantic
-faithfulness. The committed Task 17 cases provide a reproducible development
-baseline. The benchmark runner adds manifests and thresholds, while future
-production evaluation can add a separately calibrated human, NLI, or LLM judge.
-
-## Representative Test Dataset
-
-Task 17 adds
-[`asteria-policies-v1`](evaluation/datasets/asteria-policies-v1/README.md), a
-repository-owned synthetic business-policy corpus designed for both evaluation
-commands. Asteria Works is fictional, so the benchmark is safe to publish and
-does not depend on private development documents.
-
-| Asset | Count |
-| --- | ---: |
-| Markdown policy documents | 5 |
-| Default retrieval chunks | 10 |
-| Retrieval cases | 17 |
-| Answerable answer cases | 17 |
-| Expected-abstention cases | 4 |
-
-The cases cover direct facts, paraphrases, policy identifiers, numerical and
-time constraints, similar terminology across documents, multi-document
-evidence, and unsupported questions. Retrieval selectors use portable
-`file_name` and zero-based `chunk_index` metadata under the documented default
-chunking policy.
-
-```powershell
-uv run python -m rag_pipeline index `
-  evaluation/datasets/asteria-policies-v1/documents `
-  --collection-name asteria_policies_v1
-
-uv run python -m rag_pipeline evaluate-retrieval `
-  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
-  --collection-name asteria_policies_v1
-
-uv run python -m rag_pipeline evaluate-answer `
-  evaluation/datasets/asteria-policies-v1/answers-v1.json `
-  --collection-name asteria_policies_v1
-```
-
-Automated tests reproduce all chunks, require every relevance selector to match
-exactly one chunk, align answerable cases with retrieval judgments, and check
-accepted-answer vocabulary against the labeled evidence. The labels were
-manually cross-checked but have not received independent annotator review.
-Task 18 runs and records comparable configurations; the dataset itself remains
-independent of benchmark settings, thresholds, or a declared winning setup.
-
-[`asteria-policies-v2`](evaluation/datasets/asteria-policies-v2/README.md) keeps
-the same synthetic domain but uses schema-v2 `metadata` plus
-`content_contains` judgments. Those exact source anchors remain valid when
-chunk indices change, making v2 the appropriate dataset for chunking-strategy
-benchmarks. The v1 assets remain unchanged for backward compatibility and
-default-policy regression tests.
-
-## Reproducible Benchmarking
-
-The `benchmark` command measures a complete configuration from raw documents to
-generated answers. It always creates a fresh temporary Qdrant index, runs both
-evaluation datasets with shared model instances, measures one pass, records the
-temporary index size, and deletes the index afterward. This costs more time than
-evaluating an existing collection, but prevents stale points or undocumented
-chunking settings from invalidating a comparison.
-
-```powershell
-uv run python -m rag_pipeline benchmark `
-  evaluation/datasets/asteria-policies-v1/documents `
-  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
-  evaluation/datasets/asteria-policies-v1/answers-v1.json `
-  --name asteria-dense-local-v1 `
-  --top-k 4 `
-  --output .rag_data/benchmarks/asteria-dense-local-v1.json
-```
-
-The schema-v1 artifact contains:
-
-- SHA-256 fingerprints for the corpus and both label files, using portable
-  relative corpus paths rather than absolute local paths
-- the Git commit and tracked-worktree state when available
-- chunking, model revisions, devices, search, filters, reranking, prompt, token
-  limits, decoding, batching, and index configuration
-- Python, package, CPU/platform, and available CUDA device metadata
-- document, chunk, point, vector-dimension, and temporary-index storage totals
-- stage timings plus ordered per-case retrieval and end-to-end answer latency
-- the complete retrieval and answer evaluation reports
-- reproducibility warnings for unpinned models, sampled generation, or dirty
-  tracked source files
-
-Benchmark artifacts contain dataset queries and generated answers. Treat reports
-created from private or customer data according to the same access, retention,
-and deletion rules as the source data; do not commit them by default.
-
-### Regression Thresholds
-
-An optional strict JSON profile applies inclusive `minimum` or `maximum` checks:
-
-```json
-{
-  "schema_version": 1,
-  "name": "asteria-local-ci-v1",
-  "applies_to": {
-    "corpus_sha256": "e4c9da40c104e45792d0242f2b962e3d0267f980f04e5475d4a15fde2c798949",
-    "retrieval_dataset_sha256": "4344c821c85f665cf8494c1233743a06611b63d7a1baa2d720a6007b044b8e52",
-    "answer_dataset_sha256": "babd60d5819651a9cf19e01ec8ff5df80f3fbe50bad0354cd1b8cea89e92dec3",
-    "top_k": 4
-  },
-  "checks": [
-    {
-      "metric": "retrieval.mean_recall_at_k",
-      "operator": "minimum",
-      "value": 0.9
-    },
-    {
-      "metric": "answer.abstention_accuracy",
-      "operator": "minimum",
-      "value": 0.8
-    },
-    {
-      "metric": "latency.answer.p95_seconds",
-      "operator": "maximum",
-      "value": 5.0
-    }
-  ]
-}
-```
-
-The numbers above demonstrate the schema; calibrate real gates from reviewed
-runs rather than adopting example values blindly. The `applies_to` hashes shown
-are the committed Asteria v1 inputs; take these values from an ungated baseline
-artifact for another dataset. A profile is rejected before model loading when
-its corpus, labels, or final top-k differ, so an easier dataset cannot
-accidentally satisfy an approved gate. Supported checks cover all retrieval
-quality rates, answer quality/abstention/citation rates, retrieval and answer
-mean or p95 seconds, total runtime seconds, and index storage bytes. A configured
-optional metric that is undefined for the dataset fails explicitly.
-
-```powershell
-uv run python -m rag_pipeline benchmark `
-  evaluation/datasets/asteria-policies-v1/documents `
-  evaluation/datasets/asteria-policies-v1/retrieval-v1.json `
-  evaluation/datasets/asteria-policies-v1/answers-v1.json `
-  --thresholds benchmark-thresholds.json `
-  --output .rag_data/benchmarks/ci-run.json
-```
-
-A failed gate still writes the diagnostic artifact and returns exit status `1`;
-invalid configuration or schemas use the normal CLI error status. Existing
-artifacts are preserved unless `--overwrite` is explicit.
-
-### Comparing Runs
-
-```powershell
-uv run python -m rag_pipeline compare-benchmarks `
-  .rag_data/benchmarks/baseline.json `
-  .rag_data/benchmarks/candidate.json `
-  --output-format table
-```
-
-Comparison requires identical corpus and dataset fingerprints plus the same
-final `top-k`. Chunking, embedding, search mode, filters, reranking, generation,
-and code revision may differ because those are valid experiment variables.
-The comparison lists which top-level configuration sections changed alongside
-the metric deltas. Quality remains comparable across runtime environments.
-Latency, total runtime, and storage deltas are marked diagnostic when recorded
-software, platform, accelerator, or inference-device fields differ.
-
-Timings are wall-clock measurements from one local pass, including normal
-first-call effects but separating model-load and pipeline stages. Use the same
-machine, power settings, cache state, and background-load conditions for useful
-regression signals. Production capacity planning still needs warmups, repeated
-runs, concurrency, confidence intervals, memory telemetry, and representative
-service traffic. `runtime.total_seconds` covers benchmark preparation and
-execution through provenance capture; JSON serialization and artifact writing
-occur afterward and are not included.
-
-### Comparing Chunking Strategies
-
-The `benchmark` command keeps recursive chunking as its default and exposes two
-opt-in alternatives:
-
-- `structure-aware` uses LangChain's Markdown and HTML separator priorities,
-  with the normal recursive splitter as a fallback for other formats.
-- `semantic` embeds sentence contexts, creates boundaries at unusually large
-  cosine-distance changes, and enforces `--chunk-size` as a hard character cap.
-  It emits no overlap and reuses the benchmark's dense model for final vectors.
-
-Run every candidate against the v2 source-anchor labels and keep all unrelated
-settings fixed:
-
-```powershell
-uv run python -m rag_pipeline benchmark `
+uv run rag-pipeline benchmark `
   evaluation/datasets/asteria-policies-v2/documents `
   evaluation/datasets/asteria-policies-v2/retrieval-v2.json `
   evaluation/datasets/asteria-policies-v2/answers-v2.json `
-  --chunking-strategy semantic `
-  --name asteria-v2-semantic `
-  --output .rag_data/benchmarks/asteria-v2-semantic.json
+  --output .rag_data/benchmarks/asteria-v2.json
 ```
 
-Repeat with `recursive` and `structure-aware`, then use `compare-benchmarks`.
-Review retrieval and answer quality together with chunk count, index bytes,
-chunking time, dense-embedding time, and per-case failures. Semantic chunking
-performs extra embedding inference during ingestion and is not assumed to be
-better; representative reviewed results must justify changing a default.
+Use a new output filename for each run; existing artifacts are preserved unless
+`--overwrite` is explicit. Benchmark reports contain queries and generated
+answers, so reports from private data need the same protection as their sources.
 
-## Metadata Filters
+### Command Reference
 
-`retrieve`, `answer`, `evaluate-retrieval`, and `evaluate-answer` accept
-repeatable exact-match filters. Conditions are translated into structured
-Qdrant payload filters and applied before semantic top-k selection:
+| Command | Purpose |
+| --- | --- |
+| `ingest` | Discover supported files and inspect extracted documents. |
+| `chunk` | Inspect recursive chunks and their source metadata. |
+| `chunk-experiment` | Compare chunk sizes and overlap costs without model inference. |
+| `embed` | Inspect dense-vector output without writing an index. |
+| `index` | Build or update a compatible dense or hybrid collection. |
+| `retrieve` | Inspect ranked evidence, optionally filtered or reranked. |
+| `answer` | Generate an answer and citations from retrieved evidence. |
+| `evaluate-retrieval` | Score an existing collection against relevance labels. |
+| `evaluate-answer` | Measure reference answers, abstention, and citation behavior. |
+| `benchmark` | Rebuild and measure an isolated full pipeline. |
+| `compare-benchmarks` | Compare compatible saved artifacts and regression gates. |
 
-```powershell
-uv run python -m rag_pipeline answer "What is the policy?" `
-  --filter file_extension=.pdf `
-  --filter page=0
+Every command exposes its arguments through `--help`, for example
+`uv run rag-pipeline index --help`. See the
+[CLI reference](docs/CLI_REFERENCE.md) for schemas, filter semantics, score
+interpretation, and benchmark details, and the
+[dataset guide](evaluation/datasets/asteria-policies-v2/README.md) for chunking
+comparisons.
+
+## Configuration
+
+Configuration uses CLI flags and typed Python configuration objects. The current
+pipeline does **not** load model settings or API keys from `.env`; no
+`.env.example` or active OpenAI, Gemini, or Anthropic integration is included.
+
+| Setting | Default | Practical effect |
+| --- | --- | --- |
+| `--model` | `sentence-transformers/all-MiniLM-L6-v2` | Dense embedding model, not the answer model. Index and query with the same model and revision. |
+| `--generation-model` | `google/flan-t5-small` | Local text-to-text answer model; changing it does not change embeddings. |
+| `--device` / `--generation-device` | `cpu` | Independent embedding and generation devices. CUDA requires compatible hardware and sufficient VRAM. |
+| `--chunk-size` / `--chunk-overlap` | `1000` / `200` characters | Balance evidence size against chunk count, duplicated text, and storage. |
+| `--store-path` | `.rag_data/qdrant` | Persistent embedded database directory; reuse it for subsequent queries. |
+| `--collection-name` | `rag_documents` | Collection within the database; examples use explicit names to separate corpora. |
+| `--search-mode` | `dense` | Select `hybrid` only for a collection indexed in that mode. |
+| `--top-k` | `4` | Maximum final evidence chunks per query. |
+| `--score-threshold` | Disabled for `retrieve`; `0.2` for `answer` | Reject first-stage matches before reranking or generation. Scores are mode-specific, not confidence probabilities. |
+| `--batch-size` / `--write-batch-size` | `32` / `64` chunks | Separate dense-inference and database-write batches; larger batches use more memory. |
+
+Changing the embedding model, revision, or collection schema requires a new or
+rebuilt compatible collection. Pin `--model-revision`,
+`--generation-model-revision`, and, when used, `--reranker-model-revision` for
+more reproducible comparisons.
+
+Local Qdrant data, FastEmbed and reranker caches under `.rag_data/`, and
+`.env` files are ignored by Git. Dense and generation models use Hugging Face
+caching. See the [technical manual](TECHNICAL_MANUAL.md#local-state-and-io) for
+storage locations and I/O behavior.
+
+## Project Structure
+
+```text
+.
+|-- src/rag_pipeline/
+|   |-- cli/                 # Argument parsing and terminal output
+|   |-- application/         # Transport-neutral workflow orchestration
+|   |-- ingestion/           # Discovery, extraction, and chunking
+|   |-- infrastructure/      # Model adapters and Qdrant persistence
+|   |-- retrieval/           # Search, filtering, and reranking
+|   |-- generation/          # Prompts, token budgets, and citations
+|   |-- evaluation/          # Dataset schemas and quality metrics
+|   `-- benchmarking/        # Isolated runs, provenance, and comparisons
+|-- tests/                   # Offline unit and integration tests
+|-- evaluation/datasets/     # Versioned synthetic corpora and labels
+|-- docs/CLI_REFERENCE.md    # Detailed CLI workflows and contracts
+|-- .github/workflows/ci.yml # Automated quality checks
+|-- pyproject.toml           # Package metadata and dependency constraints
+`-- uv.lock                  # Reproducible dependency graph
 ```
 
-Repeated filters use AND semantics. Unquoted integers and lowercase JSON
-booleans are typed automatically, while other unquoted values remain strings.
-Use a quoted JSON string when a numeric-looking value must stay a string:
+The CLI delegates to application and feature services; model and storage I/O
+remain behind explicit adapters. See [ARCHITECTURE.md](ARCHITECTURE.md) for
+package boundaries and the contracts enforced between stages.
 
-```powershell
-uv run python -m rag_pipeline retrieve "Find policy 001" --filter 'policy_version="001"'
-```
+## Tech Stack
 
-Automatically indexed fields include `source`, `file_name`, `file_stem`,
-`file_extension`, `byte_size`, `extractor`, and, for PDFs, zero-based `page` and
-`total_pages`. The same API supports custom scalar metadata added to LangChain
-documents programmatically. A missing field or unmatched value produces no
-eligible chunks; the `answer` command then abstains before loading the LLM.
+| Area | Technology |
+| --- | --- |
+| Language and CLI | Python 3.11+, standard-library `argparse` |
+| RAG interfaces and composition | LangChain and its Hugging Face/Qdrant integrations |
+| Dense embeddings and reranking | Sentence Transformers / PyTorch |
+| Local generation | Hugging Face Transformers |
+| Sparse embeddings | FastEmbed BM25 |
+| Vector storage | Embedded Qdrant via `qdrant-client` |
+| PDF / DOCX extraction | pypdf / docx2txt |
+| Packaging and quality | uv, setuptools, unittest, Coverage.py, Ruff, mypy, GitHub Actions |
 
-Metadata filters improve relevance but are not an authorization system by
-themselves. A production API must inject mandatory tenant and ACL constraints
-server-side so callers cannot omit or replace them, and frequently filtered
-fields should receive Qdrant payload indexes at scale.
-
-## Hybrid Search
-
-Dense search remains the default and existing schema-v1 collections continue to
-work unchanged. Hybrid mode creates a schema-v2 collection containing named
-MiniLM dense vectors and BM25 sparse vectors. Use a separate collection name
-and pass the same mode to indexing and retrieval:
-
-```powershell
-uv run python -m rag_pipeline index path/to/documents `
-  --collection-name policies_hybrid `
-  --search-mode hybrid
-
-uv run python -m rag_pipeline retrieve "What does code ZX-42 require?" `
-  --collection-name policies_hybrid `
-  --search-mode hybrid
-```
-
-The first hybrid command downloads the configured FastEmbed sparse model into
-`.rag_data/fastembed`; it runs locally afterward and needs no API key. Qdrant's
-IDF modifier is part of the hybrid collection schema. At query time LangChain
-prefetches dense and sparse candidates, applies the same metadata filters to
-both branches, and asks Qdrant to combine ranks with reciprocal-rank fusion.
-Queries that produce an empty sparse vector safely fall back to the collection's
-dense vector.
-
-CLI results expose `score_kind=cosine` or `score_kind=rrf`. These scores are not
-interchangeable: dense thresholds are based on cosine similarity, while hybrid
-thresholds apply to the fused rank score. Calibrate each mode independently on
-a representative evaluation dataset. The default `Qdrant/bm25` model favors
-English tokenization and stemming; multilingual or domain-specific corpora may
-need a different sparse model.
-
-Attempting hybrid retrieval against an existing dense collection fails closed.
-This is intentional: adding a sparse field does not populate old points, so the
-documents must be reindexed into a hybrid collection before fusion is valid.
-
-## Cross-Encoder Reranking
-
-Reranking works after either dense or hybrid retrieval and does not require
-reindexing. The first stage retrieves a wider candidate set, then the local
-cross-encoder scores each query-chunk pair jointly and returns the final
-`--top-k` results:
-
-```powershell
-uv run python -m rag_pipeline retrieve "What does code ZX-42 require?" `
-  --collection-name policies_hybrid `
-  --search-mode hybrid `
-  --rerank `
-  --candidate-k 20 `
-  --top-k 4
-```
-
-The first reranked query downloads
-`cross-encoder/ms-marco-MiniLM-L6-v2` into `.rag_data/rerankers`. It then runs
-locally through Sentence Transformers and needs no API key. The model scores
-all candidates in batches, with a maximum tokenized query-chunk length of 512
-by default. The service uses LangChain's cross-encoder
-`score([(query, document), ...])` contract, so a hosted or community scorer can
-replace the local adapter later without changing retrieval or generation
-contracts.
-
-On Windows without Developer Mode, Hugging Face may warn that cache symlinks
-are unavailable. Inference still works, but the fallback cache can consume more
-disk space.
-
-Metadata filters and `--score-threshold` apply during first-stage retrieval,
-before any text reaches the reranker. This is important for permissions-aware
-systems: reranking must never become a path around tenant or ACL filtering.
-`--candidate-k` must be at least `--top-k`; increasing it may improve recall but
-increases latency roughly in proportion to the number of scored pairs.
-
-Reranked CLI results use `score_kind=cross_encoder` and retain
-`retrieval_rank`, `retrieval_score`, and `retrieval_score_kind`. Cross-encoder
-scores are model-specific logits, not calibrated probabilities, and must not be
-compared directly with cosine or RRF scores. A later evaluation task should
-measure whether the selected model and candidate width improve ranking on this
-project's actual queries.
-
-## Prompt Optimization
-
-Answer generation uses a LangChain `PromptTemplate` identified as
-`grounded-v2`. The prompt gives the model a compact contract: use supported
-evidence only, ignore instructions found in retrieved text, abstain with one
-exact response when evidence is missing, insufficient, or conflicting, and
-return concise answer text without inventing sources or citations.
-
-Ranked chunks are rendered as numbered `[Evidence n]` blocks. The same accepted
-chunk sequence drives citation numbering, so evidence block 1 and citation
-`[1]` always refer to the same retrieval result even when empty chunks are
-skipped. Filenames and other provenance are not placed in the model prompt;
-citations continue to be built and validated outside the LLM. Every
-`GeneratedAnswer` records `prompt_identifier` alongside `model_identifier` for
-reproducible evaluation and troubleshooting.
-
-Character and tokenizer budgets include block labels, separators, the question,
-all prompt instructions, and special tokens. When the final block must be
-truncated, its citation excerpt still contains only the exact raw evidence
-prefix sent to the model, excluding labels and the visual ellipsis.
-
-The evidence delimiters improve structure but do not sanitize hostile content
-or form an authorization boundary. The local FLAN-T5 baseline may also ignore
-instructions or abstain too often. Prompt quality therefore needs representative
-faithfulness and abstention evaluation in the later answer-evaluation task. A
-single text prompt is intentional for the current text-to-text model; a future
-chat-model adapter can express the same contract with system and user messages.
-
-## Local Baseline
-
-The default embedding model is
-`sentence-transformers/all-MiniLM-L6-v2`, producing 384-dimensional normalized
-vectors. The default generation model is `google/flan-t5-small`, selected as a
-small architectural baseline rather than a production-quality answer model.
-Hybrid mode adds the local `Qdrant/bm25` FastEmbed sparse encoder and Qdrant RRF.
-Optional reranking uses the small English
-`cross-encoder/ms-marco-MiniLM-L6-v2` model as a CPU-friendly baseline.
-
-Transformers is pinned below version 5 because the current LangChain T5 adapter
-uses the `text2text-generation` pipeline API. Model revisions can be pinned
-independently for reproducible indexing and generation.
-
-Generation counts the exact rendered prompt with the selected tokenizer,
-including special tokens, and reserves an eight-token safety margin below the
-model limit. The Hugging Face pipeline also enables truncation as a final guard,
-although application-level budgeting remains authoritative so citation ranges
-stay accurate.
-
-The `answer` command defaults to a retrieval score threshold of `0.20` and
-abstains when no chunk meets it. The `retrieve` command intentionally has no
-default threshold so retrieval scores can be inspected during evaluation.
-Dense and fused thresholds are model-, mode-, and corpus-specific and should be
-calibrated rather than treated as confidence scores.
+The [technical manual](TECHNICAL_MANUAL.md#library-inventory) contains the full
+application-library inventory, locked version snapshots, model defaults, and
+operational trade-offs.
 
 ## Testing
 
-Install development tools and run the same quality gate used by CI:
+Install the development environment and run the CI checks:
 
 ```powershell
 uv sync --locked --dev
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
-uv run coverage run -m unittest discover -s tests -v
+uv run coverage run -m unittest discover -s tests
 uv run coverage report
 uv build
 ```
 
-The deterministic default suite covers application orchestration, ingestion,
-extraction, chunking, dense and sparse embedding contracts, persistent dense
-and hybrid indexing, typed metadata filtering, retrieval, reranking, guarded
-generation, token budgeting, evaluation, benchmark artifacts, citations, and
-CLI integration. Provider calls use test doubles, so CI does not require model
-downloads, network access, GPUs, or API keys. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and focused test
-commands.
+Tests use provider doubles and temporary stores: no model downloads, API keys,
+network access, or GPU are needed for the default suite. Coverage includes
+branches and enforces an 80 percent floor. The
+[CI workflow](.github/workflows/ci.yml) runs on pull requests and pushes to
+`main`, currently on Ubuntu with Python 3.11.
 
-## Project Layout
+## Limitations
 
-```text
-.
-|-- .github/
-|   `-- workflows/
-|       `-- ci.yml
-|-- evaluation/
-|   |-- README.md
-|   `-- datasets/
-|       |-- asteria-policies-v1/
-|       `-- asteria-policies-v2/
-|-- src/
-|   `-- rag_pipeline/
-|       |-- application/
-|       |   |-- indexing.py
-|       |   `-- retrieval.py
-|       |-- benchmarking/
-|       |   |-- artifacts.py
-|       |   |-- config.py
-|       |   |-- metrics.py
-|       |   |-- provenance.py
-|       |   |-- reporting.py
-|       |   |-- runner.py
-|       |   |-- thresholds.py
-|       |   `-- timing.py
-|       |-- cli/
-|       |   |-- commands/
-|       |   |   |-- benchmarks.py
-|       |   |   |-- documents.py
-|       |   |   |-- evaluation.py
-|       |   |   |-- indexing.py
-|       |   |   `-- query.py
-|       |   |-- app.py
-|       |   |-- config.py
-|       |   |-- options.py
-|       |   `-- output.py
-|       |-- evaluation/
-|       |   |-- answers.py
-|       |   `-- retrieval.py
-|       |-- generation/
-|       |   |-- citations.py
-|       |   |-- prompting.py
-|       |   `-- service.py
-|       |-- infrastructure/
-|       |   |-- embeddings.py
-|       |   |-- sparse_embeddings.py
-|       |   `-- vector_store.py
-|       |-- ingestion/
-|       |   |-- chunking.py
-|       |   |-- experiments.py
-|       |   |-- extraction.py
-|       |   |-- loading.py
-|       |   `-- semantic_chunking.py
-|       |-- retrieval/
-|       |   |-- reranking.py
-|       |   `-- service.py
-|       |-- __init__.py
-|       |-- __main__.py
-|       |-- exceptions.py
-|       `-- py.typed
-|-- tests/
-|   |-- application/
-|   |-- benchmarking/
-|   |-- evaluation/
-|   |-- generation/
-|   |-- infrastructure/
-|   |-- ingestion/
-|   |-- retrieval/
-|   |-- test_cli.py
-|   `-- test_package.py
-|-- ARCHITECTURE.md
-|-- CHANGELOG.md
-|-- CONTRIBUTING.md
-|-- MANIFEST.in
-|-- PROJECT_BRIEF.md
-|-- ROADMAP.md
-|-- TECHNICAL_MANUAL.md
-|-- pyproject.toml
-`-- uv.lock
-```
-
-Subpackage `__init__.py` files are omitted from the tree for readability. The
-tracked package root otherwise matches this layout: implementation and public
-imports live under their owning feature package, without legacy root-level
-re-export modules. This pre-1.0 cleanup intentionally removed flat imports such
-as `rag_pipeline.embeddings`; use canonical paths such as
-`rag_pipeline.infrastructure.embeddings`. CLI commands and behavior are
-unchanged.
-
-## Current Limitations
-
-- Hybrid retrieval currently uses fixed unweighted RRF; fusion tuning and
-  learned sparse retrieval remain roadmap items.
-- The default reranker is a small English MS MARCO baseline; candidate width,
-  latency, domain fit, multilingual quality, and score calibration still need
-  reviewed benchmark runs on representative business queries.
-- Metadata filters currently support exact scalar AND conditions; range, OR,
-  list-membership, and policy-composition support are future extensions.
-- The default retrieval threshold is a conservative safety baseline pending
-  calibration and approval from representative benchmark runs.
-- Retrieval evaluation currently uses binary exact-match labels and macro
-  averages; graded relevance and confidence intervals remain future work.
-- Semantic chunking is an English-style, punctuation-based experiment. It adds
-  sentence embedding work and still needs representative multilingual, layout,
-  and poorly punctuated document evaluation before production adoption.
-- Benchmark latency is one local wall-clock pass. It does not yet provide
-  warmups, repetitions, concurrency, memory peaks, confidence intervals, remote
-  model cost, or service-level load testing.
-- Citations identify the evidence supplied to the model but are not yet mapped
-  to individual answer claims.
-- Answer evaluation uses deterministic lexical references and exact abstention
-  labels; semantic faithfulness, claim-level citation support, human judgment,
-  and prompt-injection resilience are not established by the small synthetic
-  dataset.
-- Local source paths should become stable document IDs or authorized URLs before
-  citations are exposed through a service.
-- The default generation model prioritizes local accessibility over answer
-  quality and throughput.
+- FLAN-T5 Small prioritizes local accessibility, not production answer quality.
+  Citations identify supplied evidence; they do not prove claim-level support.
+- Evaluation uses a small synthetic English corpus and deterministic lexical
+  metrics. It does not establish semantic faithfulness or real-world accuracy.
+- Benchmarks measure one local pass, not concurrent service throughput or
+  statistically calibrated performance.
+- HTML remains raw text; scanned PDFs require OCR that is not implemented.
+- Metadata filters are not authorization. There is no authentication, RBAC,
+  tenant isolation, hosted-model integration, HTTP service, or deployment setup.
+  Citations currently expose local source paths.
+- Semantic chunking is benchmark-only and needs corpus-specific validation
+  before use beyond experiments.
 
 ## Roadmap
 
-The staged roadmap covers retrieval-quality experiments, a FastAPI service,
-authentication, monitoring, containerization, release automation,
-permissions-aware retrieval, and multi-tenant enterprise integrations. See
-[ROADMAP.md](ROADMAP.md) for the full sequence.
+The local pipeline, retrieval-quality features, evaluation, and benchmarking
+are implemented. The next planned work is a FastAPI service, followed by
+authentication, logging, monitoring, containerization, and deployment CI/CD.
+Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
+stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and quality requirements.
+Start task branches from `develop` and open PRs into `develop`; promotions to
+`main` require separate approval. Existing `release/rag-v<version>` snapshots
+are immutable. Release history is documented in [CHANGELOG.md](CHANGELOG.md).
+
+### Development Approach
+
+This project was developed using AI-assisted software engineering with Codex. I
+used AI as a development partner for implementation support while defining the
+architecture, requirements, tests, and design decisions myself. All generated
+code was reviewed, adapted, and validated through automated tests.
+
+## License
+
+This repository does not currently include a license file.
