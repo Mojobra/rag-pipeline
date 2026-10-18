@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.2.0
-- **Last verified:** 2026-10-17
+- **Last verified:** 2026-10-18
 - **Current product surface:** Local Python CLI
 
 ## How To Read Version Information
@@ -348,6 +348,16 @@ hosted judge model or an evaluation framework such as Ragas.
 Retrieval evaluation uses versioned JSON datasets and reports per-case and macro
 Precision@k, Recall@k, reciprocal rank, and MRR. Schema-v2 relevance labels use
 source metadata and content anchors instead of unstable chunk indices.
+Schema v3 preserves those positive selectors and adds explicit unsupported
+questions with empty relevance sets. Positive macro metrics exclude negative
+cases; negative cases separately report strict no-hit and false-positive rates.
+Direct Python case construction still rejects an empty relevance set unless
+`allow_empty_relevance=True` is passed; the v3 JSON loader supplies it for
+negative cases, preserving the earlier constructor default.
+Per-case diagnostics distinguish unique evidence selectors from overlapping
+chunk hits and identify missing selectors and unwanted result ranks. The new
+synthetic v3 corpus includes current and archived policy sources, but has no
+paired answer-evaluation labels. V1/v2 report shapes remain unchanged.
 
 Answer evaluation reports normalized exact match, token F1, abstention accuracy,
 abstention precision/recall, answer rate, and citation-behavior rate. These are

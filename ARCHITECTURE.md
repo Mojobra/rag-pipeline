@@ -183,16 +183,22 @@ and operational results justify expanding the public indexing workflow.
 
 - Strict schema-v1 JSON remains supported for exact document-metadata selectors.
   Schema v2 combines exact metadata with a case-sensitive source-content anchor,
-  allowing one judgment to survive ordinary changes in chunk boundaries.
+  allowing one judgment to survive ordinary changes in chunk boundaries. Schema
+  v3 keeps that positive selector and permits empty relevance for unsupported
+  questions, while requiring at least one positive case per dataset.
 - Evaluation runs the same LangChain/Qdrant dense or hybrid retriever, metadata
   filters, score gate, and optional cross-encoder reranker used by interactive
   commands; it never invokes generation or mutates the collection.
-- Reports include per-case Hit@k, Precision@k, Recall@k, and reciprocal rank,
-  plus macro averages that give every query equal weight.
+- V1/v2 reports retain per-case Hit@k, Precision@k, Recall@k, reciprocal rank,
+  and their unchanged macro averages. V3 averages these only over positive
+  cases; negative cases receive separate no-hit and false-positive rates.
+- V3 also exposes distinct matched and missing evidence selectors, redundant
+  overlap-hit ranks, and unwanted ranks alongside chunk-level precision.
 - Table output supports local diagnosis and JSON output supports saved
   comparisons.
-- Both committed synthetic policy dataset versions supply 17 manually
-  cross-checked retrieval cases, including one multi-document judgment.
+- V1/v2 each supply 17 answerable synthetic policy cases. The separate v3
+  retrieval-only stress set adds unsupported, ambiguous, multi-document, and
+  current-versus-archived policy cases; it has no paired answer labels.
 
 Exact v1 metadata selectors are transparent but depend on stable chunk
 provenance. V2 content anchors support boundary experiments but require a new

@@ -6,8 +6,9 @@ application data and not training data.
 
 ## Dataset Rules
 
-- Keep source documents, retrieval labels, and answer labels in one versioned
-  directory.
+- Keep source documents and retrieval labels in one versioned directory. Add
+  matching answer labels there when the set is intended for end-to-end
+  benchmarks; mark retrieval-only sets explicitly.
 - Use synthetic or explicitly approved content. Never copy customer documents,
   credentials, personal data, or confidential material into a benchmark.
 - Treat a published dataset version as immutable. Create a new version when
@@ -24,3 +25,4 @@ application data and not training data.
 | --- | --- |
 | [`asteria-policies-v1`](datasets/asteria-policies-v1/README.md) | Synthetic English business policies with paired retrieval and answer labels. |
 | [`asteria-policies-v2`](datasets/asteria-policies-v2/README.md) | The same policy domain with source-anchor relevance labels for chunking-strategy comparisons. |
+| [`asteria-policies-v3`](datasets/asteria-policies-v3/README.md) | Independent retrieval-only stress set with current/archived rules, multi-document evidence, and unsupported questions. |

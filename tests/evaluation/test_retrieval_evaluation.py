@@ -109,7 +109,9 @@ class RetrievalEvaluationTests(unittest.TestCase):
         from rag_pipeline.evaluation.retrieval import (
             LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION,
             RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+            evaluate_retrieval,
             load_retrieval_evaluation_dataset,
+            retrieval_evaluation_to_dict,
         )
 
         payload = {
@@ -136,7 +138,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
 
         selector = dataset.cases[0].relevant_documents[0]
         self.assertEqual(RETRIEVAL_EVALUATION_SCHEMA_VERSION, 1)
-        self.assertEqual(LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION, 2)
+        self.assertEqual(LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION, 3)
         self.assertEqual(dataset.schema_version, 2)
         self.assertEqual(selector.content_contains, "itemized receipt")
         self.assertTrue(
@@ -155,6 +157,19 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 )
             )
         )
+        report = retrieval_evaluation_to_dict(
+            evaluate_retrieval(dataset, lambda _: [], top_k=2)
+        )
+        self.assertEqual(
+            set(report["metrics"]),
+            {
+                "hit_rate_at_k",
+                "mean_precision_at_k",
+                "mean_recall_at_k",
+                "mean_reciprocal_rank_at_k",
+            },
+        )
+        self.assertNotIn("case_type", report["cases"][0])
 
     def test_dataset_schema_rejects_incompatible_relevance_selectors(self) -> None:
         from rag_pipeline.evaluation.retrieval import (
@@ -197,6 +212,16 @@ class RetrievalEvaluationTests(unittest.TestCase):
             (
                 "v2-missing-metadata",
                 2,
+                RelevantDocument({}, content_contains="itemized receipt"),
+            ),
+            (
+                "v3-missing-anchor",
+                3,
+                RelevantDocument({"file_name": "expenses.pdf"}),
+            ),
+            (
+                "v3-missing-metadata",
+                3,
                 RelevantDocument({}, content_contains="itemized receipt"),
             ),
         )
@@ -262,7 +287,17 @@ class RetrievalEvaluationTests(unittest.TestCase):
 
         serialized = retrieval_evaluation_to_dict(report)
         self.assertEqual(serialized["case_count"], 2)
+        self.assertEqual(
+            set(serialized["metrics"]),
+            {
+                "hit_rate_at_k",
+                "mean_precision_at_k",
+                "mean_recall_at_k",
+                "mean_reciprocal_rank_at_k",
+            },
+        )
         self.assertEqual(serialized["cases"][0]["first_relevant_rank"], 2)
+        self.assertNotIn("case_type", serialized["cases"][0])
         table = format_retrieval_evaluation_table(report)
         self.assertIn("Retrieval evaluation: policies-v1", table)
         self.assertIn("MACRO", table)
@@ -280,7 +315,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
 
         invalid_payloads = (
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "name": "wrong-version",
                 "cases": [],
             },
@@ -362,6 +397,166 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 lambda _: [make_result(2, document_id="expected", chunk_index=0)],
                 top_k=1,
             )
+
+    def test_v3_separates_negative_cases_and_unique_evidence_from_chunk_hits(
+        self,
+    ) -> None:
+        from rag_pipeline.evaluation.retrieval import (
+            RelevantDocument,
+            RetrievalEvaluationCase,
+            RetrievalEvaluationDataset,
+            evaluate_retrieval,
+            format_retrieval_evaluation_table,
+            retrieval_evaluation_to_dict,
+        )
+
+        evidence_a = RelevantDocument(
+            {"document_id": "a"}, content_contains="Evidence from a"
+        )
+        evidence_b = RelevantDocument(
+            {"document_id": "b"}, content_contains="Evidence from b"
+        )
+        dataset = RetrievalEvaluationDataset(
+            name="mixed-v3",
+            schema_version=3,
+            cases=(
+                RetrievalEvaluationCase(
+                    "full", "Full evidence", (evidence_a, evidence_b)
+                ),
+                RetrievalEvaluationCase(
+                    "partial", "Partial evidence", (evidence_a, evidence_b)
+                ),
+                RetrievalEvaluationCase(
+                    "no-hit", "Unsupported A", (), allow_empty_relevance=True
+                ),
+                RetrievalEvaluationCase(
+                    "false-positive", "Unsupported B", (), allow_empty_relevance=True
+                ),
+            ),
+        )
+
+        def retrieve(query: str) -> list[object]:
+            if query == "Full evidence":
+                return [
+                    make_result(1, document_id="a", chunk_index=0),
+                    make_result(2, document_id="a", chunk_index=1),
+                    make_result(3, document_id="b", chunk_index=0),
+                    make_result(4, document_id="c", chunk_index=0),
+                ]
+            if query == "Partial evidence":
+                return [make_result(1, document_id="a", chunk_index=0)]
+            if query == "Unsupported B":
+                return [make_result(1, document_id="c", chunk_index=0)]
+            return []
+
+        report = evaluate_retrieval(dataset, retrieve, top_k=4)
+        full, partial, no_hit, false_positive = report.cases
+        self.assertEqual(full.matched_selector_indices, (0, 1))
+        self.assertEqual(full.redundant_relevant_ranks, (2,))
+        self.assertEqual(full.unwanted_ranks, (4,))
+        self.assertEqual(full.relevant_retrieved_count, 3)
+        self.assertEqual(full.precision_at_k, 0.75)
+        self.assertEqual(full.recall_at_k, 1.0)
+        self.assertEqual(partial.missing_selector_indices, (1,))
+        self.assertEqual(partial.recall_at_k, 0.5)
+        self.assertIsNone(no_hit.recall_at_k)
+        self.assertEqual(no_hit.no_hit_at_k, 1.0)
+        self.assertEqual(false_positive.false_positive_at_k, 1.0)
+        self.assertEqual(false_positive.unwanted_ranks, (1,))
+        self.assertEqual(report.aggregate.positive_case_count, 2)
+        self.assertEqual(report.aggregate.negative_case_count, 2)
+        self.assertEqual(report.aggregate.mean_recall_at_k, 0.75)
+        self.assertEqual(report.aggregate.mean_precision_at_k, 0.5)
+        self.assertEqual(report.aggregate.negative_no_hit_rate_at_k, 0.5)
+        self.assertEqual(report.aggregate.negative_false_positive_rate_at_k, 0.5)
+
+        serialized = retrieval_evaluation_to_dict(report)
+        self.assertEqual(serialized["cases"][0]["redundant_relevant_ranks"], [2])
+        self.assertIsNone(serialized["cases"][2]["recall_at_k"])
+        table = format_retrieval_evaluation_table(report)
+        self.assertIn("Positive: 2 | Negative: 2", table)
+        self.assertIn("Negative false-positive rate: 0.500", table)
+
+    def test_only_v3_accepts_empty_relevance_and_still_needs_a_positive_case(
+        self,
+    ) -> None:
+        from rag_pipeline.evaluation.retrieval import (
+            RelevantDocument,
+            RetrievalEvaluationCase,
+            RetrievalEvaluationDataset,
+            evaluate_retrieval,
+            load_retrieval_evaluation_dataset,
+        )
+        from rag_pipeline.exceptions import InvalidRetrievalEvaluationDatasetError
+
+        with self.assertRaisesRegex(
+            InvalidRetrievalEvaluationDatasetError, "relevant selectors"
+        ):
+            RetrievalEvaluationCase("negative", "Unsupported?", ())
+        negative = RetrievalEvaluationCase(
+            "negative", "Unsupported?", (), allow_empty_relevance=True
+        )
+        positive = RetrievalEvaluationCase(
+            "positive",
+            "Supported?",
+            (RelevantDocument({"file_name": "policy.md"}, "Policy ID: P-1"),),
+        )
+        with self.assertRaisesRegex(
+            InvalidRetrievalEvaluationDatasetError, "only valid for negative"
+        ):
+            RetrievalEvaluationCase(
+                "positive",
+                "Supported?",
+                positive.relevant_documents,
+                allow_empty_relevance=True,
+            )
+        for version in (1, 2):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(
+                    InvalidRetrievalEvaluationDatasetError, "relevant selectors"
+                ):
+                    RetrievalEvaluationDataset(
+                        name="invalid",
+                        cases=(negative, positive),
+                        schema_version=version,
+                    )
+        with self.assertRaisesRegex(
+            InvalidRetrievalEvaluationDatasetError, "at least one positive"
+        ):
+            RetrievalEvaluationDataset(
+                name="negative-only", cases=(negative,), schema_version=3
+            )
+
+        payload = {
+            "schema_version": 3,
+            "name": "mixed",
+            "cases": [
+                {
+                    "id": "positive",
+                    "query": "Supported?",
+                    "relevant": [
+                        {
+                            "metadata": {"file_name": "policy.md"},
+                            "content_contains": "Policy ID: P-1",
+                        }
+                    ],
+                },
+                {"id": "negative", "query": "Unsupported?", "relevant": []},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "mixed.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            loaded = load_retrieval_evaluation_dataset(path)
+        self.assertEqual(loaded.schema_version, 3)
+        self.assertEqual(loaded.cases[1].relevant_documents, ())
+        positive_only = RetrievalEvaluationDataset(
+            name="positive-only", cases=(positive,), schema_version=3
+        )
+        report = evaluate_retrieval(positive_only, lambda _: [], top_k=1)
+        self.assertEqual(report.aggregate.positive_case_count, 1)
+        self.assertEqual(report.aggregate.negative_case_count, 0)
+        self.assertIsNone(report.aggregate.negative_no_hit_rate_at_k)
 
 
 class RetrievalEvaluationCliTests(unittest.TestCase):
@@ -476,6 +671,67 @@ class RetrievalEvaluationCliTests(unittest.TestCase):
             report["metrics"]["mean_reciprocal_rank_at_k"],
             1.0,
         )
+
+    def test_cli_reports_v3_negative_and_evidence_diagnostics(self) -> None:
+        from langchain_core.embeddings import DeterministicFakeEmbedding
+
+        from rag_pipeline.__main__ import main
+        from rag_pipeline.infrastructure.embeddings import EmbeddingService
+        from rag_pipeline.infrastructure.vector_store import (
+            LocalVectorStore,
+            VectorStoreConfig,
+        )
+        from rag_pipeline.ingestion import load_documents
+        from rag_pipeline.ingestion.chunking import chunk_documents
+
+        project_root = Path(__file__).resolve().parents[2]
+        dataset_root = project_root / "evaluation" / "datasets" / "asteria-policies-v3"
+        embedding_service = EmbeddingService(
+            DeterministicFakeEmbedding(size=4), model_name="v3-test-model"
+        )
+        chunks = chunk_documents(load_documents([dataset_root / "documents"]))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_config = VectorStoreConfig(
+                path=Path(temp_dir) / "qdrant", collection_name="v3-test"
+            )
+            with LocalVectorStore(store_config) as store:
+                store.index(
+                    embedding_service.embed_documents(chunks),
+                    model_identifier=embedding_service.model_identifier,
+                )
+            output = io.StringIO()
+            with patch(
+                "rag_pipeline.infrastructure.embeddings.create_local_embedding_service",
+                return_value=embedding_service,
+            ):
+                with redirect_stdout(output):
+                    exit_code = main(
+                        [
+                            "evaluate-retrieval",
+                            str(dataset_root / "retrieval-v3.json"),
+                            "--store-path",
+                            str(store_config.resolved_path),
+                            "--collection-name",
+                            store_config.collection_name,
+                            "--top-k",
+                            "2",
+                            "--output-format",
+                            "json",
+                        ]
+                    )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["schema_version"], 3)
+        self.assertEqual(report["metrics"]["positive_case_count"], 13)
+        self.assertEqual(report["metrics"]["negative_case_count"], 4)
+        negative_cases = [
+            case for case in report["cases"] if case["case_type"] == "negative"
+        ]
+        self.assertEqual(len(negative_cases), 4)
+        self.assertTrue(all(case["recall_at_k"] is None for case in negative_cases))
+        self.assertTrue(all("unwanted_ranks" in case for case in report["cases"]))
 
 
 if __name__ == "__main__":

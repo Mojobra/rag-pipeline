@@ -26,8 +26,9 @@ CLI, not a hosted application or production service.
   citations assembled outside the model, and abstention without usable evidence.
 - **Persistent indexing:** embedded Qdrant, deterministic point IDs,
   source-scoped replacement, and collection compatibility checks.
-- **Evaluation:** versioned synthetic corpora, retrieval and answer metrics, and
-  isolated benchmarks with provenance, latency reports, and regression gates.
+- **Evaluation:** versioned synthetic corpora, positive/negative retrieval
+  diagnostics, answer metrics, and isolated benchmarks with provenance,
+  latency reports, and regression gates.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
 
@@ -127,6 +128,11 @@ Measure the existing demo collection against its committed retrieval labels:
 ```powershell
 uv run rag-pipeline evaluate-retrieval evaluation/datasets/asteria-policies-v2/retrieval-v2.json --collection-name asteria_demo
 ```
+
+For unsupported questions, archived-policy conflicts, and multi-document
+evidence, use the separate [v3 retrieval stress set](evaluation/datasets/asteria-policies-v3/README.md).
+Its negative cases report no-hit and false-positive rates separately from
+positive-case Recall@k; it is not paired with answer labels.
 
 For an isolated end-to-end benchmark, build a temporary index and save a report:
 

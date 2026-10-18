@@ -23,10 +23,10 @@ from rag_pipeline.exceptions import (
 )
 from rag_pipeline.retrieval import RetrievalResult
 
-# Preserve the original public constructor default while exposing v2 explicitly.
+# Preserve the original public constructor default for callers using v1 labels.
 RETRIEVAL_EVALUATION_SCHEMA_VERSION = 1
-LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION = 2
-SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS = frozenset({1, 2})
+LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION = 3
+SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 MetadataScalar: TypeAlias = str | int | float | bool | None
 RetrievalFunction: TypeAlias = Callable[[str], Sequence[RetrievalResult]]
@@ -115,16 +115,17 @@ class RetrievalEvaluationCase:
     """One query and its binary metadata-based relevance judgments.
 
     Case IDs identify regressions in reports, while the query is passed unchanged
-    to the configured retriever. At least one unique relevance selector is
-    required so recall has a defined denominator.
+    to the configured retriever. Empty relevance requires explicit opt-in and
+    denotes a negative case only in a containing schema-v3 dataset.
     """
 
     case_id: str
     query: str
     relevant_documents: tuple[RelevantDocument, ...]
+    allow_empty_relevance: bool = False
 
     def __post_init__(self) -> None:
-        """Normalize text fields and reject missing or duplicate judgments."""
+        """Normalize text fields and reject malformed or duplicate judgments."""
         normalized_case_id = _validate_non_empty_string("case id", self.case_id)
         normalized_query = _validate_non_empty_string("query", self.query)
         try:
@@ -133,11 +134,18 @@ class RetrievalEvaluationCase:
             raise InvalidRetrievalEvaluationDatasetError(
                 "relevant must be a list of metadata selectors."
             ) from exc
-        if not relevant_documents:
+        if not isinstance(self.allow_empty_relevance, bool):
+            raise InvalidRetrievalEvaluationDatasetError(
+                "allow_empty_relevance must be a boolean."
+            )
+        if not relevant_documents and not self.allow_empty_relevance:
             raise InvalidRetrievalEvaluationDatasetError(
                 f"case {normalized_case_id!r} must contain relevant selectors."
             )
-
+        if relevant_documents and self.allow_empty_relevance:
+            raise InvalidRetrievalEvaluationDatasetError(
+                "allow_empty_relevance is only valid for negative cases."
+            )
         canonical_selectors: set[str] = set()
         for relevant_document in relevant_documents:
             if not isinstance(relevant_document, RelevantDocument):
@@ -187,7 +195,7 @@ class RetrievalEvaluationDataset:
             or self.schema_version not in SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS
         ):
             raise InvalidRetrievalEvaluationDatasetError(
-                "unsupported retrieval evaluation schema_version; expected 1 or 2."
+                "unsupported retrieval evaluation schema_version; expected 1, 2, or 3."
             )
         normalized_name = _validate_non_empty_string("dataset name", self.name)
         try:
@@ -202,6 +210,7 @@ class RetrievalEvaluationDataset:
             )
 
         seen_case_ids: set[str] = set()
+        positive_case_count = 0
         for case in cases:
             if not isinstance(case, RetrievalEvaluationCase):
                 raise InvalidRetrievalEvaluationDatasetError(
@@ -211,21 +220,34 @@ class RetrievalEvaluationDataset:
                 raise InvalidRetrievalEvaluationDatasetError(
                     f"duplicate retrieval evaluation case id {case.case_id!r}."
                 )
+            if not case.relevant_documents and self.schema_version != 3:
+                raise InvalidRetrievalEvaluationDatasetError(
+                    f"case {case.case_id!r} must contain relevant selectors."
+                )
+            if case.relevant_documents:
+                positive_case_count += 1
             for relevant_document in case.relevant_documents:
                 has_content_anchor = relevant_document.content_contains is not None
                 if self.schema_version == 1 and has_content_anchor:
                     raise InvalidRetrievalEvaluationDatasetError(
                         "schema_version 1 does not support content anchors."
                     )
-                if self.schema_version == 2 and not has_content_anchor:
+                if self.schema_version in (2, 3) and not has_content_anchor:
                     raise InvalidRetrievalEvaluationDatasetError(
-                        "schema_version 2 requires content anchors."
+                        f"schema_version {self.schema_version} requires content anchors."
                     )
-                if self.schema_version == 2 and not relevant_document.metadata:
+                if self.schema_version in (2, 3) and not relevant_document.metadata:
                     raise InvalidRetrievalEvaluationDatasetError(
-                        "schema_version 2 requires non-empty metadata selectors."
+                        f"schema_version {self.schema_version} requires non-empty "
+                        "metadata selectors."
                     )
             seen_case_ids.add(case.case_id)
+
+        if not positive_case_count:
+            raise InvalidRetrievalEvaluationDatasetError(
+                "retrieval evaluation datasets require at least one positive case "
+                "to calculate Hit, Precision, Recall, and MRR."
+            )
 
         object.__setattr__(self, "name", normalized_name)
         object.__setattr__(self, "cases", cases)
@@ -237,7 +259,7 @@ class RetrievalCaseMetrics:
 
     Precision counts empty result slots as misses by using ``top_k`` as its
     denominator. Recall counts distinct relevance selectors matched by at least
-    one returned document.
+    one returned document. Positive metrics are not assigned to negative cases.
     """
 
     case_id: str
@@ -247,20 +269,30 @@ class RetrievalCaseMetrics:
     matched_relevant_count: int
     relevant_retrieved_count: int
     first_relevant_rank: int | None
-    hit_at_k: float
-    precision_at_k: float
-    recall_at_k: float
-    reciprocal_rank_at_k: float
+    hit_at_k: float | None
+    precision_at_k: float | None
+    recall_at_k: float | None
+    reciprocal_rank_at_k: float | None
+    matched_selector_indices: tuple[int, ...] = ()
+    missing_selector_indices: tuple[int, ...] = ()
+    redundant_relevant_ranks: tuple[int, ...] = ()
+    unwanted_ranks: tuple[int, ...] = ()
+    no_hit_at_k: float | None = None
+    false_positive_at_k: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalAggregateMetrics:
-    """Macro-averaged quality metrics giving every query equal weight."""
+    """Positive-case macro metrics and separate negative-case rates."""
 
     hit_rate_at_k: float
     mean_precision_at_k: float
     mean_recall_at_k: float
     mean_reciprocal_rank_at_k: float
+    positive_case_count: int = 0
+    negative_case_count: int = 0
+    negative_no_hit_rate_at_k: float | None = None
+    negative_false_positive_rate_at_k: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,15 +357,36 @@ def evaluate_retrieval(
         _evaluate_case(case, retrieve(case.query), top_k=top_k)
         for case in dataset.cases
     )
-    case_count = len(case_metrics)
+    positive_cases = tuple(case for case in case_metrics if case.relevant_count > 0)
+    negative_cases = tuple(case for case in case_metrics if case.relevant_count == 0)
+    positive_count = len(positive_cases)
+    negative_count = len(negative_cases)
     aggregate = RetrievalAggregateMetrics(
-        hit_rate_at_k=sum(case.hit_at_k for case in case_metrics) / case_count,
+        hit_rate_at_k=sum(case.hit_at_k or 0.0 for case in positive_cases)
+        / positive_count,
         mean_precision_at_k=(
-            sum(case.precision_at_k for case in case_metrics) / case_count
+            sum(case.precision_at_k or 0.0 for case in positive_cases) / positive_count
         ),
-        mean_recall_at_k=(sum(case.recall_at_k for case in case_metrics) / case_count),
+        mean_recall_at_k=(
+            sum(case.recall_at_k or 0.0 for case in positive_cases) / positive_count
+        ),
         mean_reciprocal_rank_at_k=(
-            sum(case.reciprocal_rank_at_k for case in case_metrics) / case_count
+            sum(case.reciprocal_rank_at_k or 0.0 for case in positive_cases)
+            / positive_count
+        ),
+        positive_case_count=positive_count,
+        negative_case_count=negative_count,
+        negative_no_hit_rate_at_k=(
+            None
+            if not negative_count
+            else sum(case.no_hit_at_k or 0.0 for case in negative_cases)
+            / negative_count
+        ),
+        negative_false_positive_rate_at_k=(
+            None
+            if not negative_count
+            else sum(case.false_positive_at_k or 0.0 for case in negative_cases)
+            / negative_count
         ),
     )
     return RetrievalEvaluationReport(
@@ -351,7 +404,7 @@ def retrieval_evaluation_to_dict(
     """Serialize a report to stable JSON-compatible fields for automation."""
     if not isinstance(report, RetrievalEvaluationReport):
         raise TypeError("report must be a RetrievalEvaluationReport.")
-    return {
+    serialized: dict[str, object] = {
         "dataset_name": report.dataset_name,
         "schema_version": report.schema_version,
         "top_k": report.top_k,
@@ -379,12 +432,43 @@ def retrieval_evaluation_to_dict(
             for case in report.cases
         ],
     }
+    if report.schema_version == 3:
+        metrics = cast(dict[str, object], serialized["metrics"])
+        metrics.update(
+            {
+                "positive_case_count": report.aggregate.positive_case_count,
+                "negative_case_count": report.aggregate.negative_case_count,
+                "negative_no_hit_rate_at_k": (
+                    report.aggregate.negative_no_hit_rate_at_k
+                ),
+                "negative_false_positive_rate_at_k": (
+                    report.aggregate.negative_false_positive_rate_at_k
+                ),
+            }
+        )
+        cases = cast(list[dict[str, object]], serialized["cases"])
+        for case_data, case in zip(cases, report.cases, strict=True):
+            case_data.update(
+                {
+                    "case_type": "negative" if case.relevant_count == 0 else "positive",
+                    "matched_selector_indices": list(case.matched_selector_indices),
+                    "missing_selector_indices": list(case.missing_selector_indices),
+                    "redundant_relevant_ranks": list(case.redundant_relevant_ranks),
+                    "unwanted_ranks": list(case.unwanted_ranks),
+                    "no_hit_at_k": case.no_hit_at_k,
+                    "false_positive_at_k": case.false_positive_at_k,
+                }
+            )
+    return serialized
 
 
 def format_retrieval_evaluation_table(report: RetrievalEvaluationReport) -> str:
     """Render per-query metrics and macro averages as an aligned table."""
     if not isinstance(report, RetrievalEvaluationReport):
         raise TypeError("report must be a RetrievalEvaluationReport.")
+
+    if report.schema_version == 3:
+        return _format_v3_retrieval_table(report)
 
     cutoff = report.top_k
     headers = (
@@ -446,6 +530,92 @@ def format_retrieval_evaluation_table(report: RetrievalEvaluationReport) -> str:
     )
 
 
+def _format_v3_retrieval_table(report: RetrievalEvaluationReport) -> str:
+    """Show positive evidence coverage and negative no-hit behavior separately."""
+    cutoff = report.top_k
+    headers = (
+        "Case",
+        "Type",
+        "Returned",
+        "Evidence",
+        "Dup",
+        "Unwanted",
+        f"Hit@{cutoff}",
+        f"P@{cutoff}",
+        f"R@{cutoff}",
+        f"RR@{cutoff}",
+        "No-hit",
+    )
+    rows = [
+        (
+            case.case_id,
+            "NEG" if case.relevant_count == 0 else "POS",
+            str(case.retrieved_count),
+            f"{case.matched_relevant_count}/{case.relevant_count}",
+            str(len(case.redundant_relevant_ranks)),
+            str(len(case.unwanted_ranks)),
+            *_format_optional_metrics(case),
+            _format_optional_metric(case.no_hit_at_k),
+        )
+        for case in report.cases
+    ]
+    rows.append(
+        (
+            "MACRO",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            f"{report.aggregate.hit_rate_at_k:.3f}",
+            f"{report.aggregate.mean_precision_at_k:.3f}",
+            f"{report.aggregate.mean_recall_at_k:.3f}",
+            f"{report.aggregate.mean_reciprocal_rank_at_k:.3f}",
+            _format_optional_metric(report.aggregate.negative_no_hit_rate_at_k),
+        )
+    )
+    widths = tuple(
+        max(len(header), *(len(row[index]) for row in rows))
+        for index, header in enumerate(headers)
+    )
+
+    def format_row(values: Sequence[str]) -> str:
+        return "  ".join(
+            value.ljust(width) if index == 0 else value.rjust(width)
+            for index, (value, width) in enumerate(zip(values, widths, strict=True))
+        )
+
+    separator = "  ".join("-" * width for width in widths)
+    return "\n".join(
+        (
+            f"Retrieval evaluation: {report.dataset_name}",
+            f"Positive: {report.aggregate.positive_case_count} | "
+            f"Negative: {report.aggregate.negative_case_count} | Cutoff: {cutoff}",
+            "Negative false-positive rate: "
+            + _format_optional_metric(
+                report.aggregate.negative_false_positive_rate_at_k
+            ),
+            "",
+            format_row(headers),
+            separator,
+            *(format_row(row) for row in rows),
+        )
+    )
+
+
+def _format_optional_metric(value: float | None) -> str:
+    return "-" if value is None else f"{value:.3f}"
+
+
+def _format_optional_metrics(case: RetrievalCaseMetrics) -> tuple[str, ...]:
+    return (
+        _format_optional_metric(case.hit_at_k),
+        _format_optional_metric(case.precision_at_k),
+        _format_optional_metric(case.recall_at_k),
+        _format_optional_metric(case.reciprocal_rank_at_k),
+    )
+
+
 def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
     """Convert untrusted decoded JSON into validated domain objects."""
     dataset_object = _require_object(raw_data, context="dataset")
@@ -464,7 +634,7 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
         or schema_version not in SUPPORTED_RETRIEVAL_EVALUATION_SCHEMA_VERSIONS
     ):
         raise InvalidRetrievalEvaluationDatasetError(
-            "unsupported retrieval evaluation schema_version; expected 1 or 2."
+            "unsupported retrieval evaluation schema_version; expected 1, 2, or 3."
         )
 
     cases: list[RetrievalEvaluationCase] = []
@@ -492,6 +662,7 @@ def _parse_dataset(raw_data: object) -> RetrievalEvaluationDataset:
                     )
                     for selector_index, selector in enumerate(raw_relevant)
                 ),
+                allow_empty_relevance=(schema_version == 3 and not raw_relevant),
             )
         )
 
@@ -554,23 +725,33 @@ def _evaluate_case(
                 "contiguous one-based ranks."
             )
 
-    relevance_flags = tuple(
-        any(
-            relevant_document.matches(result.document)
-            for relevant_document in case.relevant_documents
+    selectors_by_rank = tuple(
+        tuple(
+            index
+            for index, selector in enumerate(case.relevant_documents)
+            if selector.matches(result.document)
         )
         for result in results
     )
-    matched_relevant_count = sum(
-        any(relevant_document.matches(result.document) for result in results)
-        for relevant_document in case.relevant_documents
+    relevance_flags = tuple(bool(indices) for indices in selectors_by_rank)
+    matched_selector_indices = tuple(
+        sorted({index for indices in selectors_by_rank for index in indices})
     )
+    matched_relevant_count = len(matched_selector_indices)
     relevant_retrieved_count = sum(relevance_flags)
     first_relevant_rank = next(
         (index for index, relevant in enumerate(relevance_flags, start=1) if relevant),
         None,
     )
 
+    seen_selectors: set[int] = set()
+    redundant_ranks: list[int] = []
+    for rank, indices in enumerate(selectors_by_rank, start=1):
+        if indices and set(indices).issubset(seen_selectors):
+            redundant_ranks.append(rank)
+        seen_selectors.update(indices)
+
+    is_negative = not case.relevant_documents
     return RetrievalCaseMetrics(
         case_id=case.case_id,
         query=case.query,
@@ -579,12 +760,36 @@ def _evaluate_case(
         matched_relevant_count=matched_relevant_count,
         relevant_retrieved_count=relevant_retrieved_count,
         first_relevant_rank=first_relevant_rank,
-        hit_at_k=1.0 if first_relevant_rank is not None else 0.0,
-        precision_at_k=relevant_retrieved_count / top_k,
-        recall_at_k=matched_relevant_count / len(case.relevant_documents),
-        reciprocal_rank_at_k=(
-            0.0 if first_relevant_rank is None else 1.0 / first_relevant_rank
+        hit_at_k=(
+            None if is_negative else 1.0 if first_relevant_rank is not None else 0.0
         ),
+        precision_at_k=(None if is_negative else relevant_retrieved_count / top_k),
+        recall_at_k=(
+            None
+            if is_negative
+            else matched_relevant_count / len(case.relevant_documents)
+        ),
+        reciprocal_rank_at_k=(
+            None
+            if is_negative
+            else 0.0
+            if first_relevant_rank is None
+            else 1.0 / first_relevant_rank
+        ),
+        matched_selector_indices=matched_selector_indices,
+        missing_selector_indices=tuple(
+            index
+            for index in range(len(case.relevant_documents))
+            if index not in matched_selector_indices
+        ),
+        redundant_relevant_ranks=tuple(redundant_ranks),
+        unwanted_ranks=tuple(
+            rank
+            for rank, indices in enumerate(selectors_by_rank, start=1)
+            if not indices
+        ),
+        no_hit_at_k=(None if not is_negative else 1.0 if not results else 0.0),
+        false_positive_at_k=(None if not is_negative else 0.0 if not results else 1.0),
     )
 
 
