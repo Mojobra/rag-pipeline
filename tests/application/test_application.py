@@ -212,6 +212,23 @@ class RetrievalPipelineTests(unittest.TestCase):
         ):
             pipeline.retrieve("expense policy")
 
+    def test_allows_one_call_to_override_first_stage_gate(self) -> None:
+        default_config = RetrievalConfig(top_k=2, score_threshold=0.2)
+        override = RetrievalConfig(top_k=2, score_threshold=None)
+        retriever = _RecordingRetriever([_result()])
+        pipeline = RetrievalPipeline(retriever, retrieval_config=default_config)
+
+        self.assertEqual(
+            pipeline.retrieve("baseline", retrieval_config=override), [_result()]
+        )
+        self.assertEqual(pipeline.retrieve("default"), [_result()])
+        self.assertEqual(
+            retriever.calls,
+            [("baseline", override), ("default", default_config)],
+        )
+        with self.assertRaisesRegex(TypeError, "must be a RetrievalConfig"):
+            pipeline.retrieve("invalid", retrieval_config=object())  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
     unittest.main()

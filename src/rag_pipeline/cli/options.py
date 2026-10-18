@@ -43,7 +43,8 @@ def add_retrieval_arguments(
             "must not exceed --candidate-k (default: 4)."
         ),
     )
-    command_parser.add_argument(
+    score_group = command_parser.add_mutually_exclusive_group()
+    score_group.add_argument(
         "--score-threshold",
         type=float,
         default=default_score_threshold,
@@ -56,6 +57,18 @@ def add_retrieval_arguments(
                 if default_score_threshold is None
                 else f" (default: {default_score_threshold})."
             )
+        ),
+    )
+    score_group.add_argument(
+        "--no-score-threshold",
+        dest="score_threshold",
+        action="store_const",
+        const=None,
+        default=argparse.SUPPRESS,
+        help=(
+            "Explicitly disable first-stage gating, including answer commands' "
+            "0.2 default. May improve recall but admit weak context; cannot be "
+            "combined with --score-threshold."
         ),
     )
     command_parser.add_argument(

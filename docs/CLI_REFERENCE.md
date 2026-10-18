@@ -151,6 +151,63 @@ documents its current-versus-archived policy labels and a runnable example.
 It is retrieval-only and should not be paired with unrelated answer labels in
 an end-to-end benchmark.
 
+### Score-Gate Calibration
+
+Use v3 positive and negative labels to compare first-stage gates on one
+compatible collection. The ordinary `evaluate-retrieval` output is unchanged
+when `--compare-score-threshold` is absent. In comparison mode, the existing
+`--score-threshold` is the baseline (disabled by default); repeat
+`--compare-score-threshold` for distinct candidate values in `[-1, 1]`.
+
+```powershell
+uv run rag-pipeline evaluate-retrieval `
+  evaluation/datasets/asteria-policies-v3/retrieval-v3.json `
+  --collection-name asteria_v3 --search-mode dense --top-k 4 `
+  --no-score-threshold --compare-score-threshold 0.2 `
+  --compare-score-threshold 0.4 --output-format json
+```
+
+The same embedding model, collection, metadata filters, and `top-k` are reused
+for every gate; each query is actually rerun because Qdrant applies the gate
+before final selection. The JSON report includes the exact gate, search mode,
+nominal score kind, observed per-case score kind (`null` when no result),
+ordinary v3 metrics, lost/gained zero-based evidence-selector indices, and the
+change in unwanted result count. A lower candidate gate can add unwanted
+context; a higher gate can lose needed evidence. The comparison disallows
+`--rerank` to isolate first-stage behavior. Repeating queries costs additional
+embedding and database work but does not modify the index.
+
+Calibrate dense and hybrid collections in separate runs with the matching
+`--search-mode`, `--model`, and, for hybrid, `--sparse-model`. Hybrid queries
+with no sparse terms fall back to cosine; inspect the **observed** score kind
+per case before interpreting a gate. Cosine and RRF values are ranking signals,
+not confidence probabilities or interchangeable thresholds.
+
+For an answer-quality comparison, use a **paired answer dataset and its own
+matching corpus**, not the retrieval-only v3 labels. Set the same collection,
+search mode, embedding/sparse models, filters, `top-k`, and gate explicitly on
+both evaluations. For example, on an existing v2 collection:
+
+```powershell
+uv run rag-pipeline evaluate-retrieval `
+  evaluation/datasets/asteria-policies-v2/retrieval-v2.json `
+  --collection-name asteria_demo --search-mode dense --top-k 4 `
+  --score-threshold 0.2 --output-format json
+uv run rag-pipeline evaluate-answer `
+  evaluation/datasets/asteria-policies-v2/answers-v2.json `
+  --collection-name asteria_demo --search-mode dense --top-k 4 `
+  --score-threshold 0.2 --output-format json
+```
+
+Use `--no-score-threshold` on **both** commands for a disabled-gate comparison;
+this matters because `evaluate-answer` otherwise defaults to `0.2`. Record
+the invocations alongside saved outputs: standalone v1/v2 report JSON keeps
+its established shape and does not embed all CLI settings. No default changes
+are implied by a result on the synthetic set; review representative business
+queries and failure cases before selecting a production policy.
+The [RQ-03 synthetic calibration record](RQ03_SCORE_GATE_CALIBRATION.md)
+captures one reproducible local comparison and its limitations.
+
 ## Answer Evaluation
 
 The `evaluate-answer` command runs labeled questions through the same dense or

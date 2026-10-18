@@ -46,6 +46,12 @@ uv run rag-pipeline index evaluation/datasets/asteria-policies-v3/documents `
 uv run rag-pipeline evaluate-retrieval `
   evaluation/datasets/asteria-policies-v3/retrieval-v3.json `
   --collection-name asteria_v3 --output-format json
+
+uv run rag-pipeline evaluate-retrieval `
+  evaluation/datasets/asteria-policies-v3/retrieval-v3.json `
+  --collection-name asteria_v3 --search-mode dense --top-k 4 `
+  --no-score-threshold --compare-score-threshold 0.2 `
+  --output-format json
 ```
 
 Use the same embedding model and collection for both commands. The first run
@@ -55,3 +61,11 @@ an irrelevant returned chunk on an unsupported query counts as a false
 positive. This version has no paired answer-evaluation file, so it is intended
 for `evaluate-retrieval`, not an end-to-end benchmark with unrelated answer
 labels.
+
+The comparison reruns every question for the disabled baseline and the
+candidate gate. It records per-case evidence losses, unwanted-result changes,
+the actual score kind when results exist, and the exact threshold. Run hybrid
+calibration separately against a hybrid index with `--search-mode hybrid` and
+the matching sparse model; cosine and RRF scores are not interchangeable.
+These commands are a procedure, not measured quality results or a recommendation
+to use `0.2` for either mode.

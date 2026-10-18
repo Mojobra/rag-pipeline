@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from rag_pipeline.cli.options import (
@@ -30,8 +31,10 @@ def register_evaluation_commands(
         description=(
             "Run every query in a versioned JSON dataset through the configured "
             "Qdrant retrieval path and report binary top-k metrics. Optional "
-            "filters, hybrid search, and reranking are included; generation is "
-            "never invoked and the index is not modified."
+            "filters, hybrid search, and reranking are included. Repeated "
+            "--compare-score-threshold values compare first-stage gates on v3 "
+            "labels without reranking. Generation is never invoked and the "
+            "index is not modified."
         ),
     )
     retrieval_parser.add_argument(
@@ -49,13 +52,24 @@ def register_evaluation_commands(
     add_retrieval_arguments(retrieval_parser)
     add_reranking_arguments(retrieval_parser)
     retrieval_parser.add_argument(
+        "--compare-score-threshold",
+        action="append",
+        type=float,
+        metavar="SCORE",
+        help=(
+            "Repeat to rerun v3 queries at distinct first-stage gates in "
+            "[-1, 1] against --score-threshold (default: disabled). Adds "
+            "inference work; incompatible with --rerank."
+        ),
+    )
+    retrieval_parser.add_argument(
         "--output-format",
         choices=("table", "json"),
         default="table",
         help=(
-            "Render the same per-case and macro metrics as an aligned terminal "
-            "table or structured JSON. Use JSON when saving or comparing runs "
-            "programmatically (default: table)."
+            "Render case and aggregate metrics as a terminal table or JSON; "
+            "score-gate comparisons add per-case deltas. Use JSON to save or "
+            "compare runs programmatically (default: table)."
         ),
     )
     retrieval_parser.set_defaults(_handler=run_evaluate_retrieval)
@@ -115,6 +129,12 @@ def run_evaluate_retrieval(
         load_retrieval_evaluation_dataset,
         retrieval_evaluation_to_dict,
     )
+    from rag_pipeline.evaluation.score_gates import (
+        evaluate_score_gates,
+        format_score_gate_comparison,
+        score_gate_comparison_to_dict,
+        validate_score_gate_settings,
+    )
     from rag_pipeline.exceptions import (
         InvalidEmbeddingConfigurationError,
         InvalidPipelineConfigurationError,
@@ -122,11 +142,25 @@ def run_evaluate_retrieval(
         InvalidRetrievalConfigurationError,
         InvalidRetrievalEvaluationDatasetError,
         InvalidVectorStoreConfigurationError,
+        RetrievalEvaluationInputError,
     )
 
     try:
         dataset = load_retrieval_evaluation_dataset(args.dataset)
         runtime_config = build_retrieval_runtime_config(args)
+        if args.compare_score_threshold and args.rerank:
+            parser.error(
+                "--compare-score-threshold evaluates the first stage only; "
+                "omit --rerank."
+            )
+        if args.compare_score_threshold:
+            validate_score_gate_settings(
+                dataset,
+                top_k=args.top_k,
+                search_mode=args.search_mode,
+                baseline_gate=args.score_threshold,
+                candidate_gates=args.compare_score_threshold,
+            )
     except (
         InvalidEmbeddingConfigurationError,
         InvalidPipelineConfigurationError,
@@ -134,17 +168,39 @@ def run_evaluate_retrieval(
         InvalidRetrievalConfigurationError,
         InvalidRerankingConfigurationError,
         InvalidRetrievalEvaluationDatasetError,
+        RetrievalEvaluationInputError,
     ) as exc:
         parser.error(str(exc))
 
     with open_local_retrieval_pipeline(runtime_config) as pipeline:
-        report = evaluate_retrieval(
-            dataset,
-            pipeline.retrieve,
-            top_k=args.top_k,
-        )
+        if args.compare_score_threshold:
+            comparison = evaluate_score_gates(
+                dataset,
+                lambda query, config: pipeline.retrieve(
+                    query,
+                    retrieval_config=replace(
+                        runtime_config.retrieval,
+                        score_threshold=config.score_threshold,
+                    ),
+                ),
+                top_k=args.top_k,
+                search_mode=args.search_mode,
+                baseline_gate=args.score_threshold,
+                candidate_gates=args.compare_score_threshold,
+            )
+        else:
+            report = evaluate_retrieval(
+                dataset,
+                pipeline.retrieve,
+                top_k=args.top_k,
+            )
 
-    if args.output_format == "json":
+    if args.compare_score_threshold:
+        if args.output_format == "json":
+            print(json.dumps(score_gate_comparison_to_dict(comparison), indent=2))
+        else:
+            print(format_score_gate_comparison(comparison))
+    elif args.output_format == "json":
         print(json.dumps(retrieval_evaluation_to_dict(report), indent=2))
     else:
         print(format_retrieval_evaluation_table(report))
