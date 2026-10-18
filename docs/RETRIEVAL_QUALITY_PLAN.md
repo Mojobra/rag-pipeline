@@ -1,7 +1,8 @@
 # Retrieval Quality Implementation Plan
 
-Status: planned. This document records follow-up work identified during a
-codebase review; none of the tasks below is implemented by this plan.
+Status: in progress. This document records follow-up work identified during a
+codebase review; RQ-01 is integrated into `develop`. Later tasks remain
+separately reviewable and are marked complete only after integration.
 
 ## Goal And Scope
 
@@ -24,7 +25,7 @@ not measured quality results.
 
 | Task | Deliverable | Status |
 | --- | --- | --- |
-| RQ-01 | Source-scoped index synchronization | Planned |
+| RQ-01 | Source-scoped index synchronization | Complete |
 | RQ-02 | Broader retrieval labels and metrics | Planned |
 | RQ-03 | Score-gate calibration | Planned |
 | RQ-04 | Candidate and reranking comparison | Planned |

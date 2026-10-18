@@ -38,9 +38,9 @@ def register_evaluation_commands(
         "dataset",
         help=(
             "UTF-8 JSON file containing schema_version, name, and labeled query "
-            "cases. Schema v1 uses exact metadata selectors; v2 adds source-text "
-            "anchors for chunk-index-independent judgments. Change it for a different "
-            "corpus or relevance snapshot."
+            "cases. V1 uses exact metadata selectors, v2 adds source-text "
+            "anchors, and v3 also accepts unsupported queries with no relevant "
+            "evidence. Change it for a different corpus or relevance snapshot."
         ),
     )
     add_embedding_arguments(retrieval_parser)

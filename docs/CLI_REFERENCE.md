@@ -128,6 +128,29 @@ committed datasets provide manually cross-checked project labels for
 this command. The benchmark runner reuses these exact metrics in versioned,
 comparable run artifacts.
 
+Schema v2 replaces chunk-index labels with a `metadata` object and an exact,
+case-sensitive `content_contains` anchor. Schema v3 retains that positive
+selector format and additionally allows `"relevant": []` for unsupported
+questions. V1/v2 still require at least one selector; their JSON report fields
+and metric denominators are unchanged. A v3 dataset must include at least one
+positive case so positive macro metrics remain defined.
+
+For v3, Hit@k, Precision@k, Recall@k, and MRR@k average **positive cases only**.
+Negative cases show `null` for those per-case metrics and instead report
+`no_hit_at_k` (`1` when no chunk is returned) and `false_positive_at_k` (`1`
+when any chunk is returned). The negative macro rates average negative cases
+only and are `null` if the dataset has none. This is a strict retrieval
+diagnostic, not answer abstention accuracy. Per-case JSON also lists zero-based
+matched and missing selector indices, one-based redundant relevant ranks
+(overlap hits adding no new evidence), and one-based unwanted ranks. Chunk-level
+Precision@k still counts every matching returned chunk, so inspect it alongside
+unique selector coverage.
+
+The [v3 stress-set guide](../evaluation/datasets/asteria-policies-v3/README.md)
+documents its current-versus-archived policy labels and a runnable example.
+It is retrieval-only and should not be paired with unrelated answer labels in
+an end-to-end benchmark.
+
 ## Answer Evaluation
 
 The `evaluate-answer` command runs labeled questions through the same dense or
