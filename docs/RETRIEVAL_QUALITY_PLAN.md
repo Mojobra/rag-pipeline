@@ -1,7 +1,7 @@
 # Retrieval Quality Implementation Plan
 
 Status: in progress. This document records follow-up work identified during a
-codebase review; RQ-01 is integrated into `develop`. Later tasks remain
+codebase review; RQ-01 and RQ-02 are integrated into `develop`. Later tasks remain
 separately reviewable and are marked complete only after integration.
 
 ## Goal And Scope
@@ -17,16 +17,16 @@ Current baseline: recursive chunks of 1000 characters with 200 characters of
 overlap; dense search by default; optional BM25 hybrid search and cross-encoder
 reranking. `retrieve` and `evaluate-retrieval` have no default score gate, while
 `answer`, `evaluate-answer`, and `benchmark` default to `0.2`. The committed
-Asteria v2 retrieval set has 17 labeled, answerable questions over five
-synthetic English Markdown policies. These are configuration and dataset facts,
-not measured quality results.
+Asteria v3 retrieval set has 13 answerable and four unsupported questions over
+four synthetic English Markdown policies. These are configuration and dataset
+facts, not measured quality results.
 
 ## Task Tracker
 
 | Task | Deliverable | Status |
 | --- | --- | --- |
 | RQ-01 | Source-scoped index synchronization | Complete |
-| RQ-02 | Broader retrieval labels and metrics | Planned |
+| RQ-02 | Broader retrieval labels and metrics | Complete |
 | RQ-03 | Score-gate calibration | Planned |
 | RQ-04 | Candidate and reranking comparison | Planned |
 | RQ-05 | Extraction and chunking quality | Planned |
@@ -126,6 +126,11 @@ and evidence that the chosen false-positive/false-negative trade-off is useful.
 **Trade-off.** Raising the gate can reduce irrelevant context but increases
 missed answers. Provider scores are ranking signals, not calibrated confidence
 probabilities.
+
+The task-branch [synthetic calibration record](RQ03_SCORE_GATE_CALIBRATION.md)
+documents the first dense and hybrid comparison, including exact settings and
+per-case losses. RQ-03 remains planned in the tracker until reviewed integration
+into `develop`.
 
 ## RQ-04: Tune Candidate Retrieval And Reranking
 

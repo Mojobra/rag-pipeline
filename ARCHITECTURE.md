@@ -194,6 +194,10 @@ and operational results justify expanding the public indexing workflow.
   cases; negative cases receive separate no-hit and false-positive rates.
 - V3 also exposes distinct matched and missing evidence selectors, redundant
   overlap-hit ranks, and unwanted ranks alongside chunk-level precision.
+- Optional first-stage score-gate comparison reruns the same v3 cases for an
+  explicit baseline and candidate gates through one initialized pipeline. Its
+  separate report records settings, observed score kind, and per-case evidence
+  and unwanted-hit changes; reranking is excluded from this calibration.
 - Table output supports local diagnosis and JSON output supports saved
   comparisons.
 - V1/v2 each supply 17 answerable synthetic policy cases. The separate v3

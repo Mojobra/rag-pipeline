@@ -133,6 +133,9 @@ For unsupported questions, archived-policy conflicts, and multi-document
 evidence, use the separate [v3 retrieval stress set](evaluation/datasets/asteria-policies-v3/README.md).
 Its negative cases report no-hit and false-positive rates separately from
 positive-case Recall@k; it is not paired with answer labels.
+The evaluator can also rerun v3 cases with explicit first-stage gates using
+`--compare-score-threshold`. Run dense and hybrid modes separately; see the
+[calibration procedure](docs/CLI_REFERENCE.md#score-gate-calibration).
 
 For an isolated end-to-end benchmark, build a temporary index and save a report:
 
@@ -187,7 +190,7 @@ pipeline does **not** load model settings or API keys from `.env`; no
 | `--collection-name` | `rag_documents` | Collection within the database; examples use explicit names to separate corpora. |
 | `--search-mode` | `dense` | Select `hybrid` only for a collection indexed in that mode. |
 | `--top-k` | `4` | Maximum final evidence chunks per query. |
-| `--score-threshold` | Disabled for `retrieve`; `0.2` for `answer` | Reject first-stage matches before reranking or generation. Scores are mode-specific, not confidence probabilities. |
+| `--score-threshold` / `--no-score-threshold` | Disabled for `retrieve` and `evaluate-retrieval`; `0.2` for `answer`, `evaluate-answer`, and `benchmark` | Apply or explicitly disable the first-stage gate before reranking or generation. Scores are mode-specific, not confidence probabilities. |
 | `--batch-size` / `--write-batch-size` | `32` / `64` chunks | Separate dense-inference and database-write batches; larger batches use more memory. |
 
 Changing the embedding model, revision, or collection schema requires a new or

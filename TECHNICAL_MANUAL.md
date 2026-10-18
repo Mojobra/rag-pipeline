@@ -359,6 +359,19 @@ chunk hits and identify missing selectors and unwanted result ranks. The new
 synthetic v3 corpus includes current and archived policy sources, but has no
 paired answer-evaluation labels. V1/v2 report shapes remain unchanged.
 
+With `evaluate-retrieval --compare-score-threshold`, the v3 evaluator reruns
+the same queries for a baseline gate and one or more candidate gates through
+one initialized retrieval pipeline. Its separate comparison report records
+the requested search mode, exact gates, observed first-stage score kind per
+case, existing metrics, lost/gained evidence selectors, and unwanted-hit
+changes. The comparison excludes reranking to isolate the first stage and
+never changes the index or the ordinary evaluator's JSON contract. Dense
+cosine and hybrid RRF gates require separate calibration; an empty hybrid
+sparse vector can fall back to cosine. `--no-score-threshold` explicitly
+disables the gate on answer-oriented commands whose default remains `0.2`.
+The [RQ-03 calibration record](docs/RQ03_SCORE_GATE_CALIBRATION.md) contains
+the local synthetic-corpus measurements; they are not production thresholds.
+
 Answer evaluation reports normalized exact match, token F1, abstention accuracy,
 abstention precision/recall, answer rate, and citation-behavior rate. These are
 repeatable lexical and behavioral checks; they do not prove semantic

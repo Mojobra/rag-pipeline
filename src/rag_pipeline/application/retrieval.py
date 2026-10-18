@@ -124,15 +124,28 @@ class RetrievalPipeline:
         self._reranker_factory = reranker_factory
         self._reranking_config = reranking_config
 
-    def retrieve(self, query: str) -> list[RetrievalResult]:
+    def retrieve(
+        self,
+        query: str,
+        *,
+        retrieval_config: RetrievalConfig | None = None,
+    ) -> list[RetrievalResult]:
         """Run one query through the configured retrieval and reranking stages.
 
         The underlying services validate the query and provider responses.
-        Result order and provenance are preserved when reranking is disabled.
+        A per-call retrieval policy supports controlled comparisons without
+        reloading models or reopening Qdrant. Result order and provenance are
+        preserved when reranking is disabled.
         """
+        if retrieval_config is not None and not isinstance(
+            retrieval_config, RetrievalConfig
+        ):
+            raise TypeError("retrieval_config must be a RetrievalConfig or None.")
         results = self._retriever.retrieve(
             query,
-            config=self._retrieval_config,
+            config=self._retrieval_config
+            if retrieval_config is None
+            else retrieval_config,
         )
         if not results or self._reranking_config is None:
             return results
