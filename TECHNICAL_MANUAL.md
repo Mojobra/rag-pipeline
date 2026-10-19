@@ -32,6 +32,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
 | HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
 | HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Require a shared environment-supplied secret and compare fixed-size digests without adding an identity provider. |
+| HTTP request logging | Starlette ASGI middleware and Python `logging`/`json` | Emit bounded JSON events to stderr and correlate handled responses without storing request content. |
 | HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
 | Dense embeddings | LangChain Hugging Face + Sentence Transformers | Converts chunks and questions into normalized dense vectors for semantic search. |
 | Sparse embeddings | FastEmbed through LangChain Qdrant | Produces BM25 sparse vectors for optional lexical retrieval. |
@@ -188,7 +189,7 @@ flowchart LR
 | Package | Ownership |
 | --- | --- |
 | `rag_pipeline.cli` | Parses terminal input, maps arguments to typed configuration, invokes services, and renders output. |
-| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, and serializes source-cited JSON responses. |
+| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, emits sanitized request events, and serializes source-cited JSON responses. |
 | `rag_pipeline.application` | Coordinates transport-neutral indexing, retrieval, and answer workflows. |
 | `rag_pipeline.ingestion` | Discovers files, extracts text, creates chunks, and runs chunking experiments. |
 | `rag_pipeline.infrastructure` | Owns dense/sparse model adapters and Qdrant persistence. |
@@ -214,6 +215,17 @@ OpenAPI documentation remain public. The token is 32-256 URL-safe characters,
 should be generated from at least 32 random bytes, and is rotated by restarting
 the process. This shared secret is suitable for a trusted local demo, not user
 identity, document permissions, revocation per client, TLS, or rate limiting.
+
+### Local HTTP Request Logging
+
+A pure ASGI middleware emits one JSON line per HTTP request to stderr with a
+UTC timestamp, generated request ID, method, available route template, status,
+and duration in milliseconds. It appends `X-Request-ID` to handled responses
+for correlation. It neither trusts inbound IDs nor records bodies, headers,
+query strings, raw paths, document text, or source metadata. The documented
+Uvicorn command uses `--no-access-log` because its separate access logger can
+record full request URLs. Error logs from Uvicorn or dependencies are separate;
+this is not an audit trail or a monitoring metrics system.
 
 ## RAG Execution Flow
 

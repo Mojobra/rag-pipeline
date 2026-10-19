@@ -14,6 +14,8 @@ Versioning while the package remains in initial development.
 - Shared bearer-token authentication on the two query routes, with fail-closed
   startup and offline authentication tests. User identity, authorization, and
   rate limiting remain future work.
+- Structured, content-free HTTP request events with server-generated correlation
+  IDs and offline privacy/error-path tests.
 
 ### Changed
 

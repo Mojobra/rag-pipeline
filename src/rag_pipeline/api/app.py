@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from logging import Logger
 from typing import cast
 
 from fastapi import Depends, FastAPI, Request
@@ -15,6 +16,10 @@ from fastapi.responses import JSONResponse
 
 from rag_pipeline import __version__
 from rag_pipeline.api.auth import load_bearer_token_digest, require_bearer_token
+from rag_pipeline.api.request_logging import (
+    RequestLoggingMiddleware,
+    default_request_logger,
+)
 from rag_pipeline.api.runtime import LocalApiRuntime, QueryRuntime
 from rag_pipeline.api.schemas import (
     AnswerRequest,
@@ -36,12 +41,14 @@ from rag_pipeline.exceptions import (
 
 def create_app(
     runtime_factory: Callable[[], QueryRuntime] | None = None,
+    *,
+    request_logger: Logger | None = None,
 ) -> FastAPI:
     """Build an HTTP adapter with a replaceable, lifespan-owned query runtime.
 
     Importing the app never loads models or opens Qdrant. Startup requires a
     configured bearer secret; the real runtime initializes providers on the
-    first authenticated query. Tests inject an offline runtime double.
+    first authenticated query. Tests can inject an offline runtime and logger.
     """
 
     @asynccontextmanager
@@ -62,6 +69,12 @@ def create_app(
         title="RAG Pipeline API",
         version=__version__,
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        RequestLoggingMiddleware,
+        logger=request_logger
+        if request_logger is not None
+        else default_request_logger(),
     )
 
     @application.exception_handler(RagPipelineError)

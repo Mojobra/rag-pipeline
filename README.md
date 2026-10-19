@@ -33,7 +33,8 @@ local bearer token; it is not a hosted production service.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
 - **Local HTTP API:** bearer-protected retrieval and cited answers from an
-  existing collection, with bounded JSON requests and no per-request model loading.
+  existing collection, with bounded JSON requests, request IDs, structured
+  operational logs, and no per-request model loading.
 
 ## Quick Start
 
@@ -63,13 +64,15 @@ $token = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 $token
 $env:RAG_API_BEARER_TOKEN = $token
 $env:RAG_API_COLLECTION_NAME = 'asteria_demo'
-uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
+uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 Open `http://127.0.0.1:8000/docs` or see the [API reference](docs/API_REFERENCE.md)
 for an authenticated request example and configuration. Keep the generated token
 private and provide it to your local client; a new token requires a server
-restart. Do not bind the service to a public network.
+restart. The API writes one sanitized JSON event per request to stderr and
+returns `X-Request-ID` for correlation; `--no-access-log` prevents Uvicorn's
+raw URL access logs. Do not bind the service to a public network.
 
 ## Requirements
 
@@ -316,9 +319,9 @@ branches and enforces an 80 percent floor. The
 
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
-for the six follow-ups. Phase 4 now includes the local FastAPI service and its
-shared bearer guard; later tasks add logging, monitoring, containerization,
-and deployment CI/CD.
+for the six follow-ups. Phase 4 now includes the local FastAPI service, shared
+bearer guard, and structured request logging; later tasks add monitoring,
+containerization, and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 
