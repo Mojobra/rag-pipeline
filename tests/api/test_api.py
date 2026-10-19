@@ -22,6 +22,9 @@ from rag_pipeline.generation.citations import Citation
 from rag_pipeline.infrastructure.vector_store import SearchMode
 from rag_pipeline.retrieval import RetrievalResult
 
+_TEST_TOKEN = "test-only-" + "x" * 32
+_AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
+
 
 def sample_hit() -> RetrievalResult:
     """Return a ranked policy chunk with stable citation provenance."""
@@ -102,7 +105,13 @@ class FakeRuntime:
 
 
 class ApiContractTests(unittest.TestCase):
-    """Keep the first HTTP surface read-only, bounded, and source-cited."""
+    """Keep the authenticated HTTP surface bounded and source-cited."""
+
+    def setUp(self) -> None:
+        """Supply an offline, non-secret credential for route contract tests."""
+        token_patch = patch.dict("os.environ", {"RAG_API_BEARER_TOKEN": _TEST_TOKEN})
+        token_patch.start()
+        self.addCleanup(token_patch.stop)
 
     def test_health_and_openapi_do_not_query_runtime(self) -> None:
         runtime = FakeRuntime()
@@ -117,7 +126,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_retrieval_returns_ranked_text_and_selected_provenance(self) -> None:
         runtime = FakeRuntime()
-        with TestClient(create_app(lambda: runtime)) as client:
+        with TestClient(create_app(lambda: runtime), headers=_AUTH_HEADERS) as client:
             response = client.post(
                 "/v1/retrieve",
                 json={"query": "  What receipt?  ", "top_k": 2},
@@ -133,7 +142,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_answer_preserves_citations_and_default_gate(self) -> None:
         runtime = FakeRuntime()
-        with TestClient(create_app(lambda: runtime)) as client:
+        with TestClient(create_app(lambda: runtime), headers=_AUTH_HEADERS) as client:
             response = client.post("/v1/answer", json={"query": "What receipt?"})
             disabled = client.post(
                 "/v1/answer",
@@ -151,7 +160,7 @@ class ApiContractTests(unittest.TestCase):
     def test_no_evidence_abstains_without_citations(self) -> None:
         runtime = FakeRuntime()
         runtime.result = AnswerOutcome(INSUFFICIENT_CONTEXT_ANSWER, None)
-        with TestClient(create_app(lambda: runtime)) as client:
+        with TestClient(create_app(lambda: runtime), headers=_AUTH_HEADERS) as client:
             response = client.post("/v1/answer", json={"query": "Unknown?"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["answer"], INSUFFICIENT_CONTEXT_ANSWER)
@@ -170,7 +179,7 @@ class ApiContractTests(unittest.TestCase):
             {"query": "valid", "score_threshold": True},
             {"query": "valid", "store_path": "C:/private"},
         )
-        with TestClient(create_app(lambda: runtime)) as client:
+        with TestClient(create_app(lambda: runtime), headers=_AUTH_HEADERS) as client:
             for body in invalid:
                 with self.subTest(body=body):
                     self.assertEqual(
@@ -183,7 +192,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_domain_errors_are_stable_and_provider_details_are_hidden(self) -> None:
         runtime = FakeRuntime()
-        with TestClient(create_app(lambda: runtime)) as client:
+        with TestClient(create_app(lambda: runtime), headers=_AUTH_HEADERS) as client:
             for failure, status in (
                 (RetrievalInputError("query is invalid"), 422),
                 (VectorStoreCollectionNotFoundError("missing collection"), 404),

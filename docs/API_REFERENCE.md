@@ -1,8 +1,9 @@
 # Local HTTP API
 
-Task 19 adds a read-only FastAPI adapter over the existing local retrieval and
-answer workflows. It does not ingest documents, host remote models, enforce
-identity or permissions, or make embedded Qdrant a multi-user database. Index
+Tasks 19 and 20 add a read-only FastAPI adapter with shared-token authentication
+over the existing local retrieval and answer workflows. It does not ingest
+documents, host remote models, identify individual users, enforce document
+permissions, or make embedded Qdrant a multi-user database. Index
 documents with the CLI first; stop the API before modifying the same local
 Qdrant store with the CLI.
 
@@ -11,6 +12,9 @@ Qdrant store with the CLI.
 From the repository root, after `uv sync --locked` and indexing a collection:
 
 ```powershell
+$token = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$token
+$env:RAG_API_BEARER_TOKEN = $token
 $env:RAG_API_COLLECTION_NAME = 'asteria_demo'
 uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
 ```
@@ -18,7 +22,8 @@ uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
 The example collection name matches the README Quick Start. Without that
 variable, the API uses the CLI's default `rag_documents` collection. Visit
 `http://127.0.0.1:8000/docs` for the generated OpenAPI explorer. Bind only to
-loopback: there is no authentication or rate limiting yet. Use one worker; the
+loopback: a shared bearer token is not user authorization or a substitute for
+TLS and rate limiting on a network. Use one worker; the
 local models and embedded Qdrant session are shared within one process, and
 queries are serialized. The first query may download or initialize a model.
 
@@ -30,6 +35,7 @@ settings; incompatible settings fail rather than silently mixing vectors.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
+| `RAG_API_BEARER_TOKEN` | required | Shared 32-256-character URL-safe secret for query routes. Generate at least 32 random bytes; missing or malformed values prevent startup. Rotation requires restart. |
 | `RAG_API_STORE_PATH` | `.rag_data/qdrant` | Local embedded-Qdrant directory; use the same path as CLI `--store-path`. |
 | `RAG_API_COLLECTION_NAME` | `rag_documents` | Existing collection; use the CLI `--collection-name` value. |
 | `RAG_API_SEARCH_MODE` | `dense` | `dense` or `hybrid`; must match the collection schema. |
@@ -44,6 +50,11 @@ generation context policy as the CLI default. Other CLI tuning flags are not
 HTTP configuration in this first adapter.
 
 ## Endpoints
+
+`POST /v1/retrieve` and `POST /v1/answer` require
+`Authorization: Bearer <token>`. Copy the generated value securely into a
+second terminal or use the OpenAPI explorer's **Authorize** control. The
+OpenAPI document and `/health` remain public and reveal no indexed text.
 
 ### `GET /health`
 
@@ -81,13 +92,16 @@ paths or arbitrary model names per request. For example, in a second PowerShell
 terminal:
 
 ```powershell
+$token = '<same token configured on the server>'
+$headers = @{ Authorization = "Bearer $token" }
 $body = @{ query = 'When must expense claims be submitted?' } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/answer `
-  -ContentType 'application/json' -Body $body
+  -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
 ## Failures And Limits
 
+- `401`: missing or invalid bearer token; no retrieval or generation occurs.
 - `422`: invalid request fields or query input.
 - `404`: collection not indexed.
 - `409`: collection and configured model/search settings are incompatible.
@@ -95,7 +109,9 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/answer `
 - `500`: unexpected server failure.
 
 Responses can include local source paths and document text. Keep this service
-on a trusted machine and do not expose it to a network before Task 20 adds
-authentication and later permission-aware retrieval. There is no upload,
-authorization, CORS policy, distributed worker, streaming, or remote-Qdrant
-support in this task.
+on a trusted machine: the shared token does not identify a caller or restrict
+which documents they can read. It can be copied or stolen and is not a
+replacement for TLS, per-user identity, permission-aware retrieval, per-client
+rotation and revocation, rate limiting, or audit logging. Do not put it in a URL, Git,
+or application logs. There is no upload, HTTP indexing, CORS policy,
+distributed worker, streaming, or remote-Qdrant support.

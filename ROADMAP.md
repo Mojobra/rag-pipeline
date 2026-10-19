@@ -44,7 +44,7 @@ original roadmap task numbers below remain unchanged.
 ## Phase 4: Production
 
 Task 19 - FastAPI service (local read-only API implemented)
-Task 20 - Authentication
+Task 20 - Authentication (shared bearer token for local HTTP queries implemented)
 Task 21 - Logging
 Task 22 - Monitoring
 Task 23 - Dockerization

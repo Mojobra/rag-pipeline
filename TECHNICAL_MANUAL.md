@@ -30,7 +30,8 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Language | Python 3.11+ | Implements the CLI, application services, RAG stages, validation, and tests. |
 | RAG contracts | LangChain | Supplies common document, embedding, prompt, model, parser, and vector-store interfaces. |
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
-| HTTP adapter | FastAPI and Uvicorn | Serve bounded retrieval and answer routes over an existing local collection on loopback. |
+| HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
+| HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Require a shared environment-supplied secret and compare fixed-size digests without adding an identity provider. |
 | HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
 | Dense embeddings | LangChain Hugging Face + Sentence Transformers | Converts chunks and questions into normalized dense vectors for semantic search. |
 | Sparse embeddings | FastEmbed through LangChain Qdrant | Produces BM25 sparse vectors for optional lexical retrieval. |
@@ -70,7 +71,7 @@ manager, which can differ from Python import names.
 | Library / package | Dependency type | Purpose and use in this project |
 | --- | --- | --- |
 | `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
-| `fastapi` | Direct runtime | Defines the local read-only HTTP app, OpenAPI schema, routes, and exception mapping. |
+| `fastapi` | Direct runtime | Defines the local read-only HTTP app, bearer security scheme, OpenAPI schema, routes, and exception mapping. |
 | `uvicorn` | Direct runtime | Runs the ASGI app on a local listening socket. |
 | `starlette` | Transitive | Provides FastAPI's ASGI request/response and test-client infrastructure. |
 | `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
@@ -173,7 +174,8 @@ Development tools are deliberately pinned exactly:
 ```mermaid
 flowchart LR
     CLI["argparse CLI"] --> APP["Application use cases"]
-    API["FastAPI HTTP adapter"] --> APP
+    API["FastAPI HTTP adapter"] --> AUTH["Bearer query guard"]
+    AUTH --> APP
     APP --> ING["Ingestion and chunking"]
     APP --> INF["Model and Qdrant adapters"]
     INF --> RET["Retrieval and reranking"]
@@ -186,7 +188,7 @@ flowchart LR
 | Package | Ownership |
 | --- | --- |
 | `rag_pipeline.cli` | Parses terminal input, maps arguments to typed configuration, invokes services, and renders output. |
-| `rag_pipeline.api` | Validates read-only HTTP requests, owns local provider lifecycle, and serializes source-cited JSON responses. |
+| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, and serializes source-cited JSON responses. |
 | `rag_pipeline.application` | Coordinates transport-neutral indexing, retrieval, and answer workflows. |
 | `rag_pipeline.ingestion` | Discovers files, extracts text, creates chunks, and runs chunking experiments. |
 | `rag_pipeline.infrastructure` | Owns dense/sparse model adapters and Qdrant persistence. |
@@ -199,7 +201,19 @@ flowchart LR
 This is a layered modular monolith with CLI and local HTTP transports. The
 application and feature services are shared; provider details stay at explicit
 boundaries instead of being spread through command or route handlers. The API
-is read-only until authentication and authorization are designed.
+is read-only and uses one shared bearer credential. It does not enforce
+per-user identity or document authorization.
+
+### Local HTTP Authentication Boundary
+
+The API validates `RAG_API_BEARER_TOKEN` during lifespan startup and retains
+only its SHA-256 digest in process state. FastAPI's HTTPBearer dependency gives
+the query routes an OpenAPI security contract. Missing or incorrect credentials
+receive the same `401` Bearer challenge before provider work; `/health` and
+OpenAPI documentation remain public. The token is 32-256 URL-safe characters,
+should be generated from at least 32 random bytes, and is rotated by restarting
+the process. This shared secret is suitable for a trusted local demo, not user
+identity, document permissions, revocation per client, TLS, or rate limiting.
 
 ## RAG Execution Flow
 
@@ -468,9 +482,10 @@ Current commands are:
 | `benchmark` | Rebuild and measure an isolated end-to-end pipeline. |
 | `compare-benchmarks` | Compare compatible artifacts and regression thresholds. |
 
-Configuration is currently supplied through CLI flags and typed immutable
-dataclasses. There is no active `.env` model-provider configuration on `main`,
-and the current generation and embedding paths are local model providers.
+CLI configuration uses flags and typed immutable dataclasses. The API reads
+`RAG_API_*` environment values once at startup, including a required shared
+bearer token; `.env` is not loaded automatically. Generation and embedding
+remain local model providers.
 
 ## Local State And I/O
 
@@ -482,11 +497,12 @@ and the current generation and embedding paths are local model providers.
 | Hugging Face cache | Dense and generation model artifacts | Managed outside tracked source |
 | `evaluation/datasets` | Synthetic Markdown corpus and versioned JSON labels | Tracked |
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
-| Local `.env` files | Potential secrets | Ignored by default; `.env.example` is the only allowed exception, and no active provider contract exists on `main` |
+| Local `.env` files | Potential secrets | Ignored by default; `.env.example` is the only allowed exception, and no hosted-provider contract is active |
 
 Model factories may download artifacts on first use. After caches are populated,
-the pipeline runs locally without an API key. Default automated tests use stubs
-and in-memory or temporary storage, so they require neither downloads nor
+model inference runs locally without a hosted-provider API key. The HTTP adapter
+still requires its locally generated bearer token. Default automated tests use
+stubs and in-memory or temporary storage, so they require neither downloads nor
 network access.
 
 ## Engineering Toolchain
@@ -563,12 +579,12 @@ hiding the entire application behind an opaque chain or agent abstraction.
 The following technologies or capabilities are not implemented in this code and
 must not be presented as current behavior:
 
-- Authenticated or publicly deployable HTTP service, document uploads, or
-  HTTP indexing
+- Publicly deployable HTTP service, document uploads, or HTTP indexing
 - OpenAI, Gemini, Claude, or other hosted model providers
 - API-key loading from `.env`
 - MCP servers, tool calling, or autonomous agents
-- RBAC, authentication, tenant isolation, or authorization policy enforcement
+- Per-user identity, OIDC/Keycloak integration, RBAC, tenant isolation, or
+  authorization policy enforcement
 - Docker, Kubernetes, cloud deployment, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting

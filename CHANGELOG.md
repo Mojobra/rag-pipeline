@@ -9,8 +9,17 @@ Versioning while the package remains in initial development.
 
 - Local read-only FastAPI routes for health, ranked retrieval, and grounded
   cited answers over an existing CLI-indexed collection.
-- Bounded HTTP schemas and offline API lifecycle/error tests. Authentication,
-  uploads, and network deployment remain future tasks.
+- Bounded HTTP schemas and offline API lifecycle/error tests. Uploads and
+  network deployment remain future tasks.
+- Shared bearer-token authentication on the two query routes, with fail-closed
+  startup and offline authentication tests. User identity, authorization, and
+  rate limiting remain future work.
+
+### Changed
+
+- The local HTTP API now requires `RAG_API_BEARER_TOKEN` at startup and a matching
+  `Authorization: Bearer` header for retrieval and answer requests. CLI behavior
+  is unchanged.
 
 ## [0.3.0] - 2026-10-19
 
