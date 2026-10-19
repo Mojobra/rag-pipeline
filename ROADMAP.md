@@ -47,7 +47,7 @@ Task 19 - FastAPI service (local read-only API implemented)
 Task 20 - Authentication (shared bearer token for local HTTP queries implemented)
 Task 21 - Logging (privacy-conscious structured HTTP request events implemented)
 Task 22 - Monitoring (protected process-local API and RAG outcome metrics implemented)
-Task 23 - Dockerization
+Task 23 - Dockerization (local CLI/API image and persistent-volume workflow implemented)
 Task 24 - Deployment CI/CD (pull-request quality CI is already in place)
 
 ## Phase 5: Enterprise

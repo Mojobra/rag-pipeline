@@ -18,7 +18,7 @@
 14. Local read-only FastAPI adapter with shared bearer authentication and request logging
 15. Process-local API and RAG outcome monitoring
 16. Frontend/UI (planned)
-17. Deployment Infrastructure (planned)
+17. Local CLI/API container packaging (implemented); deployment infrastructure (planned)
 
 ---
 
@@ -148,6 +148,20 @@ request/response schemas, and error mapping live in `rag_pipeline.api`.
   retrieval. It must stay on loopback; source paths and document text in
   responses may be sensitive. See
   [the API reference](docs/API_REFERENCE.md).
+
+## Current Container Boundary
+
+The optional Docker image installs the locked runtime package in a builder stage
+and copies only its non-editable virtual environment into a Python 3.11 runtime
+stage. The final process runs as a non-root user. Both CLI indexing and the
+single-process API use the same image; they must run sequentially against one
+embedded Qdrant volume. The default working directory preserves the existing
+`.rag_data/qdrant` path, while a second volume retains Hugging Face model caches.
+The image does not include source documents or credentials. Its Docker health
+check calls public `/health`, so it indicates process liveness rather than
+collection readiness. The documented host port binds to loopback only. This is
+local packaging, not an authenticated multi-user deployment; see
+[Docker setup](docs/DOCKER.md).
 
 ---
 
