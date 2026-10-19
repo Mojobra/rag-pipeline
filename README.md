@@ -28,7 +28,7 @@ CLI, not a hosted application or production service.
   source-scoped replacement, and collection compatibility checks.
 - **Evaluation:** versioned synthetic corpora, positive/negative retrieval
   diagnostics, answer metrics, and isolated benchmarks with provenance,
-  latency reports, and regression gates.
+  latency reports, regression gates, and paired prompt-evidence coverage.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
 

@@ -354,12 +354,23 @@ The schema-v1 artifact contains:
 - document, chunk, point, vector-dimension, and temporary-index storage totals
 - stage timings plus ordered per-case retrieval and end-to-end answer latency
 - the complete retrieval and answer evaluation reports
+- per-anchor prompt-evidence states when answerable cases have matching v2/v3
+  source-anchor retrieval labels; v1 and unpaired datasets omit this section
 - reproducibility warnings for unpinned models, sampled generation, or dirty
   tracked source files
 
 Benchmark artifacts contain dataset queries and generated answers. Treat reports
 created from private or customer data according to the same access, retention,
 and deletion rules as the source data; do not commit them by default.
+
+The optional `results.evidence_coverage` section distinguishes anchors not
+retrieved, retrieved but not packed, packed with model abstention, and packed
+with a non-abstaining answer. It matches exact text in the packed source
+prefixes, not a citation's shortened display excerpt. Counts are per labeled
+anchor, so overlapping or repeated hits do not inflate coverage. An answered
+state does not prove correctness; inspect answer EM/F1 separately. This
+diagnostic is not yet an allowlisted regression-gate metric. See the
+[RQ-06 measured comparison](RQ06_EVIDENCE_COVERAGE.md).
 
 ### Regression Thresholds
 

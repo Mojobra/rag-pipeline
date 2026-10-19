@@ -32,6 +32,10 @@ from rag_pipeline.evaluation.answers import (
     AnswerEvaluationReport,
     answer_evaluation_to_dict,
 )
+from rag_pipeline.evaluation.evidence import (
+    EvidenceCoverageReport,
+    evidence_coverage_to_dict,
+)
 from rag_pipeline.evaluation.retrieval import (
     RetrievalEvaluationReport,
     retrieval_evaluation_to_dict,
@@ -61,6 +65,7 @@ class BenchmarkReport:
     answer_report: AnswerEvaluationReport
     threshold_gate: ThresholdGateResult | None
     reproducibility_warnings: tuple[str, ...]
+    evidence_report: EvidenceCoverageReport | None = None
 
 
 def validate_benchmark_output_path(
@@ -99,6 +104,12 @@ def benchmark_report_to_dict(report: BenchmarkReport) -> dict[str, object]:
     """Serialize a report to the stable schema-v1 artifact contract."""
     if not isinstance(report, BenchmarkReport):
         raise TypeError("report must be a BenchmarkReport.")
+    results: dict[str, object] = {
+        "retrieval": retrieval_evaluation_to_dict(report.retrieval_report),
+        "answer": answer_evaluation_to_dict(report.answer_report),
+    }
+    if report.evidence_report is not None:
+        results["evidence_coverage"] = evidence_coverage_to_dict(report.evidence_report)
     return {
         "schema_version": BENCHMARK_SCHEMA_VERSION,
         "run": {
@@ -123,10 +134,7 @@ def benchmark_report_to_dict(report: BenchmarkReport) -> dict[str, object]:
             "retrieval": timing_to_dict(report.retrieval_timing),
             "answer": timing_to_dict(report.answer_timing),
         },
-        "results": {
-            "retrieval": retrieval_evaluation_to_dict(report.retrieval_report),
-            "answer": answer_evaluation_to_dict(report.answer_report),
-        },
+        "results": results,
         "threshold_gate": (
             None
             if report.threshold_gate is None
@@ -205,30 +213,37 @@ def format_benchmark_summary(report: BenchmarkReport) -> str:
         if report.threshold_gate is None
         else ("PASS" if report.threshold_gate.passed else "FAIL")
     )
-    return "\n".join(
+    lines = [
+        f"Benchmark: {report.name}",
         (
-            f"Benchmark: {report.name}",
-            (
-                f"Corpus: {report.corpus.file_count} file(s), "
-                f"{report.index['chunk_count']} chunk(s)"
-            ),
-            (
-                f"Retrieval: Hit@{report.retrieval_report.top_k}="
-                f"{retrieval.hit_rate_at_k:.3f}, "
-                f"Recall@{report.retrieval_report.top_k}="
-                f"{retrieval.mean_recall_at_k:.3f}, "
-                f"p95={report.retrieval_timing.p95_seconds:.4f}s"
-            ),
-            (
-                f"Answer: EM={_optional_ratio(answer.exact_match_rate)}, "
-                f"F1={_optional_ratio(answer.mean_token_f1)}, "
-                f"abstention_accuracy={answer.abstention_accuracy:.3f}, "
-                f"p95={report.answer_timing.p95_seconds:.4f}s"
-            ),
-            f"Total runtime: {report.total_seconds:.4f}s",
-            f"Threshold gate: {gate_status}",
+            f"Corpus: {report.corpus.file_count} file(s), "
+            f"{report.index['chunk_count']} chunk(s)"
+        ),
+        (
+            f"Retrieval: Hit@{report.retrieval_report.top_k}="
+            f"{retrieval.hit_rate_at_k:.3f}, "
+            f"Recall@{report.retrieval_report.top_k}="
+            f"{retrieval.mean_recall_at_k:.3f}, "
+            f"p95={report.retrieval_timing.p95_seconds:.4f}s"
+        ),
+        (
+            f"Answer: EM={_optional_ratio(answer.exact_match_rate)}, "
+            f"F1={_optional_ratio(answer.mean_token_f1)}, "
+            f"abstention_accuracy={answer.abstention_accuracy:.3f}, "
+            f"p95={report.answer_timing.p95_seconds:.4f}s"
+        ),
+        f"Total runtime: {report.total_seconds:.4f}s",
+        f"Threshold gate: {gate_status}",
+    ]
+    if report.evidence_report is not None:
+        evidence = report.evidence_report
+        lines.insert(
+            4,
+            f"Prompt evidence: retrieved={evidence.retrieval_coverage_rate:.3f}, "
+            f"packed={evidence.packed_coverage_rate:.3f} "
+            f"({evidence.selector_count} anchor(s))",
         )
-    )
+    return "\n".join(lines)
 
 
 def _json_copy(value: Mapping[str, object]) -> dict[str, object]:

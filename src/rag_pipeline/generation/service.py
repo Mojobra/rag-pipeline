@@ -160,8 +160,8 @@ class GeneratedAnswer:
     """Grounded generation result with reproducibility and evidence metadata.
 
     The record identifies model and prompt versions, accepted retrieval records,
-    prefix-aligned citations, budget usage, truncation, and whether a model was
-    invoked or the no-evidence fallback was returned.
+    prefix-aligned citations and packed text, budget usage, truncation, and
+    whether a model was invoked or the no-evidence fallback was returned.
     """
 
     answer: str
@@ -174,6 +174,7 @@ class GeneratedAnswer:
     prompt_tokens: int
     prompt_token_limit: int
     generated: bool
+    packed_evidence_texts: tuple[str, ...] = ()
 
 
 class AnswerGenerator:
@@ -260,6 +261,7 @@ class AnswerGenerator:
                 prompt_tokens=0,
                 prompt_token_limit=input_token_limit,
                 generated=False,
+                packed_evidence_texts=(),
             )
 
         used_context = tuple(item.retrieval_result for item in packed_context.evidence)
@@ -305,6 +307,9 @@ class AnswerGenerator:
             prompt_tokens=packed_context.prompt_tokens,
             prompt_token_limit=input_token_limit,
             generated=True,
+            packed_evidence_texts=tuple(
+                item.evidence_text for item in packed_context.evidence
+            ),
         )
 
 

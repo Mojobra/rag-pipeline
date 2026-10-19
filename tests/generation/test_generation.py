@@ -110,6 +110,10 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(generator.prompt_identifier, GROUNDED_ANSWER_PROMPT_ID)
         self.assertEqual(result.used_context, tuple(retrieval_results))
         self.assertEqual(
+            result.packed_evidence_texts,
+            ("Expense claims require receipts.", "Managers approve exceptions."),
+        )
+        self.assertEqual(
             [citation.label for citation in result.citations],
             ["[1]", "[2]"],
         )
@@ -153,6 +157,7 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(result.prompt_identifier, GROUNDED_ANSWER_PROMPT_ID)
         self.assertFalse(result.generated)
         self.assertEqual(result.used_context, ())
+        self.assertEqual(result.packed_evidence_texts, ())
         self.assertEqual(result.citations, ())
         self.assertEqual(result.context_characters, 0)
         self.assertEqual(result.prompt_tokens, 0)
@@ -208,6 +213,7 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(result.citations[0].excerpt, "A" * 10)
         self.assertEqual(result.citations[0].start_index, 100)
         self.assertEqual(result.citations[0].end_index, 110)
+        self.assertEqual(result.packed_evidence_texts, ("A" * 10,))
         self.assertIn("...", language_model.prompts[0])
         self.assertNotIn("Second context", language_model.prompts[0])
 
@@ -285,6 +291,10 @@ class GroundedGenerationTests(unittest.TestCase):
         self.assertEqual(
             result.citations[0].end_index,
             len(result.citations[0].excerpt),
+        )
+        self.assertEqual(
+            result.packed_evidence_texts,
+            ("A" * result.citations[0].end_index,),
         )
 
     def test_rejects_missing_provenance_before_calling_model(self) -> None:

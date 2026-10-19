@@ -403,6 +403,17 @@ abstention precision/recall, answer rate, and citation-behavior rate. These are
 repeatable lexical and behavioral checks; they do not prove semantic
 faithfulness or business correctness.
 
+For paired schema-v2/v3 retrieval anchors and answerable cases, isolated
+benchmarks also record which exact source spans survive retrieval and prompt
+packing. The answer result retains the packed evidence prefixes used for
+generation; diagnostics separate missing retrieval, lost packing, and model
+abstention after packing. A non-abstaining answer is not automatically correct:
+exact match and token F1 remain separate. Legacy or unpaired labels leave this
+optional report absent, preserving existing artifact comparisons and gates.
+The [RQ-06 measurement](docs/RQ06_EVIDENCE_COVERAGE.md) found full prompt
+coverage at the default context cap on the synthetic v2 corpus, so it did not
+justify a packing-policy change.
+
 The benchmark runner rebuilds a temporary index from an exact corpus and records:
 
 - Input, dataset, threshold-profile, and configuration fingerprints
@@ -410,6 +421,7 @@ The benchmark runner rebuilds a temporary index from an exact corpus and records
 - Stage duration plus per-case retrieval and answer latency
 - Mean, p50, and p95 latency summaries
 - Retrieval and answer quality metrics
+- Optional per-anchor prompt-evidence diagnostics for paired source labels
 - Index storage size and total runtime
 - Compatible-run deltas and allowlisted regression gates
 
