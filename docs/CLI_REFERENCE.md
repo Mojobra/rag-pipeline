@@ -6,6 +6,21 @@ Run all commands from the repository root; multiline commands use PowerShell
 continuation syntax. The schemas shown below are JSON examples, not
 additional files installed by the application.
 
+## HTML Extraction
+
+`.html` and `.htm` files are decoded into normalized visible text before
+chunking. Head, script, style, template, and navigation content is omitted;
+headings, tables, asides, and footers remain. The `source` metadata still names
+the original file, but `start_index`/`end_index` and citation excerpts refer
+to the extracted text, not offsets in raw HTML. The extractor metadata changes
+from `text` to `html.parser` for HTML only. Reindex affected HTML sources so
+old markup chunks are replaced, and adjust any `extractor=text` metadata
+filter intended to include HTML. The parser does not implement CSS visibility,
+OCR, image text, or visual page layout.
+
+The [RQ-05 audit](RQ05_EXTRACTION_CHUNKING.md) records an over-limit token count
+for raw HTML and the extraction/strategy measurements behind this change.
+
 ## Index Synchronization
 
 `index` replaces the complete indexed chunk set for each discovered file. This
@@ -427,8 +442,9 @@ occur afterward and are not included.
 The `benchmark` command keeps recursive chunking as its default and exposes two
 opt-in alternatives:
 
-- `structure-aware` uses LangChain's Markdown and HTML separator priorities,
-  with the normal recursive splitter as a fallback for other formats.
+- `structure-aware` uses LangChain's Markdown separators. Normal extracted
+  HTML has no tags, so it uses recursive fallback like PDF, DOCX, and text;
+  directly supplied raw HTML documents retain HTML separator priorities.
 - `semantic` embeds sentence contexts, creates boundaries at unusually large
   cosine-distance changes, and enforces `--chunk-size` as a hard character cap.
   It emits no overlap and reuses the benchmark's dense model for final vectors.

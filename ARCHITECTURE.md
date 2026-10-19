@@ -127,6 +127,17 @@ response, authentication, and error-mapping concerns remain future work.
   delete calls are not atomic; a database failure may require retrying the same
   source scope to finish synchronization.
 
+## Current Extraction Contract
+
+HTML files are decoded into visible text with Python's `html.parser`. Script,
+style, head, template, and navigation subtrees are omitted; headings, tables,
+asides, and footers remain text. Plain text and Markdown retain their raw
+content. HTML chunk `start_index` and `end_index` point into normalized
+extracted text, not raw HTML byte positions. Source paths and PDF page metadata
+are unchanged. Existing HTML sources must be reindexed for the new text and
+`extractor=html.parser` metadata to take effect; a filter on the previous
+`extractor=text` value will no longer match those HTML chunks.
+
 ---
 
 ## Current Generation Contract
@@ -157,8 +168,9 @@ before production use.
 - Normal `chunk`, `embed`, and `index` workflows retain the established
   LangChain recursive-character policy and its defaults.
 - Isolated benchmarks additionally accept a structure-aware recursive policy.
-  Markdown and HTML use LangChain's language-specific separator priorities;
-  other formats use the baseline separator order.
+  Markdown and raw HTML documents use LangChain's language-specific separator
+  priorities. Extracted HTML has no tags, so it and other formats use the
+  baseline separator order.
 - The semantic policy forms punctuation/paragraph units, embeds buffered
   sentence contexts through LangChain's `Embeddings` interface, and proposes
   boundaries above a configurable cosine-distance percentile.
@@ -176,6 +188,10 @@ Semantic chunking can improve topical coherence but adds ingestion latency and
 is sensitive to sentence segmentation, model choice, and threshold calibration.
 The implementation is intentionally benchmark-only until representative quality
 and operational results justify expanding the public indexing workflow.
+The [RQ-05 local comparison](docs/RQ05_EXTRACTION_CHUNKING.md) found no
+retrieval gain on the small v2 labels from switching the default policy, so
+recursive indexing remains unchanged. PDF text-layer order and OCR remain
+separate, unimplemented extraction concerns.
 
 ---
 

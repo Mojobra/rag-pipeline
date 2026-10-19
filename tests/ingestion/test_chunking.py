@@ -124,6 +124,47 @@ class DocumentChunkingTests(unittest.TestCase):
             self.assertEqual(chunk.page_content, text[start:end])
             self.assertEqual(chunk.metadata["chunking_strategy"], "structure_aware")
 
+    def test_structure_aware_policy_falls_back_for_cleaned_html(self) -> None:
+        text = "Expense rules\nReceipts are required over 25 euros.\nFinance approves exceptions."
+        document = Document(
+            page_content=text,
+            metadata={"file_extension": ".HTML", "extractor": "html.parser"},
+        )
+        config = StructureAwareChunkingConfig(chunk_size=40, chunk_overlap=5)
+
+        chunks = chunk_documents_with_structure([document], config=config)
+        baseline = chunk_documents(
+            [document], config=ChunkingConfig(chunk_size=40, chunk_overlap=5)
+        )
+
+        self.assertEqual(
+            [chunk.page_content for chunk in chunks],
+            [chunk.page_content for chunk in baseline],
+        )
+        self.assertTrue(
+            all(
+                chunk.metadata["structure_language"] == "recursive_fallback"
+                for chunk in chunks
+            )
+        )
+        for chunk in chunks:
+            start = chunk.metadata["start_index"]
+            end = chunk.metadata["end_index"]
+            self.assertEqual(chunk.page_content, text[start:end])
+
+    def test_structure_aware_policy_keeps_raw_html_separators(self) -> None:
+        document = Document(
+            page_content="<h1>Expenses</h1><p>Receipts are required.</p>",
+            metadata={"file_extension": ".html"},
+        )
+
+        chunks = chunk_documents_with_structure([document])
+
+        self.assertTrue(chunks)
+        self.assertTrue(
+            all(chunk.metadata["structure_language"] == "html" for chunk in chunks)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

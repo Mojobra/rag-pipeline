@@ -680,6 +680,17 @@ class BenchmarkCliTests(unittest.TestCase):
                         artifact["configuration"]["chunking"]["strategy"],
                         artifact_strategy,
                     )
+                    if cli_strategy == "structure-aware":
+                        self.assertEqual(
+                            artifact["configuration"]["chunking"]["recognized_markup"],
+                            ["markdown", "raw_html"],
+                        )
+                        self.assertEqual(
+                            artifact["configuration"]["chunking"][
+                                "cleaned_html_fallback"
+                            ],
+                            "recursive_character",
+                        )
                     self.assertEqual(artifact["index"]["chunk_count"], 1)
 
     def test_compare_cli_outputs_compatible_metric_deltas_as_json(self) -> None:

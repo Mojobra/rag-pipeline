@@ -6,6 +6,7 @@ chunking and retrieval do not depend on parser-specific response types.
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from rag_pipeline.exceptions import TextExtractionError, UnsupportedDocumentType
 PathInput = str | Path
 
 TEXT_FILE_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".html", ".htm"})
+HTML_FILE_EXTENSIONS = frozenset({".html", ".htm"})
 PDF_FILE_EXTENSIONS = frozenset({".pdf"})
 WORD_FILE_EXTENSIONS = frozenset({".docx"})
 SUPPORTED_FILE_EXTENSIONS = (
@@ -26,14 +28,16 @@ SUPPORTED_FILE_EXTENSIONS = (
 def extract_documents(path: PathInput, *, encoding: str = "utf-8") -> list[Document]:
     """Read one supported file into LangChain documents with source metadata.
 
-    Text-like and DOCX inputs produce one document, while PDFs produce one per
-    page to preserve page-level citations. The function performs filesystem and
-    parser I/O. Unsupported formats use the ingestion exception hierarchy;
-    PDF/DOCX parser failures are wrapped, while plain-text I/O and decoding
-    errors propagate from ``Path.read_text``.
+    Text-like, HTML, and DOCX inputs produce one document, while PDFs produce
+    one per page for citations. HTML offsets refer to normalized visible text,
+    not raw markup positions. Filesystem and decoding errors propagate for text;
+    PDF/DOCX parser failures use the ingestion exception hierarchy.
     """
     file_path = Path(path).expanduser().resolve()
     suffix = file_path.suffix.lower()
+
+    if suffix in HTML_FILE_EXTENSIONS:
+        return [_extract_html_file(file_path, encoding=encoding)]
 
     if suffix in TEXT_FILE_EXTENSIONS:
         return [_extract_text_file(file_path, encoding=encoding)]
@@ -53,14 +57,137 @@ def extract_documents(path: PathInput, *, encoding: str = "utf-8") -> list[Docum
 def _extract_text_file(path: Path, *, encoding: str) -> Document:
     """Read a text-like file without interpreting its markup.
 
-    The caller supplies the decoding to use. Markdown and HTML therefore remain
-    raw text at this stage rather than being semantically cleaned. Filesystem and
-    decoding errors propagate to the caller.
+    The caller supplies the decoding to use. Plain text and Markdown remain
+    unchanged; filesystem and decoding errors propagate to the caller.
     """
     return Document(
         page_content=path.read_text(encoding=encoding),
         metadata=_build_metadata(path, extractor="text"),
     )
+
+
+def _extract_html_file(path: Path, *, encoding: str) -> Document:
+    """Keep visible HTML text while discarding markup and page chrome.
+
+    The parser preserves block and table-cell boundaries in normalized text.
+    Result offsets used by chunking and citations refer to that text, not to
+    byte positions in the HTML file. Reading and decoding can raise I/O errors.
+    """
+    parser = _VisibleHtmlParser()
+    parser.feed(path.read_text(encoding=encoding))
+    parser.close()
+    return Document(
+        page_content=parser.visible_text(),
+        metadata=_build_metadata(path, extractor="html.parser"),
+    )
+
+
+class _VisibleHtmlParser(HTMLParser):
+    """Extract readable policy text through Python's standard HTML parser.
+
+    The parser omits non-content elements and navigation chrome while
+    retaining heading, paragraph, list, and table boundaries. It does not
+    attempt CSS visibility analysis or visual PDF-style layout reconstruction.
+    """
+
+    _IGNORED_TAGS = frozenset(
+        {"head", "script", "style", "noscript", "nav", "template"}
+    )
+    _BLOCK_TAGS = frozenset(
+        {
+            "article",
+            "aside",
+            "blockquote",
+            "br",
+            "dd",
+            "div",
+            "dl",
+            "dt",
+            "footer",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "hr",
+            "li",
+            "main",
+            "ol",
+            "p",
+            "section",
+            "table",
+            "tr",
+            "ul",
+        }
+    )
+    _VOID_TAGS = frozenset(
+        {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._ignored_depth = 0
+        self._table_cell_count = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Track omitted subtrees and insert boundaries for visible blocks."""
+        if self._ignored_depth:
+            if tag not in self._VOID_TAGS:
+                self._ignored_depth += 1
+            return
+        if tag in self._IGNORED_TAGS:
+            self._ignored_depth = 1
+            return
+        if tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+        if tag == "tr":
+            self._table_cell_count = 0
+        elif tag in ("th", "td"):
+            if self._table_cell_count:
+                self._parts.append(" | ")
+            self._table_cell_count += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Process self-closing breaks without leaving ignored depth open."""
+        if not self._ignored_depth and tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        """Close omitted subtrees or terminate a visible block."""
+        if self._ignored_depth:
+            self._ignored_depth -= 1
+        elif tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        """Keep text nodes outside ignored elements for later normalization."""
+        if not self._ignored_depth:
+            self._parts.append(data)
+
+    def visible_text(self) -> str:
+        """Return non-empty lines with stable whitespace and decoded entities."""
+        return "\n".join(
+            normalized
+            for line in "".join(self._parts).splitlines()
+            if (normalized := " ".join(line.split()))
+        )
 
 
 def _extract_pdf(path: Path) -> list[Document]:

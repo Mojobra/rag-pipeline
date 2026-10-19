@@ -40,9 +40,9 @@ class ChunkingConfig:
 class StructureAwareChunkingConfig:
     """Settings for markup-aware recursive splitting in benchmark experiments.
 
-    Markdown and HTML documents use LangChain's language-specific separator
-    priorities; other formats fall back to the normal recursive policy. The
-    size and overlap limits keep output bounded and comparable.
+    Markdown and raw HTML use language-specific separator priorities. Cleaned
+    HTML and other formats use the normal recursive policy because their source
+    markup is no longer available. Size and overlap keep output bounded.
     """
 
     chunk_size: int = 1000
@@ -80,10 +80,9 @@ def chunk_documents_with_structure(
 ) -> list[Document]:
     """Split markup at structural boundaries before smaller text boundaries.
 
-    Markdown and HTML use LangChain's language-aware recursive separator lists,
-    while PDF, DOCX, plain text, and unknown metadata use the baseline policy.
-    The function performs no model or storage I/O and preserves exact character
-    offsets for every emitted chunk.
+    Markdown and raw HTML use LangChain's language-aware separator lists;
+    cleaned HTML and other formats use the baseline policy. The function
+    performs no model or storage I/O and preserves exact character offsets.
     """
     settings = config or StructureAwareChunkingConfig()
     return _split_documents(
@@ -174,8 +173,14 @@ def _structure_splitter(
     document: Document,
     config: StructureAwareChunkingConfig,
 ) -> tuple[RecursiveCharacterTextSplitter, str | None]:
-    """Select a markup-aware LangChain splitter from source extension metadata."""
+    """Use markup separators only while the extracted content still has markup."""
     extension = document.metadata.get("file_extension")
+    normalized_extension = extension.casefold() if isinstance(extension, str) else None
+    if (
+        normalized_extension in (".html", ".htm")
+        and document.metadata.get("extractor") == "html.parser"
+    ):
+        return _recursive_splitter(config), None
     language_by_extension = {
         ".md": Language.MARKDOWN,
         ".markdown": Language.MARKDOWN,
@@ -183,8 +188,8 @@ def _structure_splitter(
         ".htm": Language.HTML,
     }
     language = (
-        language_by_extension.get(extension.casefold())
-        if isinstance(extension, str)
+        language_by_extension.get(normalized_extension)
+        if normalized_extension is not None
         else None
     )
     if language is None:

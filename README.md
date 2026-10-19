@@ -278,7 +278,9 @@ branches and enforces an 80 percent floor. The
   metrics. It does not establish semantic faithfulness or real-world accuracy.
 - Benchmarks measure one local pass, not concurrent service throughput or
   statistically calibrated performance.
-- HTML remains raw text; scanned PDFs require OCR that is not implemented.
+- HTML extraction keeps readable text and table rows while omitting scripts,
+  styles, and navigation. CSS-dependent visibility and image text are not
+  interpreted; scanned PDFs still require OCR that is not implemented.
 - Metadata filters are not authorization. There is no authentication, RBAC,
   tenant isolation, hosted-model integration, HTTP service, or deployment setup.
   Citations currently expose local source paths.
@@ -287,8 +289,9 @@ branches and enforces an 80 percent floor. The
 
 ## Roadmap
 
-The local pipeline, retrieval-quality features, evaluation, and benchmarking
-are implemented. The next planned work is a FastAPI service, followed by
+The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
+are in progress. See the [quality plan](docs/RETRIEVAL_QUALITY_PLAN.md) before
+Phase 4. Later work includes a FastAPI service, followed by
 authentication, logging, monitoring, containerization, and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
