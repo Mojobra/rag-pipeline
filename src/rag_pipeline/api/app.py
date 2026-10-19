@@ -12,10 +12,12 @@ from logging import Logger
 from typing import cast
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from rag_pipeline import __version__
 from rag_pipeline.api.auth import load_bearer_token_digest, require_bearer_token
+from rag_pipeline.api.monitoring import ApiMetrics, RequestMetricsMiddleware
 from rag_pipeline.api.request_logging import (
     RequestLoggingMiddleware,
     default_request_logger,
@@ -70,12 +72,14 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+    metrics = ApiMetrics()
     application.add_middleware(
         RequestLoggingMiddleware,
         logger=request_logger
         if request_logger is not None
         else default_request_logger(),
     )
+    application.add_middleware(RequestMetricsMiddleware, metrics=metrics)
 
     @application.exception_handler(RagPipelineError)
     async def handle_pipeline_error(
@@ -98,6 +102,19 @@ def create_app(
         """Report process liveness without loading a model or querying Qdrant."""
         return HealthResponse()
 
+    @application.get(
+        "/metrics",
+        response_class=PlainTextResponse,
+        dependencies=[Depends(require_bearer_token)],
+    )
+    def scrape_metrics() -> Response:
+        """Expose process-local aggregates to an authorized loopback scraper."""
+        return Response(
+            content=generate_latest(metrics.registry),
+            media_type=CONTENT_TYPE_LATEST,
+            headers={"Cache-Control": "no-store"},
+        )
+
     @application.post(
         "/v1/retrieve",
         response_model=RetrievalResponse,
@@ -111,9 +128,11 @@ def create_app(
             top_k=body.top_k,
             score_threshold=body.score_threshold,
         )
-        return RetrievalResponse(
+        response = RetrievalResponse(
             results=[RetrievalHit.from_result(result) for result in results]
         )
+        metrics.record_retrieval(has_evidence=bool(results))
+        return response
 
     @application.post(
         "/v1/answer",
@@ -128,7 +147,11 @@ def create_app(
             top_k=body.top_k,
             score_threshold=body.score_threshold,
         )
-        return AnswerResponse.from_outcome(outcome)
+        response = AnswerResponse.from_outcome(outcome)
+        metrics.record_answer(
+            generated=response.generated, cited=bool(response.citations)
+        )
+        return response
 
     return application
 

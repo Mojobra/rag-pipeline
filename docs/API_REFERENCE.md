@@ -1,12 +1,11 @@
 # Local HTTP API
 
-Tasks 19-21 add a read-only FastAPI adapter with shared-token authentication
-and structured request logging over the existing local retrieval and answer
-workflows. It does not ingest documents, host remote models, identify individual
-users, enforce document
-permissions, or make embedded Qdrant a multi-user database. Index
-documents with the CLI first; stop the API before modifying the same local
-Qdrant store with the CLI.
+Tasks 19-22 add a read-only FastAPI adapter with shared-token authentication,
+structured request logging, and process-local monitoring over the existing
+retrieval and answer workflows. It does not ingest documents, host remote
+models, identify individual users, enforce document permissions, or make
+embedded Qdrant a multi-user database. Index documents with the CLI first;
+stop the API before modifying the same local Qdrant store with the CLI.
 
 ## Start Locally
 
@@ -64,11 +63,42 @@ Use `--no-access-log` as shown above: Uvicorn's separate access log can include
 raw URLs and query strings. Uvicorn error logs and third-party libraries have
 separate logging behavior; review their configuration before processing sensitive
 data. These events support local diagnosis, not tamper-resistant audit trails,
-per-user attribution, centralized retention, or monitoring metrics.
+per-user attribution, or centralized retention. Aggregated monitoring is
+exposed separately at `/metrics`.
+
+## Monitoring
+
+`GET /metrics` requires the same bearer token as the query routes and returns
+Prometheus text exposition. For example, from a second PowerShell terminal:
+
+```powershell
+$token = '<same token configured on the server>'
+Invoke-WebRequest -Uri http://127.0.0.1:8000/metrics `
+  -Headers @{ Authorization = "Bearer $token" } | Select-Object -ExpandProperty Content
+```
+
+The per-process registry exposes these series:
+
+| Metric | Meaning |
+| --- | --- |
+| `rag_api_http_requests_total` | Completed HTTP requests by method, route template, and status code. |
+| `rag_api_http_request_duration_seconds` | Histogram of full HTTP request duration by method and route template. |
+| `rag_api_http_in_flight_requests` | Requests currently being processed. |
+| `rag_api_retrieval_outcomes_total` | Successful retrievals with `empty` or `nonempty` selected evidence. |
+| `rag_api_answer_outcomes_total` | Completed answers: `no_evidence` (no model call), `cited`, or model `abstained`. |
+
+`/metrics` requests themselves are excluded from these counters and timings;
+the normal request log still records them. Unknown paths use `<unmatched>` and
+uncommon HTTP methods use `OTHER`, preventing caller-controlled labels. No
+query text, credentials, document paths, model identifiers, or request IDs are
+metric labels. Values reset on process restart. There is no multi-worker
+aggregation, remote collector, alerting, dashboard, or guarantee that a cited
+answer is correct. Keep the service on loopback; the bearer token is sent over
+plain HTTP in this local setup.
 
 ## Endpoints
 
-`POST /v1/retrieve` and `POST /v1/answer` require
+`POST /v1/retrieve`, `POST /v1/answer`, and `GET /metrics` require
 `Authorization: Bearer <token>`. Copy the generated value securely into a
 second terminal or use the OpenAPI explorer's **Authorize** control. The
 OpenAPI document and `/health` remain public and reveal no indexed text.

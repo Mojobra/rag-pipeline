@@ -16,6 +16,9 @@ Versioning while the package remains in initial development.
   rate limiting remain future work.
 - Structured, content-free HTTP request events with server-generated correlation
   IDs and offline privacy/error-path tests.
+- A bearer-protected Prometheus metrics endpoint with bounded request, latency,
+  in-flight, retrieval, and answer-outcome series. Metrics are process-local;
+  collection and alerting remain deployment work.
 
 ### Changed
 

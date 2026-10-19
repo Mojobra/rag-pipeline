@@ -33,6 +33,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
 | HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Require a shared environment-supplied secret and compare fixed-size digests without adding an identity provider. |
 | HTTP request logging | Starlette ASGI middleware and Python `logging`/`json` | Emit bounded JSON events to stderr and correlate handled responses without storing request content. |
+| HTTP monitoring | Prometheus Python client | Expose bearer-protected process-local request and RAG outcome aggregates with bounded labels. |
 | HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
 | Dense embeddings | LangChain Hugging Face + Sentence Transformers | Converts chunks and questions into normalized dense vectors for semantic search. |
 | Sparse embeddings | FastEmbed through LangChain Qdrant | Produces BM25 sparse vectors for optional lexical retrieval. |
@@ -74,6 +75,7 @@ manager, which can differ from Python import names.
 | `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
 | `fastapi` | Direct runtime | Defines the local read-only HTTP app, bearer security scheme, OpenAPI schema, routes, and exception mapping. |
 | `uvicorn` | Direct runtime | Runs the ASGI app on a local listening socket. |
+| `prometheus-client` | Direct runtime | Maintains an app-owned registry of HTTP and RAG outcome counters, a latency histogram, and an in-flight gauge; renders `/metrics`. |
 | `starlette` | Transitive | Provides FastAPI's ASGI request/response and test-client infrastructure. |
 | `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
 | `langchain-huggingface` | Direct runtime | Provides `HuggingFaceEmbeddings` for dense vectors and `HuggingFacePipeline` for local answer generation. |
@@ -130,6 +132,7 @@ reflects `uv.lock` as verified on the date at the top of this document.
 | `langchain-qdrant` | `>=1.1,<2.0` | 1.1.0 | Connects LangChain retrieval contracts to Qdrant and exposes FastEmbed sparse embeddings. |
 | `langchain-text-splitters` | `>=1.0,<2.0` | 1.1.2 | Supplies recursive character and language-aware splitters. |
 | `pydantic` | `>=2.0,<3.0` | 2.13.4 | Defines and validates project-owned HTTP request and response models. |
+| `prometheus-client` | `>=0.20,<1.0` | 0.26.0 | Exposes process-local, bearer-protected operational metrics without custom exposition code. |
 | `qdrant-client` | `>=1.18,<2.0` | 1.18.0 | Runs the embedded Qdrant database and its query/filter API. |
 | `sentence-transformers` | `>=5.2,<6.0` | 5.6.0 | Provides the dense embedding backend and cross-encoder reranker. |
 | `sentencepiece` | `>=0.2,<1.0` | 0.2.2 | Supports tokenization for the default T5-family generation model. |
@@ -189,7 +192,7 @@ flowchart LR
 | Package | Ownership |
 | --- | --- |
 | `rag_pipeline.cli` | Parses terminal input, maps arguments to typed configuration, invokes services, and renders output. |
-| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, emits sanitized request events, and serializes source-cited JSON responses. |
+| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, emits sanitized request events and bounded metrics, and serializes source-cited JSON responses. |
 | `rag_pipeline.application` | Coordinates transport-neutral indexing, retrieval, and answer workflows. |
 | `rag_pipeline.ingestion` | Discovers files, extracts text, creates chunks, and runs chunking experiments. |
 | `rag_pipeline.infrastructure` | Owns dense/sparse model adapters and Qdrant persistence. |
@@ -225,7 +228,20 @@ for correlation. It neither trusts inbound IDs nor records bodies, headers,
 query strings, raw paths, document text, or source metadata. The documented
 Uvicorn command uses `--no-access-log` because its separate access logger can
 record full request URLs. Error logs from Uvicorn or dependencies are separate;
-this is not an audit trail or a monitoring metrics system.
+request logs are not an audit trail. Monitoring metrics use a separate in-memory
+registry.
+
+### Local HTTP Monitoring
+
+An app-owned Prometheus registry tracks HTTP request totals by method, route
+template, and status; request durations in seconds by method and route; and an
+unlabeled in-flight gauge. Completed retrieval and answer workflows also count
+fixed outcome categories. `GET /metrics` uses the shared bearer guard and is
+excluded from request metrics to avoid self-scrape skew. Unknown paths and
+uncommon methods collapse to fixed labels; no questions, tokens, source paths,
+or model identifiers become labels. The registry resets on restart and is not
+aggregated across workers. These are operational indicators, not offline answer
+quality metrics, tracing, alerting, or an identity-aware audit system.
 
 ## RAG Execution Flow
 
