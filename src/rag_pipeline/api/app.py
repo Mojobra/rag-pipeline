@@ -1,7 +1,7 @@
-"""Expose read-only local retrieval and grounded answers over HTTP.
+"""Expose authenticated local retrieval and grounded answers over HTTP.
 
-No authentication or document write endpoint is present in Task 19. Run this
-adapter on loopback only until a later security task adds access controls.
+The adapter has no authorization or document write endpoints. A shared bearer
+credential protects query routes, but the service must remain on loopback.
 """
 
 from __future__ import annotations
@@ -10,10 +10,11 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import cast
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from rag_pipeline import __version__
+from rag_pipeline.api.auth import load_bearer_token_digest, require_bearer_token
 from rag_pipeline.api.runtime import LocalApiRuntime, QueryRuntime
 from rag_pipeline.api.schemas import (
     AnswerRequest,
@@ -38,13 +39,14 @@ def create_app(
 ) -> FastAPI:
     """Build an HTTP adapter with a replaceable, lifespan-owned query runtime.
 
-    Importing the app never loads models or opens Qdrant. The real runtime reads
-    server settings at startup and initializes providers on the first query.
-    Tests inject an offline double and verify shutdown closes it.
+    Importing the app never loads models or opens Qdrant. Startup requires a
+    configured bearer secret; the real runtime initializes providers on the
+    first authenticated query. Tests inject an offline runtime double.
     """
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        application.state.bearer_token_digest = load_bearer_token_digest()
         runtime = (
             LocalApiRuntime(load_api_settings())
             if runtime_factory is None
@@ -83,7 +85,11 @@ def create_app(
         """Report process liveness without loading a model or querying Qdrant."""
         return HealthResponse()
 
-    @application.post("/v1/retrieve", response_model=RetrievalResponse)
+    @application.post(
+        "/v1/retrieve",
+        response_model=RetrievalResponse,
+        dependencies=[Depends(require_bearer_token)],
+    )
     def retrieve(body: QueryRequest, request: Request) -> RetrievalResponse:
         """Search the configured collection and return ordered source evidence."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)
@@ -96,7 +102,11 @@ def create_app(
             results=[RetrievalHit.from_result(result) for result in results]
         )
 
-    @application.post("/v1/answer", response_model=AnswerResponse)
+    @application.post(
+        "/v1/answer",
+        response_model=AnswerResponse,
+        dependencies=[Depends(require_bearer_token)],
+    )
     def answer(body: AnswerRequest, request: Request) -> AnswerResponse:
         """Return a local grounded answer with deterministic source citations."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)

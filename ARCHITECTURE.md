@@ -15,7 +15,7 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Local read-only FastAPI adapter
+14. Local read-only FastAPI adapter with shared bearer authentication
 15. Monitoring & Observability (planned)
 16. Frontend/UI (planned)
 17. Deployment Infrastructure (planned)
@@ -48,8 +48,8 @@ directory or a deeply nested clean-architecture hierarchy:
 
 - `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
   rendering.
-- `rag_pipeline.api` owns bounded HTTP schemas, loopback-oriented service
-  configuration, provider lifetime, and HTTP error mapping.
+- `rag_pipeline.api` owns bearer authentication, bounded HTTP schemas,
+  loopback-oriented service configuration, provider lifetime, and HTTP errors.
 - `rag_pipeline.application` owns transport-neutral indexing, retrieval, and
   answer use cases that coordinate multiple pipeline stages.
 - `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
@@ -109,14 +109,18 @@ function.
 
 The application layer is intentionally small. It coordinates existing domain
 services rather than replacing their validation or algorithms. The API reuses
-these contracts without importing CLI handlers. HTTP request/response schemas
-and error mapping live in `rag_pipeline.api`; authentication remains planned.
+these contracts without importing CLI handlers. HTTP authentication,
+request/response schemas, and error mapping live in `rag_pipeline.api`.
 
 ## Current HTTP Boundary
 
 - `GET /health` checks process liveness only. `POST /v1/retrieve` and
   `POST /v1/answer` read an existing local collection; no upload or indexing
-  route is exposed before access controls exist.
+  route is exposed.
+- Startup requires a 32-256-character URL-safe `RAG_API_BEARER_TOKEN`. Only its
+  SHA-256 digest stays in app state. FastAPI's bearer dependency rejects
+  unauthenticated query requests before model or storage work; `/health` and
+  OpenAPI documentation remain public. A token change requires restart.
 - The API reads model and collection identity from server-owned `RAG_API_*`
   environment variables at startup, never from per-request file paths.
 - One process lazily opens embedded Qdrant and the embedding model on first
@@ -126,9 +130,10 @@ and error mapping live in `rag_pipeline.api`; authentication remains planned.
 - Pydantic bounds query length, result count, and score thresholds. Known
   collection errors receive stable HTTP statuses; provider details are hidden
   behind a generic unavailable response.
-- The service has no authentication, authorization, rate limiting, or
-  permission-aware retrieval. It must stay on loopback; source paths and
-  document text in responses may be sensitive. See
+- The shared token authenticates possession, not a person or document scope.
+  There is no user identity, authorization, rate limiting, or permission-aware
+  retrieval. It must stay on loopback; source paths and document text in
+  responses may be sensitive. See
   [the API reference](docs/API_REFERENCE.md).
 
 ---
@@ -390,7 +395,7 @@ production tasks.
 
 ## Business Features To Add Later
 
-- User authentication
+- Per-user authentication and identity-provider integration
 - Role-based access control
 - Multi-tenancy
 - Audit logging

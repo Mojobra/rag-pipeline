@@ -14,8 +14,8 @@ locally, from document extraction and indexing to retrieval, generation, and
 evaluation.
 
 It is intended for developers and AI engineers who want to inspect, test, and
-compare RAG components on a reproducible baseline. The HTTP adapter is local
-and unauthenticated, not a hosted production service.
+compare RAG components on a reproducible baseline. The HTTP adapter requires a
+local bearer token; it is not a hosted production service.
 
 ## Features
 
@@ -32,8 +32,8 @@ and unauthenticated, not a hosted production service.
   latency reports, regression gates, and paired prompt-evidence coverage.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
-- **Local HTTP API:** read-only retrieval and cited answers from an existing
-  collection, with bounded JSON requests and no per-request model loading.
+- **Local HTTP API:** bearer-protected retrieval and cited answers from an
+  existing collection, with bounded JSON requests and no per-request model loading.
 
 ## Quick Start
 
@@ -59,13 +59,17 @@ To query that collection over HTTP instead, start the local API in a second
 terminal:
 
 ```powershell
+$token = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$token
+$env:RAG_API_BEARER_TOKEN = $token
 $env:RAG_API_COLLECTION_NAME = 'asteria_demo'
 uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
 ```
 
 Open `http://127.0.0.1:8000/docs` or see the [API reference](docs/API_REFERENCE.md)
-for request examples and configuration. Do not bind this unauthenticated service
-to a public network.
+for an authenticated request example and configuration. Keep the generated token
+private and provide it to your local client; a new token requires a server
+restart. Do not bind the service to a public network.
 
 ## Requirements
 
@@ -75,10 +79,10 @@ to a public network.
 - Network access for initial dependency installation and uncached model
   downloads; disk space for dependencies, model caches, and the local index.
 
-The defaults run on CPU. A GPU, separate Qdrant server, Docker, and API keys are
-not required. After dependencies and model artifacts are cached, inference runs
-locally. The HTTP command uses bundled Uvicorn; no separate server install is
-needed.
+The defaults run on CPU. A GPU, separate Qdrant server, Docker, and hosted-model
+API keys are not required. After dependencies and model artifacts are cached,
+inference runs locally. HTTP queries require a locally generated bearer token.
+The HTTP command uses bundled Uvicorn; no separate server install is needed.
 
 ## Installation
 
@@ -197,8 +201,10 @@ comparisons.
 
 ## Configuration
 
-Configuration uses CLI flags and typed Python configuration objects. The current
-pipeline does **not** load model settings or API keys from `.env`; no
+Configuration uses CLI flags and typed Python configuration objects. The HTTP
+adapter reads `RAG_API_*` environment variables at startup, including the
+required `RAG_API_BEARER_TOKEN`; it does not load `.env` automatically. The
+pipeline does **not** load hosted-model settings or API keys from `.env`; no
 `.env.example` or active OpenAI, Gemini, or Anthropic integration is included.
 
 | Setting | Default | Practical effect |
@@ -230,6 +236,7 @@ storage locations and I/O behavior.
 .
 |-- src/rag_pipeline/
 |   |-- cli/                 # Argument parsing and terminal output
+|   |-- api/                 # HTTP authentication, schemas, and routes
 |   |-- application/         # Transport-neutral workflow orchestration
 |   |-- ingestion/           # Discovery, extraction, and chunking
 |   |-- infrastructure/      # Model adapters and Qdrant persistence
@@ -240,6 +247,7 @@ storage locations and I/O behavior.
 |-- tests/                   # Offline unit and integration tests
 |-- evaluation/datasets/     # Versioned synthetic corpora and labels
 |-- docs/CLI_REFERENCE.md    # Detailed CLI workflows and contracts
+|-- docs/API_REFERENCE.md    # Local HTTP setup and endpoint contract
 |-- .github/workflows/ci.yml # Automated quality checks
 |-- pyproject.toml           # Package metadata and dependency constraints
 `-- uv.lock                  # Reproducible dependency graph
@@ -297,9 +305,10 @@ branches and enforces an 80 percent floor. The
 - HTML extraction keeps readable text and table rows while omitting scripts,
   styles, and navigation. CSS-dependent visibility and image text are not
   interpreted; scanned PDFs still require OCR that is not implemented.
-- Metadata filters are not authorization. The HTTP service has no authentication,
-  RBAC, tenant isolation, hosted-model integration, upload endpoint, or deployment
-  setup. Citations currently expose local source paths.
+- Metadata filters are not authorization. The HTTP service has one shared bearer
+  credential but no user identities, RBAC, tenant isolation, rate limiting,
+  hosted-model integration, upload endpoint, or deployment setup. Citations
+  currently expose local source paths.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
 
@@ -307,8 +316,9 @@ branches and enforces an 80 percent floor. The
 
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
-for the six follow-ups. Phase 4 starts with the local FastAPI service; later
-tasks add authentication, logging, monitoring, containerization, and deployment CI/CD.
+for the six follow-ups. Phase 4 now includes the local FastAPI service and its
+shared bearer guard; later tasks add logging, monitoring, containerization,
+and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 
