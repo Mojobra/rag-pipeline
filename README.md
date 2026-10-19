@@ -34,7 +34,7 @@ local bearer token; it is not a hosted production service.
   structure-aware and semantic strategies in isolated benchmarks.
 - **Local HTTP API:** bearer-protected retrieval and cited answers from an
   existing collection, with bounded JSON requests, request IDs, structured
-  operational logs, and no per-request model loading.
+  operational logs, protected Prometheus metrics, and no per-request model loading.
 
 ## Quick Start
 
@@ -68,11 +68,11 @@ uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 Open `http://127.0.0.1:8000/docs` or see the [API reference](docs/API_REFERENCE.md)
-for an authenticated request example and configuration. Keep the generated token
-private and provide it to your local client; a new token requires a server
-restart. The API writes one sanitized JSON event per request to stderr and
-returns `X-Request-ID` for correlation; `--no-access-log` prevents Uvicorn's
-raw URL access logs. Do not bind the service to a public network.
+for authenticated query and `/metrics` examples. Keep the generated token private
+and provide it to your local client; a new token requires a server restart. The
+API writes one sanitized JSON event per request to stderr and returns
+`X-Request-ID` for correlation; `--no-access-log` prevents Uvicorn's raw URL
+access logs. Do not bind the service to a public network.
 
 ## Requirements
 
@@ -239,7 +239,7 @@ storage locations and I/O behavior.
 .
 |-- src/rag_pipeline/
 |   |-- cli/                 # Argument parsing and terminal output
-|   |-- api/                 # HTTP authentication, schemas, and routes
+|   |-- api/                 # HTTP auth, routes, logging, and monitoring
 |   |-- application/         # Transport-neutral workflow orchestration
 |   |-- ingestion/           # Discovery, extraction, and chunking
 |   |-- infrastructure/      # Model adapters and Qdrant persistence
@@ -265,6 +265,7 @@ package boundaries and the contracts enforced between stages.
 | Area | Technology |
 | --- | --- |
 | Language and CLI | Python 3.11+, standard-library `argparse` |
+| HTTP API and monitoring | FastAPI, Uvicorn, `prometheus-client` |
 | RAG interfaces and composition | LangChain and its Hugging Face/Qdrant integrations |
 | Dense embeddings and reranking | Sentence Transformers / PyTorch |
 | Local generation | Hugging Face Transformers |
@@ -320,8 +321,8 @@ branches and enforces an 80 percent floor. The
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
 for the six follow-ups. Phase 4 now includes the local FastAPI service, shared
-bearer guard, and structured request logging; later tasks add monitoring,
-containerization, and deployment CI/CD.
+bearer guard, structured request logging, and process-local monitoring metrics;
+later tasks add containerization and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 

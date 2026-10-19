@@ -16,7 +16,7 @@
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
 14. Local read-only FastAPI adapter with shared bearer authentication and request logging
-15. Monitoring & Observability beyond request events (planned)
+15. Process-local API and RAG outcome monitoring
 16. Frontend/UI (planned)
 17. Deployment Infrastructure (planned)
 
@@ -50,7 +50,7 @@ directory or a deeply nested clean-architecture hierarchy:
   rendering.
 - `rag_pipeline.api` owns bearer authentication, bounded HTTP schemas,
   loopback-oriented service configuration, provider lifetime, HTTP errors,
-  and sanitized request events.
+  sanitized request events, and bounded operational metrics.
 - `rag_pipeline.application` owns transport-neutral indexing, retrieval, and
   answer use cases that coordinate multiple pipeline stages.
 - `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
@@ -135,7 +135,14 @@ request/response schemas, and error mapping live in `rag_pipeline.api`.
   server-generated `X-Request-ID` to handled responses. Events contain route
   templates, statuses, and duration, but never raw URLs, bodies, credentials,
   or source text. Documented Uvicorn startup disables its separate URL-bearing
-  access log. This is operational logging, not audit logging or metrics.
+  access log. This is operational logging, not audit logging.
+- A second ASGI middleware records request count, duration, and in-flight load
+  in an app-owned Prometheus registry. Route templates and fixed outcome labels
+  bound cardinality; the protected `/metrics` scrape is excluded from counting.
+  Successful query handlers also count empty/nonempty retrieval and no-evidence,
+  cited, or model-abstained answers. These aggregates cannot establish factual
+  answer quality, per-user usage, or document-level access. One process owns
+  one registry; multi-worker aggregation and alerting are not implemented.
 - The shared token authenticates possession, not a person or document scope.
   There is no user identity, authorization, rate limiting, or permission-aware
   retrieval. It must stay on loopback; source paths and document text in
