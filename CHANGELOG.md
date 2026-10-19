@@ -3,6 +3,15 @@
 Notable project milestones are recorded here. Versions follow Semantic
 Versioning while the package remains in initial development.
 
+## Unreleased
+
+### Added
+
+- Local read-only FastAPI routes for health, ranked retrieval, and grounded
+  cited answers over an existing CLI-indexed collection.
+- Bounded HTTP schemas and offline API lifecycle/error tests. Authentication,
+  uploads, and network deployment remain future tasks.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added

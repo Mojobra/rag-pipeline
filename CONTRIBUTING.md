@@ -67,6 +67,9 @@ depend on an existing local Qdrant collection.
 ## Change Design
 
 - Keep CLI parsing and terminal rendering in `rag_pipeline.cli`.
+- Keep HTTP schemas, settings, lifecycle, and error mapping in
+  `rag_pipeline.api`; reuse application workflows rather than importing CLI
+  command handlers into API routes.
 - Put transport-neutral workflow orchestration in `rag_pipeline.application`.
 - Put document discovery, extraction, and chunking in `rag_pipeline.ingestion`;
   search and reranking in `rag_pipeline.retrieval`; prompts, citations, and model

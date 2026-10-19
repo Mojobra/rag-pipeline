@@ -15,8 +15,8 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Monitoring & Observability (planned)
-15. API Layer (planned)
+14. Local read-only FastAPI adapter
+15. Monitoring & Observability (planned)
 16. Frontend/UI (planned)
 17. Deployment Infrastructure (planned)
 
@@ -48,8 +48,10 @@ directory or a deeply nested clean-architecture hierarchy:
 
 - `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
   rendering.
-- `rag_pipeline.application` owns transport-neutral indexing and retrieval use
-  cases that coordinate multiple pipeline stages.
+- `rag_pipeline.api` owns bounded HTTP schemas, loopback-oriented service
+  configuration, provider lifetime, and HTTP error mapping.
+- `rag_pipeline.application` owns transport-neutral indexing, retrieval, and
+  answer use cases that coordinate multiple pipeline stages.
 - `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
   recursive and experimental chunking policies, and structural diagnostics.
 - `rag_pipeline.retrieval` owns first-stage search and optional cross-encoder
@@ -94,8 +96,8 @@ function.
 - CLI configuration builders translate dynamic argparse values into validated
   application configuration objects before model or storage side effects.
 - Command handlers are grouped by document, indexing, query, evaluation, and
-  benchmark responsibilities. They delegate reusable indexing and retrieval
-  lifecycles to `rag_pipeline.application`.
+  benchmark responsibilities. They delegate reusable indexing, retrieval,
+  and no-evidence answer behavior to `rag_pipeline.application`.
 - Application use cases own cross-stage invariants, provider lifecycle, and
   orchestration. They accept explicit dependencies where useful for deterministic
   tests and do not import argparse or terminal output helpers.
@@ -106,9 +108,28 @@ function.
   orchestration and can be tested without provider calls.
 
 The application layer is intentionally small. It coordinates existing domain
-services rather than replacing their validation or algorithms. A future API can
-reuse these use cases without importing CLI handlers; API-specific request,
-response, authentication, and error-mapping concerns remain future work.
+services rather than replacing their validation or algorithms. The API reuses
+these contracts without importing CLI handlers. HTTP request/response schemas
+and error mapping live in `rag_pipeline.api`; authentication remains planned.
+
+## Current HTTP Boundary
+
+- `GET /health` checks process liveness only. `POST /v1/retrieve` and
+  `POST /v1/answer` read an existing local collection; no upload or indexing
+  route is exposed before access controls exist.
+- The API reads model and collection identity from server-owned `RAG_API_*`
+  environment variables at startup, never from per-request file paths.
+- One process lazily opens embedded Qdrant and the embedding model on first
+  query, then loads generation only when answer evidence exists. A lifespan
+  hook closes the store at shutdown; a lock serializes queries against these
+  shared local resources.
+- Pydantic bounds query length, result count, and score thresholds. Known
+  collection errors receive stable HTTP statuses; provider details are hidden
+  behind a generic unavailable response.
+- The service has no authentication, authorization, rate limiting, or
+  permission-aware retrieval. It must stay on loopback; source paths and
+  document text in responses may be sensitive. See
+  [the API reference](docs/API_REFERENCE.md).
 
 ---
 
