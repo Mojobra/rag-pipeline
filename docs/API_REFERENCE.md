@@ -1,0 +1,101 @@
+# Local HTTP API
+
+Task 19 adds a read-only FastAPI adapter over the existing local retrieval and
+answer workflows. It does not ingest documents, host remote models, enforce
+identity or permissions, or make embedded Qdrant a multi-user database. Index
+documents with the CLI first; stop the API before modifying the same local
+Qdrant store with the CLI.
+
+## Start Locally
+
+From the repository root, after `uv sync --locked` and indexing a collection:
+
+```powershell
+$env:RAG_API_COLLECTION_NAME = 'asteria_demo'
+uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
+```
+
+The example collection name matches the README Quick Start. Without that
+variable, the API uses the CLI's default `rag_documents` collection. Visit
+`http://127.0.0.1:8000/docs` for the generated OpenAPI explorer. Bind only to
+loopback: there is no authentication or rate limiting yet. Use one worker; the
+local models and embedded Qdrant session are shared within one process, and
+queries are serialized. The first query may download or initialize a model.
+
+## Server Configuration
+
+These variables are read when the ASGI application starts. They do not load a
+`.env` file automatically. Match the indexed collection's embedding and search
+settings; incompatible settings fail rather than silently mixing vectors.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `RAG_API_STORE_PATH` | `.rag_data/qdrant` | Local embedded-Qdrant directory; use the same path as CLI `--store-path`. |
+| `RAG_API_COLLECTION_NAME` | `rag_documents` | Existing collection; use the CLI `--collection-name` value. |
+| `RAG_API_SEARCH_MODE` | `dense` | `dense` or `hybrid`; must match the collection schema. |
+| `RAG_API_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Dense query model; must match the model used to index. |
+| `RAG_API_EMBEDDING_REVISION` | unset | Optional matching Hugging Face model revision. |
+| `RAG_API_SPARSE_MODEL` | `Qdrant/bm25` | Sparse query model, used only in `hybrid` mode. |
+| `RAG_API_GENERATION_MODEL` | `google/flan-t5-small` | Local text-to-text answer model, loaded only for an answer with evidence. |
+| `RAG_API_GENERATION_REVISION` | unset | Optional generation model revision. |
+
+The API currently uses CPU defaults, no reranker, and the same 1,200-character
+generation context policy as the CLI default. Other CLI tuning flags are not
+HTTP configuration in this first adapter.
+
+## Endpoints
+
+### `GET /health`
+
+Returns `{"status":"ok"}` without opening Qdrant or loading a model. It is a
+process-liveness check, not proof that a collection exists or a model can run.
+
+### `POST /v1/retrieve`
+
+Example request:
+
+```json
+{"query":"When must expense claims be submitted?","top_k":4}
+```
+
+Returns `results` in ranked order, with score, score kind, source text, and
+selected provenance fields (`source`, one-based `page_number`, `chunk_index`,
+`chunk_id`). An empty list means no evidence passed retrieval. Raw Qdrant
+metadata is not returned. `score_threshold` defaults to `null` (disabled).
+
+### `POST /v1/answer`
+
+Uses the same request fields. Its `score_threshold` defaults to `0.2`, matching
+the CLI answer command; send JSON `null` explicitly to disable the gate. The
+response includes `answer`, `generated`, model/prompt identifiers when a model
+was initialized, and structured `citations`. No qualifying evidence returns
+the deterministic abstention with `generated=false` and no citations, without
+loading the generation model. A model may also abstain after invocation; that
+has `generated=true` and no citations. Citations identify supplied evidence,
+not claim-level correctness.
+
+Both POST routes require a nonblank query of at most 2,000 characters, allow
+`top_k` from 1 to 20, and accept a finite score threshold from -1 to 1 or
+`null`. Unknown request fields are rejected, so clients cannot choose server
+paths or arbitrary model names per request. For example, in a second PowerShell
+terminal:
+
+```powershell
+$body = @{ query = 'When must expense claims be submitted?' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/answer `
+  -ContentType 'application/json' -Body $body
+```
+
+## Failures And Limits
+
+- `422`: invalid request fields or query input.
+- `404`: collection not indexed.
+- `409`: collection and configured model/search settings are incompatible.
+- `503`: local provider or storage unavailable, with provider details hidden.
+- `500`: unexpected server failure.
+
+Responses can include local source paths and document text. Keep this service
+on a trusted machine and do not expose it to a network before Task 20 adds
+authentication and later permission-aware retrieval. There is no upload,
+authorization, CORS policy, distributed worker, streaming, or remote-Qdrant
+support in this task.

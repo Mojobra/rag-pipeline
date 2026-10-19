@@ -43,7 +43,7 @@ original roadmap task numbers below remain unchanged.
 
 ## Phase 4: Production
 
-Task 19 - FastAPI service
+Task 19 - FastAPI service (local read-only API implemented)
 Task 20 - Authentication
 Task 21 - Logging
 Task 22 - Monitoring

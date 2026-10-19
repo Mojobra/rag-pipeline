@@ -1,7 +1,8 @@
 # RAG Pipeline
 
-A local Python CLI that turns business documents into searchable evidence and
-source-cited answers using LangChain, Hugging Face models, and Qdrant.
+A local Python CLI and read-only HTTP API that turn business documents into
+searchable evidence and source-cited answers using LangChain, Hugging Face
+models, and Qdrant.
 
 [![CI](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml)
 
@@ -13,8 +14,8 @@ locally, from document extraction and indexing to retrieval, generation, and
 evaluation.
 
 It is intended for developers and AI engineers who want to inspect, test, and
-compare RAG components on a reproducible baseline. The current interface is a
-CLI, not a hosted application or production service.
+compare RAG components on a reproducible baseline. The HTTP adapter is local
+and unauthenticated, not a hosted production service.
 
 ## Features
 
@@ -31,6 +32,8 @@ CLI, not a hosted application or production service.
   latency reports, regression gates, and paired prompt-evidence coverage.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
+- **Local HTTP API:** read-only retrieval and cited answers from an existing
+  collection, with bounded JSON requests and no per-request model loading.
 
 ## Quick Start
 
@@ -52,6 +55,18 @@ Answers include a `Sources` section identifying the evidence used. The small
 default model is a functional baseline, not a guarantee of answer quality. Use
 `retrieve` to inspect evidence independently of generation.
 
+To query that collection over HTTP instead, start the local API in a second
+terminal:
+
+```powershell
+$env:RAG_API_COLLECTION_NAME = 'asteria_demo'
+uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/docs` or see the [API reference](docs/API_REFERENCE.md)
+for request examples and configuration. Do not bind this unauthenticated service
+to a public network.
+
 ## Requirements
 
 - Python **3.11 or newer**; CI currently runs Python 3.11.
@@ -62,7 +77,8 @@ default model is a functional baseline, not a guarantee of answer quality. Use
 
 The defaults run on CPU. A GPU, separate Qdrant server, Docker, and API keys are
 not required. After dependencies and model artifacts are cached, inference runs
-locally.
+locally. The HTTP command uses bundled Uvicorn; no separate server install is
+needed.
 
 ## Installation
 
@@ -281,9 +297,9 @@ branches and enforces an 80 percent floor. The
 - HTML extraction keeps readable text and table rows while omitting scripts,
   styles, and navigation. CSS-dependent visibility and image text are not
   interpreted; scanned PDFs still require OCR that is not implemented.
-- Metadata filters are not authorization. There is no authentication, RBAC,
-  tenant isolation, hosted-model integration, HTTP service, or deployment setup.
-  Citations currently expose local source paths.
+- Metadata filters are not authorization. The HTTP service has no authentication,
+  RBAC, tenant isolation, hosted-model integration, upload endpoint, or deployment
+  setup. Citations currently expose local source paths.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
 
@@ -291,8 +307,8 @@ branches and enforces an 80 percent floor. The
 
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
-for the six follow-ups. Phase 4 plans a FastAPI service, followed by
-authentication, logging, monitoring, containerization, and deployment CI/CD.
+for the six follow-ups. Phase 4 starts with the local FastAPI service; later
+tasks add authentication, logging, monitoring, containerization, and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 

@@ -121,6 +121,7 @@ def run_answer(
     initialized. No eligible evidence therefore produces the deterministic
     abstention without paying generation model startup or inference cost.
     """
+    from rag_pipeline.application.answering import answer_from_results
     from rag_pipeline.application.retrieval import (
         open_local_retrieval_pipeline,
     )
@@ -141,7 +142,6 @@ def run_answer(
         InvalidVectorStoreConfigurationError,
     )
     from rag_pipeline.generation import create_local_answer_generator
-    from rag_pipeline.generation.prompting import INSUFFICIENT_CONTEXT_ANSWER
 
     try:
         runtime_config = build_retrieval_runtime_config(args)
@@ -159,15 +159,16 @@ def run_answer(
     with open_local_retrieval_pipeline(runtime_config) as pipeline:
         retrieval_results = pipeline.retrieve(args.query)
 
-    if not retrieval_results:
-        print(format_abstention_answer(INSUFFICIENT_CONTEXT_ANSWER))
-        return 0
-
-    answer_generator = create_local_answer_generator(local_generation_config)
-    generated_answer = answer_generator.generate(
+    outcome = answer_from_results(
         args.query,
         retrieval_results,
+        generator_factory=lambda: create_local_answer_generator(
+            local_generation_config
+        ),
         config=generation_config,
     )
-    print(format_generated_answer(generated_answer))
+    if outcome.generated_answer is None:
+        print(format_abstention_answer(outcome.answer))
+    else:
+        print(format_generated_answer(outcome.generated_answer))
     return 0

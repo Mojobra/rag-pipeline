@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import argparse
 
+from rag_pipeline.application.answering import (
+    DEFAULT_ANSWER_SCORE_THRESHOLD as APPLICATION_ANSWER_SCORE_THRESHOLD,
+)
 from rag_pipeline.infrastructure.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
 from rag_pipeline.infrastructure.sparse_embeddings import (
     DEFAULT_FASTEMBED_CACHE_DIR,
@@ -19,7 +22,7 @@ from rag_pipeline.retrieval.reranking import (
     DEFAULT_RERANKER_CACHE_DIR,
 )
 
-DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
+DEFAULT_ANSWER_SCORE_THRESHOLD = APPLICATION_ANSWER_SCORE_THRESHOLD
 
 
 def add_retrieval_arguments(

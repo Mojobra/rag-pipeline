@@ -6,7 +6,7 @@ trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.3.0
 - **Last verified:** 2026-10-19
-- **Current product surface:** Local Python CLI
+- **Current product surface:** Local Python CLI and read-only HTTP API
 
 ## How To Read Version Information
 
@@ -30,6 +30,8 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Language | Python 3.11+ | Implements the CLI, application services, RAG stages, validation, and tests. |
 | RAG contracts | LangChain | Supplies common document, embedding, prompt, model, parser, and vector-store interfaces. |
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
+| HTTP adapter | FastAPI and Uvicorn | Serve bounded retrieval and answer routes over an existing local collection on loopback. |
+| HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
 | Dense embeddings | LangChain Hugging Face + Sentence Transformers | Converts chunks and questions into normalized dense vectors for semantic search. |
 | Sparse embeddings | FastEmbed through LangChain Qdrant | Produces BM25 sparse vectors for optional lexical retrieval. |
 | Generation | Hugging Face Transformers through LangChain | Runs a local text-to-text model for grounded answer generation. |
@@ -44,6 +46,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
 | Packaging | setuptools | Builds the typed `src`-layout package as a wheel and source distribution. |
 | Tests | `unittest` | Runs deterministic unit and local integration tests without network access. |
+| HTTP tests | Starlette TestClient and `httpx2` | Exercise ASGI routes and lifespan with provider doubles. |
 | Formatting and linting | Ruff | Enforces formatting, imports, naming, correctness, and selected performance rules. |
 | Static typing | mypy | Checks all production modules in strict mode. |
 | Coverage | Coverage.py | Measures branch coverage and enforces an 80 percent minimum. |
@@ -67,6 +70,9 @@ manager, which can differ from Python import names.
 | Library / package | Dependency type | Purpose and use in this project |
 | --- | --- | --- |
 | `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
+| `fastapi` | Direct runtime | Defines the local read-only HTTP app, OpenAPI schema, routes, and exception mapping. |
+| `uvicorn` | Direct runtime | Runs the ASGI app on a local listening socket. |
+| `starlette` | Transitive | Provides FastAPI's ASGI request/response and test-client infrastructure. |
 | `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
 | `langchain-huggingface` | Direct runtime | Provides `HuggingFaceEmbeddings` for dense vectors and `HuggingFacePipeline` for local answer generation. |
 | `langchain-qdrant` | Direct runtime | Adapts Qdrant retrieval and supplies sparse-vector contracts and the `FastEmbedSparse` provider. |
@@ -82,7 +88,8 @@ manager, which can differ from Python import names.
 | `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
 | `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
 | `onnxruntime` | Transitive | Supplies FastEmbed's ONNX model support; the current BM25 sparse path is lexical, not neural ONNX inference. |
-| `pydantic` | Transitive | Supports LangChain/Qdrant model contracts; generation tests import `Field` for an LLM test double. It is not a project-owned HTTP schema layer. |
+| `pydantic` | Direct runtime | Supports provider contracts and defines the API's bounded request and response schemas. |
+| `httpx2` | Development | Backs the current Starlette TestClient used in deterministic HTTP tests. |
 | `ruff` | Development | Checks and formats source and tests, including imports and the configured correctness rules. |
 | `mypy` | Development | Statically checks production code with the project's strict typing configuration. |
 | `coverage[toml]` (Coverage.py) | Development | Measures statement and branch coverage for the offline test suite and enforces the configured coverage floor. |
@@ -115,14 +122,17 @@ reflects `uv.lock` as verified on the date at the top of this document.
 
 | Package | Declared range | Locked | Why it exists |
 | --- | --- | --- | --- |
+| `fastapi` | `>=0.115,<1.0` | 0.148.0 | Exposes typed local HTTP retrieval and answer routes. |
 | `langchain` | `>=1.0,<2.0` | 1.3.13 | Declares the LangChain framework family used by the pipeline. |
 | `langchain-huggingface` | `>=1.2,<2.0` | 1.2.2 | Adapts local Hugging Face embedding and generation models to LangChain contracts. |
 | `langchain-qdrant` | `>=1.1,<2.0` | 1.1.0 | Connects LangChain retrieval contracts to Qdrant and exposes FastEmbed sparse embeddings. |
 | `langchain-text-splitters` | `>=1.0,<2.0` | 1.1.2 | Supplies recursive character and language-aware splitters. |
+| `pydantic` | `>=2.0,<3.0` | 2.13.4 | Defines and validates project-owned HTTP request and response models. |
 | `qdrant-client` | `>=1.18,<2.0` | 1.18.0 | Runs the embedded Qdrant database and its query/filter API. |
 | `sentence-transformers` | `>=5.2,<6.0` | 5.6.0 | Provides the dense embedding backend and cross-encoder reranker. |
 | `sentencepiece` | `>=0.2,<1.0` | 0.2.2 | Supports tokenization for the default T5-family generation model. |
 | `transformers` | `>=4.48,<5.0` | 4.57.6 | Loads the local text-to-text generation pipeline and tokenizer. |
+| `uvicorn` | `>=0.30,<1.0` | 0.54.0 | Runs the local ASGI service. |
 | `fastembed` | `>=0.3.3,<1.0` | 0.8.0 | Executes the optional local BM25 sparse model. |
 | `pypdf` | `>=6.0,<7.0` | 6.14.2 | Reads text and page metadata from PDFs. |
 | `docx2txt` | `>=0.9,<1.0` | 0.9 | Reads text from DOCX files. |
@@ -138,7 +148,7 @@ transitive runtime snapshot is:
 | `numpy` | 2.4.6 on Python 3.11; 2.5.1 on Python 3.12+ | Supplies array operations used by the ML provider stack and provider score outputs. |
 | `tokenizers` | 0.22.2 | Provides optimized Hugging Face tokenization where supported by a model. |
 | `onnxruntime` | 1.27.0 | Supplies FastEmbed's ONNX model support; the current BM25 path is lexical. |
-| `pydantic` | 2.13.4 | Supports LangChain/Qdrant contracts and the `Field` import in generation test doubles, not project-owned API schemas. |
+| `starlette` | 1.9.0 | Supplies the ASGI request/response layer under FastAPI. |
 
 These packages are locked in `uv.lock` rather than maintained as independent
 application APIs. The full transitive graph contains additional implementation
@@ -156,12 +166,14 @@ Development tools are deliberately pinned exactly:
 | `ruff` | 0.16.1 | Formatting plus configured lint rule families. |
 | `mypy` | 2.3.0 | Strict type checking under `src/rag_pipeline`. |
 | `coverage[toml]` | 7.15.2 | Branch coverage with `fail_under = 80`. |
+| `httpx2` | 2.14.0 | Supports offline ASGI route and lifespan tests through Starlette TestClient. |
 
 ## Architecture And Ownership
 
 ```mermaid
 flowchart LR
     CLI["argparse CLI"] --> APP["Application use cases"]
+    API["FastAPI HTTP adapter"] --> APP
     APP --> ING["Ingestion and chunking"]
     APP --> INF["Model and Qdrant adapters"]
     INF --> RET["Retrieval and reranking"]
@@ -174,7 +186,8 @@ flowchart LR
 | Package | Ownership |
 | --- | --- |
 | `rag_pipeline.cli` | Parses terminal input, maps arguments to typed configuration, invokes services, and renders output. |
-| `rag_pipeline.application` | Coordinates transport-neutral indexing and retrieval lifecycles. |
+| `rag_pipeline.api` | Validates read-only HTTP requests, owns local provider lifecycle, and serializes source-cited JSON responses. |
+| `rag_pipeline.application` | Coordinates transport-neutral indexing, retrieval, and answer workflows. |
 | `rag_pipeline.ingestion` | Discovers files, extracts text, creates chunks, and runs chunking experiments. |
 | `rag_pipeline.infrastructure` | Owns dense/sparse model adapters and Qdrant persistence. |
 | `rag_pipeline.retrieval` | Defines retrieval policy, metadata filters, result provenance, and reranking. |
@@ -183,10 +196,10 @@ flowchart LR
 | `rag_pipeline.benchmarking` | Rebuilds isolated pipelines, records provenance and timing, compares artifacts, and enforces thresholds. |
 | `rag_pipeline.exceptions` | Provides stage-specific errors shared across package boundaries. |
 
-This is a layered modular monolith. The CLI is the only transport, while the
-application and feature services remain reusable by a future API. Provider
-details are kept at explicit boundaries instead of being spread through command
-handlers.
+This is a layered modular monolith with CLI and local HTTP transports. The
+application and feature services are shared; provider details stay at explicit
+boundaries instead of being spread through command or route handlers. The API
+is read-only until authentication and authorization are designed.
 
 ## RAG Execution Flow
 
@@ -547,11 +560,11 @@ hiding the entire application behind an opaque chain or agent abstraction.
 
 ## Not In The Current Stack
 
-The following technologies or capabilities are not implemented on `main` and
+The following technologies or capabilities are not implemented in this code and
 must not be presented as current behavior:
 
-- FastAPI, REST endpoints, or an HTTP service
-- Pydantic request/response schemas owned by this project
+- Authenticated or publicly deployable HTTP service, document uploads, or
+  HTTP indexing
 - OpenAI, Gemini, Claude, or other hosted model providers
 - API-key loading from `.env`
 - MCP servers, tool calling, or autonomous agents

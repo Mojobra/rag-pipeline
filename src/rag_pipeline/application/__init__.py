@@ -1,10 +1,11 @@
 """Transport-neutral use cases for composing the local RAG domain services.
 
 The application package coordinates provider lifecycles and multi-stage
-workflows. It deliberately has no argparse or terminal-output dependencies, so
-the same use cases can support the CLI today and an HTTP adapter later.
+workflows. It has no argparse, HTTP, or output-rendering dependencies, so the
+CLI and API can share the same behavior.
 """
 
+from rag_pipeline.application.answering import AnswerOutcome, answer_from_results
 from rag_pipeline.application.indexing import (
     EmbeddingPreview,
     IndexingPipelineConfig,
@@ -18,10 +19,12 @@ from rag_pipeline.application.retrieval import (
 )
 
 __all__ = [
+    "AnswerOutcome",
     "EmbeddingPreview",
     "IndexingPipelineConfig",
     "RetrievalPipeline",
     "RetrievalPipelineConfig",
+    "answer_from_results",
     "index_local_documents",
     "open_local_retrieval_pipeline",
     "preview_local_embeddings",
