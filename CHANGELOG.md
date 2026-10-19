@@ -3,9 +3,34 @@
 Notable project milestones are recorded here. Versions follow Semantic
 Versioning while the package remains in initial development.
 
+## [0.3.0] - 2026-10-19
+
+### Added
+
+- Source-scoped index synchronization with pruning support and stable point
+  identities for unchanged content.
+- Expanded retrieval datasets and diagnostics, including negative cases,
+  source anchors, score-gate calibration, and candidate/reranking comparisons.
+- HTML text-cleaning and chunk-boundary audits with measured recursive,
+  structure-aware, and semantic-chunking comparisons.
+- Optional benchmark diagnostics that track labeled evidence from retrieval
+  through exact prompt packing to answer or abstention.
+
+### Changed
+
+- Updated the retrieval-quality plan after RQ-01 through RQ-06 were integrated
+  into `develop`. The production-phase roadmap remains planned.
+
+### Known Limitations
+
+- Evidence coverage measures whether source anchors reached the prompt, not
+  whether generated claims are faithful or factually correct.
+- The supported interface remains a local CLI; hosted providers, a service,
+  authentication, and deployment are not included in this release.
+
 ## [0.2.0] - 2026-08-12
 
-First tagged portfolio milestone for the production-minded local RAG pipeline.
+First versioned portfolio milestone for the production-minded local RAG pipeline.
 
 ### Added
 

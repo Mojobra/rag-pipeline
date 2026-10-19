@@ -4,7 +4,7 @@ This manual is the implementation-level inventory for the RAG pipeline. It
 explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
-- **Project version:** 0.2.0
+- **Project version:** 0.3.0
 - **Last verified:** 2026-10-19
 - **Current product surface:** Local Python CLI
 

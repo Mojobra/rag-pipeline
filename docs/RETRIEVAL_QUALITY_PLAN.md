@@ -1,8 +1,7 @@
 # Retrieval Quality Implementation Plan
 
-Status: in progress. This document records follow-up work identified during a
-codebase review; RQ-01 through RQ-05 are integrated into `develop`. Later
-tasks remain separately reviewable and are marked complete only after integration.
+Status: complete. This document records follow-up work identified during a
+codebase review; RQ-01 through RQ-06 are integrated into `develop`.
 
 ## Goal And Scope
 
@@ -30,7 +29,7 @@ facts, not measured quality results.
 | RQ-03 | Score-gate calibration | Complete |
 | RQ-04 | Candidate and reranking comparison | Complete |
 | RQ-05 | Extraction and chunking quality | Complete |
-| RQ-06 | Evidence-to-prompt coverage | Planned |
+| RQ-06 | Evidence-to-prompt coverage | Complete |
 
 ## How To Execute The Plan
 
@@ -208,9 +207,9 @@ configured prompt budget.
 **Trade-off.** More context can dilute useful evidence and raise latency or
 memory use. Extracting a smaller window can omit a needed qualification.
 
-The task-branch [evidence coverage record](RQ06_EVIDENCE_COVERAGE.md) documents
-paired v2 measurements at the default and a constrained prompt budget. RQ-06
-remains planned in the tracker until reviewed integration into `develop`.
+The [evidence coverage record](RQ06_EVIDENCE_COVERAGE.md) documents paired v2
+measurements at the default and a constrained prompt budget. RQ-06 was
+integrated into `develop` in PR #19.
 
 ## Suggested Order And Completion Record
 
