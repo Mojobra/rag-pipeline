@@ -12,6 +12,15 @@ from rag_pipeline.evaluation.answers import (
     format_answer_evaluation_table,
     load_answer_evaluation_dataset,
 )
+from rag_pipeline.evaluation.evidence import (
+    EvidenceCaseMetrics,
+    EvidenceCoverageReport,
+    EvidenceObservation,
+    EvidenceSelectorMetrics,
+    evaluate_evidence_coverage,
+    evidence_coverage_to_dict,
+    supports_evidence_coverage,
+)
 from rag_pipeline.evaluation.retrieval import (
     LATEST_RETRIEVAL_EVALUATION_SCHEMA_VERSION,
     RETRIEVAL_EVALUATION_SCHEMA_VERSION,
@@ -38,6 +47,10 @@ __all__ = [
     "AnswerEvaluationCase",
     "AnswerEvaluationDataset",
     "AnswerEvaluationReport",
+    "EvidenceCaseMetrics",
+    "EvidenceCoverageReport",
+    "EvidenceObservation",
+    "EvidenceSelectorMetrics",
     "RelevantDocument",
     "RetrievalAggregateMetrics",
     "RetrievalCaseMetrics",
@@ -46,10 +59,13 @@ __all__ = [
     "RetrievalEvaluationReport",
     "answer_evaluation_to_dict",
     "evaluate_answers",
+    "evaluate_evidence_coverage",
     "evaluate_retrieval",
+    "evidence_coverage_to_dict",
     "format_answer_evaluation_table",
     "format_retrieval_evaluation_table",
     "load_answer_evaluation_dataset",
     "load_retrieval_evaluation_dataset",
     "retrieval_evaluation_to_dict",
+    "supports_evidence_coverage",
 ]

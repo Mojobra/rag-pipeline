@@ -59,6 +59,12 @@ from rag_pipeline.evaluation.answers import (
     evaluate_answers,
     load_answer_evaluation_dataset,
 )
+from rag_pipeline.evaluation.evidence import (
+    EvidenceCoverageReport,
+    EvidenceObservation,
+    evaluate_evidence_coverage,
+    supports_evidence_coverage,
+)
 from rag_pipeline.evaluation.retrieval import (
     RetrievalEvaluationDataset,
     RetrievalEvaluationReport,
@@ -161,6 +167,7 @@ class _ExecutionResult:
     storage_bytes: int
     retrieval_report: RetrievalEvaluationReport
     answer_report: AnswerEvaluationReport
+    evidence_report: EvidenceCoverageReport | None
     retrieval_timing: TimingSummary
     answer_timing: TimingSummary
 
@@ -248,6 +255,7 @@ def run_benchmark(
         answer_timing=execution.answer_timing,
         retrieval_report=execution.retrieval_report,
         answer_report=execution.answer_report,
+        evidence_report=execution.evidence_report,
         threshold_gate=None,
         reproducibility_warnings=_reproducibility_warnings(
             config,
@@ -425,8 +433,9 @@ def _execute_pipeline(
                 stages=stages,
                 clock=clock,
             )
-            answer_report, answer_timing = _run_answer_suite(
+            answer_report, evidence_report, answer_timing = _run_answer_suite(
                 inputs.answer_dataset,
+                retrieval_dataset=inputs.retrieval_dataset,
                 retriever=retriever,
                 answer_generator=pipeline.answer_generator,
                 config=config,
@@ -440,6 +449,7 @@ def _execute_pipeline(
         storage_bytes=storage_bytes,
         retrieval_report=retrieval_report,
         answer_report=answer_report,
+        evidence_report=evidence_report,
         retrieval_timing=retrieval_timing,
         answer_timing=answer_timing,
     )
@@ -493,15 +503,17 @@ def _run_retrieval_suite(
 def _run_answer_suite(
     dataset: AnswerEvaluationDataset,
     *,
+    retrieval_dataset: RetrievalEvaluationDataset,
     retriever: RetrieverService,
     answer_generator: AnswerGenerator,
     config: BenchmarkConfig,
     reranker: RerankerService | None,
     stages: _StageRecorder,
     clock: Clock,
-) -> tuple[AnswerEvaluationReport, TimingSummary]:
-    """Evaluate end-to-end answers while preserving one latency per case."""
+) -> tuple[AnswerEvaluationReport, EvidenceCoverageReport | None, TimingSummary]:
+    """Evaluate answers and paired evidence traces from the same inference runs."""
     case_durations = []
+    observations: list[EvidenceObservation] = []
 
     def answer(query: str) -> GeneratedAnswer:
         """Run and time retrieval, optional reranking, and generation."""
@@ -514,11 +526,13 @@ def _run_answer_suite(
                 reranker=reranker,
                 reranking_config=config.reranking,
             )
-            return answer_generator.generate(
+            prediction = answer_generator.generate(
                 query,
                 results,
                 config=config.generation,
             )
+            observations.append(EvidenceObservation(tuple(results), prediction))
+            return prediction
         finally:
             case_durations.append(
                 _elapsed_seconds(
@@ -530,11 +544,21 @@ def _run_answer_suite(
 
     with stages.measure("answer_evaluation"):
         report = evaluate_answers(dataset, answer)
+        evidence_report = (
+            evaluate_evidence_coverage(
+                retrieval_dataset,
+                dataset,
+                report,
+                observations,
+            )
+            if supports_evidence_coverage(retrieval_dataset, dataset)
+            else None
+        )
     timing = summarize_case_timings(
         tuple(case.case_id for case in dataset.cases),
         case_durations,
     )
-    return report, timing
+    return report, evidence_report, timing
 
 
 def _retrieve_and_rerank(

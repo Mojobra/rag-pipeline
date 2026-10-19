@@ -1,8 +1,8 @@
 # Retrieval Quality Implementation Plan
 
 Status: in progress. This document records follow-up work identified during a
-codebase review; RQ-01 through RQ-04 are integrated into `develop`. Later tasks remain
-separately reviewable and are marked complete only after integration.
+codebase review; RQ-01 through RQ-05 are integrated into `develop`. Later
+tasks remain separately reviewable and are marked complete only after integration.
 
 ## Goal And Scope
 
@@ -29,7 +29,7 @@ facts, not measured quality results.
 | RQ-02 | Broader retrieval labels and metrics | Complete |
 | RQ-03 | Score-gate calibration | Complete |
 | RQ-04 | Candidate and reranking comparison | Complete |
-| RQ-05 | Extraction and chunking quality | Planned |
+| RQ-05 | Extraction and chunking quality | Complete |
 | RQ-06 | Evidence-to-prompt coverage | Planned |
 
 ## How To Execute The Plan
@@ -182,9 +182,9 @@ stable citation and collection-compatibility behavior.
 chunks increase index size; semantic boundaries add embedding work. Parser
 changes can invalidate existing offsets and evaluation anchors.
 
-The task-branch [extraction and chunking record](RQ05_EXTRACTION_CHUNKING.md)
-documents the fixture audit and matched v2 benchmarks. RQ-05 remains planned
-in the tracker until reviewed integration into `develop`.
+The [extraction and chunking record](RQ05_EXTRACTION_CHUNKING.md) documents
+the fixture audit and matched v2 benchmarks. RQ-05 was integrated into
+`develop` in PR #18.
 
 ## RQ-06: Measure Evidence That Reaches The Prompt
 
@@ -207,6 +207,10 @@ configured prompt budget.
 
 **Trade-off.** More context can dilute useful evidence and raise latency or
 memory use. Extracting a smaller window can omit a needed qualification.
+
+The task-branch [evidence coverage record](RQ06_EVIDENCE_COVERAGE.md) documents
+paired v2 measurements at the default and a constrained prompt budget. RQ-06
+remains planned in the tracker until reviewed integration into `develop`.
 
 ## Suggested Order And Completion Record
 

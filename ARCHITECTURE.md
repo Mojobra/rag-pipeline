@@ -299,8 +299,9 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
 - `rag_pipeline.benchmarking.artifacts` owns artifact validation, regression
   gates, and comparison behavior under the canonical benchmark package.
 - `benchmark` starts from one explicit corpus and paired retrieval/answer files,
-  then builds a fresh temporary Qdrant collection. Retrieval schemas v1 and v2
-  are accepted, but v2 is required for valid boundary-strategy comparisons. The
+  then builds a fresh temporary Qdrant collection. Retrieval schemas v1, v2,
+  and v3 are accepted, but source-anchor labels are required for valid
+  boundary-strategy and prompt-evidence comparisons. The
   index is closed and deleted after its storage size is recorded.
 - Corpus relative paths and bytes plus both dataset files receive SHA-256
   fingerprints. Artifacts omit absolute corpus, cache, output, and work paths.
@@ -311,6 +312,11 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
   chunking (including semantic boundary inference), final embedding, index,
   retrieval-evaluation, and answer-evaluation stage durations, with ordered
   per-case retrieval and end-to-end answer latency.
+- When every answerable case has a paired source anchor, benchmark reports also
+  classify each selector as not retrieved, retrieved but not packed, packed
+  with an abstention, or packed with a non-abstaining answer. The check uses
+  exact text prefixes passed to generation, not bounded citation excerpts.
+  Older chunk-index or unpaired labels keep their existing artifact shape.
 - Optional strict threshold profiles apply inclusive minimum or maximum bounds
   to allowlisted quality and operational metrics. Profiles bind to corpus and
   dataset hashes plus final top-k and fail before model loading on a mismatch.
