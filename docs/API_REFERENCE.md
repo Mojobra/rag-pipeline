@@ -1,8 +1,9 @@
 # Local HTTP API
 
-Tasks 19 and 20 add a read-only FastAPI adapter with shared-token authentication
-over the existing local retrieval and answer workflows. It does not ingest
-documents, host remote models, identify individual users, enforce document
+Tasks 19-21 add a read-only FastAPI adapter with shared-token authentication
+and structured request logging over the existing local retrieval and answer
+workflows. It does not ingest documents, host remote models, identify individual
+users, enforce document
 permissions, or make embedded Qdrant a multi-user database. Index
 documents with the CLI first; stop the API before modifying the same local
 Qdrant store with the CLI.
@@ -16,7 +17,7 @@ $token = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 $token
 $env:RAG_API_BEARER_TOKEN = $token
 $env:RAG_API_COLLECTION_NAME = 'asteria_demo'
-uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000
+uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 The example collection name matches the README Quick Start. Without that
@@ -48,6 +49,22 @@ settings; incompatible settings fail rather than silently mixing vectors.
 The API currently uses CPU defaults, no reranker, and the same 1,200-character
 generation context policy as the CLI default. Other CLI tuning flags are not
 HTTP configuration in this first adapter.
+
+## Request Logging
+
+The API writes one JSON object per HTTP request to stderr with a UTC timestamp,
+server-generated request ID, method, available route template, HTTP status,
+and elapsed milliseconds. Handled responses include the same ID in
+`X-Request-ID`; a caller-supplied ID is ignored. Unknown URLs and framework
+routes without an exposed template are recorded as `<unmatched>`. Bodies,
+credentials, query strings, raw paths, response text, and source metadata are
+not included in these application events.
+
+Use `--no-access-log` as shown above: Uvicorn's separate access log can include
+raw URLs and query strings. Uvicorn error logs and third-party libraries have
+separate logging behavior; review their configuration before processing sensitive
+data. These events support local diagnosis, not tamper-resistant audit trails,
+per-user attribution, centralized retention, or monitoring metrics.
 
 ## Endpoints
 
@@ -112,6 +129,6 @@ Responses can include local source paths and document text. Keep this service
 on a trusted machine: the shared token does not identify a caller or restrict
 which documents they can read. It can be copied or stolen and is not a
 replacement for TLS, per-user identity, permission-aware retrieval, per-client
-rotation and revocation, rate limiting, or audit logging. Do not put it in a URL, Git,
-or application logs. There is no upload, HTTP indexing, CORS policy,
+rotation and revocation, rate limiting, or audit logging. Do not put it in a URL,
+Git, or application logs. There is no upload, HTTP indexing, CORS policy,
 distributed worker, streaming, or remote-Qdrant support.
