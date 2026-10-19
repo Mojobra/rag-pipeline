@@ -229,6 +229,39 @@ class RetrievalPipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "must be a RetrievalConfig"):
             pipeline.retrieve("invalid", retrieval_config=object())  # type: ignore[arg-type]
 
+    def test_exposes_first_stage_without_loading_reranker(self) -> None:
+        retriever = _RecordingRetriever([_result()])
+        reranker = _RecordingReranker()
+        factory_calls = 0
+
+        def create_reranker() -> _RecordingReranker:
+            nonlocal factory_calls
+            factory_calls += 1
+            return reranker
+
+        pipeline = RetrievalPipeline(
+            retriever,
+            retrieval_config=RetrievalConfig(top_k=2),
+            reranker_factory=create_reranker,
+            reranking_config=RerankingConfig(top_n=1),
+        )
+        wider = RetrievalConfig(top_k=3)
+
+        candidates = pipeline.retrieve_candidates("question", retrieval_config=wider)
+        self.assertEqual(factory_calls, 0)
+        self.assertEqual(retriever.calls, [("question", wider)])
+        self.assertEqual(pipeline.rerank_candidates("question", candidates), candidates)
+        self.assertEqual(factory_calls, 1)
+        self.assertEqual(reranker.calls[0][1], candidates)
+
+        without_reranker = RetrievalPipeline(
+            retriever, retrieval_config=RetrievalConfig()
+        )
+        with self.assertRaisesRegex(
+            InvalidPipelineConfigurationError, "not configured"
+        ):
+            without_reranker.rerank_candidates("question", candidates)
+
 
 if __name__ == "__main__":
     unittest.main()

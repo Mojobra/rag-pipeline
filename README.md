@@ -136,6 +136,11 @@ positive-case Recall@k; it is not paired with answer labels.
 The evaluator can also rerun v3 cases with explicit first-stage gates using
 `--compare-score-threshold`. Run dense and hybrid modes separately; see the
 [calibration procedure](docs/CLI_REFERENCE.md#score-gate-calibration).
+To compare candidate-pool recall with final ranking at several widths, use
+`--rerank --candidate-k 2 --compare-candidate-k 3 --compare-candidate-k 4`
+with `--top-k 2` on v3 labels. See the
+[candidate comparison procedure](docs/CLI_REFERENCE.md#candidate-and-reranking-comparison);
+it requires a compatible collection and does not change search defaults.
 
 For an isolated end-to-end benchmark, build a temporary index and save a report:
 

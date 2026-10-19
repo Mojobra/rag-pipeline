@@ -198,6 +198,13 @@ and operational results justify expanding the public indexing workflow.
   explicit baseline and candidate gates through one initialized pipeline. Its
   separate report records settings, observed score kind, and per-case evidence
   and unwanted-hit changes; reranking is excluded from this calibration.
+- Optional candidate-width comparison reruns each v3 query at every requested
+  width, then scores the same pool at full width, at the final cutoff without
+  reranking, and after cross-encoder reranking. Per-case selector diagnostics
+  separate missing first-stage evidence from final-selection losses. The
+  application retrieval session exposes these stages without changing the
+  ordinary `retrieve` contract; dense and hybrid collections are compared in
+  separate compatible runs.
 - Table output supports local diagnosis and JSON output supports saved
   comparisons.
 - V1/v2 each supply 17 answerable synthetic policy cases. The separate v3

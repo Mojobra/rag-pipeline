@@ -208,6 +208,40 @@ queries and failure cases before selecting a production policy.
 The [RQ-03 synthetic calibration record](RQ03_SCORE_GATE_CALIBRATION.md)
 captures one reproducible local comparison and its limitations.
 
+### Candidate And Reranking Comparison
+
+Use schema-v3 retrieval labels to inspect whether a miss occurs in the
+first-stage pool or after the final `--top-k` selection. Enable `--rerank`, set
+the baseline width with `--candidate-k`, and repeat `--compare-candidate-k`
+for at least one distinct width. Every width must be at least `--top-k`.
+
+```powershell
+uv run rag-pipeline evaluate-retrieval `
+  evaluation/datasets/asteria-policies-v3/retrieval-v3.json `
+  --collection-name asteria_v3 --search-mode dense `
+  --no-score-threshold --rerank --top-k 2 --candidate-k 2 `
+  --compare-candidate-k 3 --compare-candidate-k 4 --output-format json
+```
+
+Build `asteria_v3` from the matching v3 documents first. For hybrid, build a
+separate hybrid collection from the same documents and repeat with its name,
+`--search-mode hybrid`, and matching sparse-model settings. The command reads
+existing collections and does not change their contents. It cannot combine
+candidate comparison with `--compare-score-threshold`.
+
+The JSON report contains three evaluations per width: `pool` at
+`candidate_k`, `unreranked` at `top_k` from that same pool, and `reranked` at
+`top_k` after cross-encoder scoring. Zero-based selector indices distinguish
+`first_stage_missing_selector_indices` from
+`lost_after_reranking_selector_indices`; gained/lost selector indices versus
+the unreranked baseline expose ranking effects. Negative no-hit metrics remain
+separate. Each width reruns retrieval rather than truncating a larger result,
+because hybrid fusion can change ranks. Observed stage times include model
+initialization and are not stable latency estimates. The v3 demo has only four
+chunks, so widths above four add no candidates; validate promising settings
+on a larger reviewed corpus before changing defaults. See the
+[RQ-04 local comparison](RQ04_CANDIDATE_RANKING.md).
+
 ## Answer Evaluation
 
 The `evaluate-answer` command runs labeled questions through the same dense or

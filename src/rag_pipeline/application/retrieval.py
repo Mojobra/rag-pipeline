@@ -137,18 +137,47 @@ class RetrievalPipeline:
         reloading models or reopening Qdrant. Result order and provenance are
         preserved when reranking is disabled.
         """
+        results = self.retrieve_candidates(query, retrieval_config=retrieval_config)
+        if not results or self._reranking_config is None:
+            return results
+        return self.rerank_candidates(query, results)
+
+    def retrieve_candidates(
+        self,
+        query: str,
+        *,
+        retrieval_config: RetrievalConfig | None = None,
+    ) -> list[RetrievalResult]:
+        """Return first-stage results without invoking the optional reranker.
+
+        Per-call settings let evaluation issue real Qdrant searches at each
+        candidate width while reusing the initialized embedding and store.
+        """
         if retrieval_config is not None and not isinstance(
             retrieval_config, RetrievalConfig
         ):
             raise TypeError("retrieval_config must be a RetrievalConfig or None.")
-        results = self._retriever.retrieve(
+        return self._retriever.retrieve(
             query,
             config=self._retrieval_config
             if retrieval_config is None
             else retrieval_config,
         )
-        if not results or self._reranking_config is None:
-            return results
+
+    def rerank_candidates(
+        self,
+        query: str,
+        candidates: list[RetrievalResult],
+    ) -> list[RetrievalResult]:
+        """Rerank an existing pool using this session's configured final cutoff.
+
+        The cross-encoder is initialized lazily on the first non-empty pool.
+        Calling this method without reranking configured is a usage error.
+        """
+        if self._reranking_config is None:
+            raise InvalidPipelineConfigurationError("Reranking is not configured.")
+        if not candidates:
+            return []
         if self._reranker is None:
             if self._reranker_factory is None:
                 raise RuntimeError("Reranking is configured without a service.")
@@ -160,7 +189,7 @@ class RetrievalPipeline:
             self._reranker = reranker
         return self._reranker.rerank(
             query,
-            results,
+            candidates,
             config=self._reranking_config,
         )
 

@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.2.0
-- **Last verified:** 2026-10-18
+- **Last verified:** 2026-10-19
 - **Current product surface:** Local Python CLI
 
 ## How To Read Version Information
@@ -371,6 +371,19 @@ sparse vector can fall back to cosine. `--no-score-threshold` explicitly
 disables the gate on answer-oriented commands whose default remains `0.2`.
 The [RQ-03 calibration record](docs/RQ03_SCORE_GATE_CALIBRATION.md) contains
 the local synthetic-corpus measurements; they are not production thresholds.
+
+With `evaluate-retrieval --rerank --compare-candidate-k`, a schema-v3 dataset
+is rerun at `--candidate-k` and each distinct comparison width. The application
+session exposes raw first-stage candidates and reranks exactly that pool,
+without reloading Qdrant or the models for each query. The report compares
+Recall@candidate-k, unreranked Recall@top-k, and reranked Recall@top-k, plus
+per-case first-stage misses, final-selection losses, score kinds, and observed
+retrieval/reranking wall time. Each width issues a real Qdrant query: hybrid
+fusion need not yield a simple prefix of a wider result set. Compare dense and
+hybrid collections separately against identical corpus and labels. Timings
+include lazy initialization and are not latency benchmarks. The
+[RQ-04 comparison record](docs/RQ04_CANDIDATE_RANKING.md) reports the small
+synthetic experiment without changing defaults.
 
 Answer evaluation reports normalized exact match, token F1, abstention accuracy,
 abstention precision/recall, answer rate, and citation-behavior rate. These are
