@@ -33,6 +33,14 @@ The isolated benchmark can compare bounded semantic and structure-aware
 chunking with the recursive baseline using chunk-index-independent schema-v2
 relevance anchors. Recursive chunking remains the default outside experiments.
 
+## Retrieval Quality Follow-Up (Complete)
+
+The [retrieval quality implementation plan](docs/RETRIEVAL_QUALITY_PLAN.md)
+records six separately reviewable tasks covering index freshness, evaluation
+coverage, score calibration, candidate ranking, source text and chunking, and
+evidence packing. RQ-01 through RQ-06 are integrated into `develop`; the
+original roadmap task numbers below remain unchanged.
+
 ## Phase 4: Production
 
 Task 19 - FastAPI service

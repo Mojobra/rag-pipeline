@@ -1,0 +1,172 @@
+{
+  "schema_version": 3,
+  "name": "asteria-policies-retrieval-v3",
+  "cases": [
+    {
+      "id": "current-receipt-paraphrase",
+      "query": "What proof must accompany a purchase exceeding twenty-five euros?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "itemized receipt for each purchase above EUR 25"
+        }
+      ]
+    },
+    {
+      "id": "receipt-exact-boundary",
+      "query": "Is an itemized receipt mandatory for a purchase of exactly EUR 25?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "For a purchase of exactly EUR 25, an itemized receipt is not mandatory"
+        }
+      ]
+    },
+    {
+      "id": "current-expense-identifier",
+      "query": "Which expense rule has identifier EXP-204?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "Policy ID: EXP-204"
+        }
+      ]
+    },
+    {
+      "id": "historic-receipt-rule",
+      "query": "What receipt threshold applied under the archived EXP-042 policy?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-archived.md"},
+          "content_contains": "purchases above EUR 50"
+        }
+      ]
+    },
+    {
+      "id": "superseded-threshold",
+      "query": "Which receipt threshold is current instead of the old EUR 50 rule?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "itemized receipt for each purchase above EUR 25"
+        },
+        {
+          "metadata": {"file_name": "expense-archived.md"},
+          "content_contains": "Status: Archived on 2025-12-31. Superseded by EXP-204."
+        }
+      ]
+    },
+    {
+      "id": "manager-approval-boundary",
+      "query": "Who signs off a claim of exactly EUR 500?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "Claims of EUR 500 or less require manager approval."
+        }
+      ]
+    },
+    {
+      "id": "director-approval-boundary",
+      "query": "Who signs off a claim of EUR 501?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "Claims above EUR 500"
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-claim-limit",
+      "query": "Does the EUR 500 limit cap reimbursement or change who approves a claim?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "Claims of EUR 500 or less require manager approval."
+        },
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "Claims above EUR 500"
+        },
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "not a maximum reimbursable claim amount"
+        }
+      ]
+    },
+    {
+      "id": "travel-meal-cross-policy",
+      "query": "For a travel meal over EUR 25, which rules determine the supporting evidence?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "Travel meals follow the current Expense Reimbursement Policy, EXP-204"
+        },
+        {
+          "metadata": {"file_name": "expense-current.md"},
+          "content_contains": "itemized receipt for each purchase above EUR 25"
+        }
+      ]
+    },
+    {
+      "id": "premium-economy-approval",
+      "query": "Can I book premium economy on a seven-hour flight without approval?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "business-travel.md"},
+          "content_contains": "segments of six hours or longer only when a manager approves it"
+        }
+      ]
+    },
+    {
+      "id": "security-exact-identifier",
+      "query": "Which incident policy carries SEC-210?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "Policy ID: SEC-210"
+        }
+      ]
+    },
+    {
+      "id": "phishing-paraphrase",
+      "query": "How quickly must a suspicious message be escalated, and to whom?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "Security Operations within 30 minutes of discovery"
+        }
+      ]
+    },
+    {
+      "id": "lost-device-notification",
+      "query": "Who gets the report when a company laptop disappears?",
+      "relevant": [
+        {
+          "metadata": {"file_name": "information-security.md"},
+          "content_contains": "reported to Security Operations and the employee's manager within one hour"
+        }
+      ]
+    },
+    {
+      "id": "unsupported-parental-leave",
+      "query": "How many weeks of parental leave are employees entitled to?",
+      "relevant": []
+    },
+    {
+      "id": "unsupported-cloud-region",
+      "query": "Which cloud region stores security incident reports?",
+      "relevant": []
+    },
+    {
+      "id": "unsupported-home-office-chair",
+      "query": "Can I claim reimbursement for a home-office chair?",
+      "relevant": []
+    },
+    {
+      "id": "unsupported-hotel-cap",
+      "query": "What is the approved nightly hotel price cap?",
+      "relevant": []
+    }
+  ]
+}

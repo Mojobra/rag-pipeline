@@ -19,6 +19,9 @@ DATASET_V2_ROOT = PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v
 DOCUMENTS_V2_ROOT = DATASET_V2_ROOT / "documents"
 RETRIEVAL_V2_PATH = DATASET_V2_ROOT / "retrieval-v2.json"
 ANSWERS_V2_PATH = DATASET_V2_ROOT / "answers-v2.json"
+DATASET_V3_ROOT = PROJECT_ROOT / "evaluation" / "datasets" / "asteria-policies-v3"
+DOCUMENTS_V3_ROOT = DATASET_V3_ROOT / "documents"
+RETRIEVAL_V3_PATH = DATASET_V3_ROOT / "retrieval-v3.json"
 
 _WORD_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
@@ -247,6 +250,85 @@ class ChunkingIndependentEvaluationDatasetTests(unittest.TestCase):
                         case_id=answer_case.case_id,
                     ):
                         self.assertLessEqual(_tokens(reference), evidence_tokens)
+
+
+class RepresentativeRetrievalDatasetTests(unittest.TestCase):
+    """Keep v3 positive anchors and unsupported cases tied to one corpus."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from rag_pipeline.evaluation.retrieval import (
+            load_retrieval_evaluation_dataset,
+        )
+        from rag_pipeline.ingestion import load_documents
+        from rag_pipeline.ingestion.chunking import chunk_documents
+
+        cls.documents = load_documents([DOCUMENTS_V3_ROOT])
+        cls.chunks = chunk_documents(cls.documents)
+        cls.dataset = load_retrieval_evaluation_dataset(RETRIEVAL_V3_PATH)
+
+    def test_v3_corpus_and_case_types_are_explicit(self) -> None:
+        self.assertEqual(self.dataset.schema_version, 3)
+        self.assertEqual(self.dataset.name, "asteria-policies-retrieval-v3")
+        self.assertEqual(len(self.documents), 4)
+        self.assertEqual(len(self.dataset.cases), 17)
+        self.assertEqual(
+            sum(bool(case.relevant_documents) for case in self.dataset.cases), 13
+        )
+        self.assertEqual(
+            {
+                case.case_id
+                for case in self.dataset.cases
+                if not case.relevant_documents
+            },
+            {
+                "unsupported-parental-leave",
+                "unsupported-cloud-region",
+                "unsupported-home-office-chair",
+                "unsupported-hotel-cap",
+            },
+        )
+
+    def test_every_positive_anchor_identifies_source_and_default_chunk(self) -> None:
+        for case in self.dataset.cases:
+            for selector in case.relevant_documents:
+                with self.subTest(
+                    case_id=case.case_id, anchor=selector.content_contains
+                ):
+                    self.assertEqual(set(selector.metadata), {"file_name"})
+                    matching_sources = [
+                        document
+                        for document in self.documents
+                        if selector.matches(document)
+                    ]
+                    self.assertEqual(len(matching_sources), 1)
+                    self.assertEqual(
+                        matching_sources[0].page_content.count(
+                            selector.content_contains
+                        ),
+                        1,
+                    )
+                    self.assertGreaterEqual(
+                        sum(selector.matches(chunk) for chunk in self.chunks),
+                        1,
+                    )
+
+    def test_current_and_archived_policies_have_distinct_evidence(self) -> None:
+        cases = {case.case_id: case for case in self.dataset.cases}
+        self.assertEqual(
+            {
+                selector.metadata["file_name"]
+                for selector in cases["superseded-threshold"].relevant_documents
+            },
+            {"expense-current.md", "expense-archived.md"},
+        )
+        self.assertEqual(
+            {
+                selector.metadata["file_name"]
+                for selector in cases["travel-meal-cross-policy"].relevant_documents
+            },
+            {"business-travel.md", "expense-current.md"},
+        )
 
 
 if __name__ == "__main__":

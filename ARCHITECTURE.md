@@ -112,6 +112,34 @@ response, authentication, and error-mapping concerns remain future work.
 
 ---
 
+## Current Index Synchronization Contract
+
+- The CLI `index` use case discovers the complete file set before extraction and
+  passes explicit source paths to Qdrant, including files yielding no chunks.
+- `LocalVectorStore.replace_sources()` validates scope, snapshots old IDs by
+  exact source, verifies collection compatibility before writing, upserts new
+  points, then deletes obsolete IDs. `LocalVectorStore.index()` keeps its
+  general upsert contract for other callers, including isolated benchmarks.
+- Files no longer present in a directory are retained unless `--prune-missing`
+  is explicitly requested for one recursively scanned directory. Sources
+  outside that resolved directory are never included in directory pruning.
+- A failure before upsert leaves the collection unchanged. Multiple upsert and
+  delete calls are not atomic; a database failure may require retrying the same
+  source scope to finish synchronization.
+
+## Current Extraction Contract
+
+HTML files are decoded into visible text with Python's `html.parser`. Script,
+style, head, template, and navigation subtrees are omitted; headings, tables,
+asides, and footers remain text. Plain text and Markdown retain their raw
+content. HTML chunk `start_index` and `end_index` point into normalized
+extracted text, not raw HTML byte positions. Source paths and PDF page metadata
+are unchanged. Existing HTML sources must be reindexed for the new text and
+`extractor=html.parser` metadata to take effect; a filter on the previous
+`extractor=text` value will no longer match those HTML chunks.
+
+---
+
 ## Current Generation Contract
 
 - LangChain composes the `grounded-v2` prompt with the configured language model
@@ -140,8 +168,9 @@ before production use.
 - Normal `chunk`, `embed`, and `index` workflows retain the established
   LangChain recursive-character policy and its defaults.
 - Isolated benchmarks additionally accept a structure-aware recursive policy.
-  Markdown and HTML use LangChain's language-specific separator priorities;
-  other formats use the baseline separator order.
+  Markdown and raw HTML documents use LangChain's language-specific separator
+  priorities. Extracted HTML has no tags, so it and other formats use the
+  baseline separator order.
 - The semantic policy forms punctuation/paragraph units, embeds buffered
   sentence contexts through LangChain's `Embeddings` interface, and proposes
   boundaries above a configurable cosine-distance percentile.
@@ -159,6 +188,10 @@ Semantic chunking can improve topical coherence but adds ingestion latency and
 is sensitive to sentence segmentation, model choice, and threshold calibration.
 The implementation is intentionally benchmark-only until representative quality
 and operational results justify expanding the public indexing workflow.
+The [RQ-05 local comparison](docs/RQ05_EXTRACTION_CHUNKING.md) found no
+retrieval gain on the small v2 labels from switching the default policy, so
+recursive indexing remains unchanged. PDF text-layer order and OCR remain
+separate, unimplemented extraction concerns.
 
 ---
 
@@ -166,16 +199,33 @@ and operational results justify expanding the public indexing workflow.
 
 - Strict schema-v1 JSON remains supported for exact document-metadata selectors.
   Schema v2 combines exact metadata with a case-sensitive source-content anchor,
-  allowing one judgment to survive ordinary changes in chunk boundaries.
+  allowing one judgment to survive ordinary changes in chunk boundaries. Schema
+  v3 keeps that positive selector and permits empty relevance for unsupported
+  questions, while requiring at least one positive case per dataset.
 - Evaluation runs the same LangChain/Qdrant dense or hybrid retriever, metadata
   filters, score gate, and optional cross-encoder reranker used by interactive
   commands; it never invokes generation or mutates the collection.
-- Reports include per-case Hit@k, Precision@k, Recall@k, and reciprocal rank,
-  plus macro averages that give every query equal weight.
+- V1/v2 reports retain per-case Hit@k, Precision@k, Recall@k, reciprocal rank,
+  and their unchanged macro averages. V3 averages these only over positive
+  cases; negative cases receive separate no-hit and false-positive rates.
+- V3 also exposes distinct matched and missing evidence selectors, redundant
+  overlap-hit ranks, and unwanted ranks alongside chunk-level precision.
+- Optional first-stage score-gate comparison reruns the same v3 cases for an
+  explicit baseline and candidate gates through one initialized pipeline. Its
+  separate report records settings, observed score kind, and per-case evidence
+  and unwanted-hit changes; reranking is excluded from this calibration.
+- Optional candidate-width comparison reruns each v3 query at every requested
+  width, then scores the same pool at full width, at the final cutoff without
+  reranking, and after cross-encoder reranking. Per-case selector diagnostics
+  separate missing first-stage evidence from final-selection losses. The
+  application retrieval session exposes these stages without changing the
+  ordinary `retrieve` contract; dense and hybrid collections are compared in
+  separate compatible runs.
 - Table output supports local diagnosis and JSON output supports saved
   comparisons.
-- Both committed synthetic policy dataset versions supply 17 manually
-  cross-checked retrieval cases, including one multi-document judgment.
+- V1/v2 each supply 17 answerable synthetic policy cases. The separate v3
+  retrieval-only stress set adds unsupported, ambiguous, multi-document, and
+  current-versus-archived policy cases; it has no paired answer labels.
 
 Exact v1 metadata selectors are transparent but depend on stable chunk
 provenance. V2 content anchors support boundary experiments but require a new
@@ -249,8 +299,9 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
 - `rag_pipeline.benchmarking.artifacts` owns artifact validation, regression
   gates, and comparison behavior under the canonical benchmark package.
 - `benchmark` starts from one explicit corpus and paired retrieval/answer files,
-  then builds a fresh temporary Qdrant collection. Retrieval schemas v1 and v2
-  are accepted, but v2 is required for valid boundary-strategy comparisons. The
+  then builds a fresh temporary Qdrant collection. Retrieval schemas v1, v2,
+  and v3 are accepted, but source-anchor labels are required for valid
+  boundary-strategy and prompt-evidence comparisons. The
   index is closed and deleted after its storage size is recorded.
 - Corpus relative paths and bytes plus both dataset files receive SHA-256
   fingerprints. Artifacts omit absolute corpus, cache, output, and work paths.
@@ -261,6 +312,11 @@ ground-truth assets so dataset versions do not encode a preferred pipeline.
   chunking (including semantic boundary inference), final embedding, index,
   retrieval-evaluation, and answer-evaluation stage durations, with ordered
   per-case retrieval and end-to-end answer latency.
+- When every answerable case has a paired source anchor, benchmark reports also
+  classify each selector as not retrieved, retrieved but not packed, packed
+  with an abstention, or packed with a non-abstaining answer. The check uses
+  exact text prefixes passed to generation, not bounded citation excerpts.
+  Older chunk-index or unpaired labels keep their existing artifact shape.
 - Optional strict threshold profiles apply inclusive minimum or maximum bounds
   to allowlisted quality and operational metrics. Profiles bind to corpus and
   dataset hashes plus final top-k and fail before model loading on a mismatch.

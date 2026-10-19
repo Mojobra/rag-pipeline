@@ -4,8 +4,8 @@ This manual is the implementation-level inventory for the RAG pipeline. It
 explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
-- **Project version:** 0.2.0
-- **Last verified:** 2026-08-13
+- **Project version:** 0.3.0
+- **Last verified:** 2026-10-19
 - **Current product surface:** Local Python CLI
 
 ## How To Read Version Information
@@ -36,6 +36,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Reranking | Sentence Transformers CrossEncoder | Jointly scores query and chunk pairs after first-stage retrieval. |
 | Vector storage | Embedded Qdrant | Persists vectors and metadata and executes dense or hybrid similarity search. |
 | Text splitting | LangChain Text Splitters | Provides recursive and Markdown-aware hard boundaries for chunks. |
+| HTML extraction | Python `html.parser` | Removes markup and non-content elements while preserving readable block and table text. |
 | PDF extraction | pypdf | Extracts one provenance-bearing document per PDF page. |
 | DOCX extraction | docx2txt | Extracts a Word document as one logical text document. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
@@ -48,6 +49,64 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Coverage | Coverage.py | Measures branch coverage and enforces an 80 percent minimum. |
 | CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests and `main`. |
 | Version control | Git and GitHub | Provide reviewable branch history, pull requests, release tags, and benchmark commit provenance. |
+
+## Library Inventory
+
+This consolidated table lists every runtime, development, and build dependency
+declared in `pyproject.toml`, plus directly imported or operationally important
+transitive libraries. Package names are distribution names used by the package
+manager, which can differ from Python import names.
+
+- **Direct runtime:** explicitly declared application dependencies, even when
+  their functionality is reached through another library's adapter.
+- **Transitive:** installed through another dependency rather than separately
+  declared by this project. Inclusion here does not make it a direct dependency.
+- **Development:** tools declared in the `dev` dependency group.
+- **Build:** the backend declared under `[build-system]`.
+
+| Library / package | Dependency type | Purpose and use in this project |
+| --- | --- | --- |
+| `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
+| `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
+| `langchain-huggingface` | Direct runtime | Provides `HuggingFaceEmbeddings` for dense vectors and `HuggingFacePipeline` for local answer generation. |
+| `langchain-qdrant` | Direct runtime | Adapts Qdrant retrieval and supplies sparse-vector contracts and the `FastEmbedSparse` provider. |
+| `langchain-text-splitters` | Direct runtime | Creates bounded recursive chunks, including language-aware separator policies for structure-aware experiments. |
+| `qdrant-client` | Direct runtime | Opens embedded Qdrant, manages collections and point writes, and defines vector, query, and metadata-filter models. |
+| `sentence-transformers` | Direct runtime | Executes dense embedding models through the Hugging Face adapter and the optional `CrossEncoder` reranker. |
+| `transformers` | Direct runtime | Loads local text-to-text models and tokenizers through the generation adapter. |
+| `sentencepiece` | Direct runtime | Supplies tokenizer support for the default T5-family generation model. |
+| `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
+| `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
+| `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
+| `torch` (PyTorch) | Transitive | Executes dense embedding, generation, and reranking models; benchmark provenance also inspects its CUDA information lazily. |
+| `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
+| `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
+| `onnxruntime` | Transitive | Supplies FastEmbed's ONNX model support; the current BM25 sparse path is lexical, not neural ONNX inference. |
+| `pydantic` | Transitive | Supports LangChain/Qdrant model contracts; generation tests import `Field` for an LLM test double. It is not a project-owned HTTP schema layer. |
+| `ruff` | Development | Checks and formats source and tests, including imports and the configured correctness rules. |
+| `mypy` | Development | Statically checks production code with the project's strict typing configuration. |
+| `coverage[toml]` (Coverage.py) | Development | Measures statement and branch coverage for the offline test suite and enforces the configured coverage floor. |
+| `setuptools` | Build | Implements the `setuptools.build_meta` backend that packages the typed `src` layout into wheels and source distributions. |
+
+Python standard-library modules such as `argparse`, `html.parser`, `pathlib`, `dataclasses`,
+`json`, `sqlite3`, and `unittest` do not require separate package installation.
+Python, uv, Git, GitHub, and GitHub Actions are tools or platforms, not additional
+application libraries; their responsibilities appear in **Stack At A Glance**
+and **Engineering Toolchain**.
+
+The table is an application-stack inventory, not an exhaustive software bill of
+materials. Indirect implementation dependencies remain authoritative in
+`uv.lock`; do not mistake every locked package for a library imported by project
+code. Inspect the complete graph, including development tools, without changing
+the lockfile or accessing the network:
+
+```powershell
+uv tree --locked --offline --all-groups
+```
+
+The default tree is filtered for the current interpreter and platform. Add
+`--universal` to inspect the lockfile graph across supported environments;
+platform-specific packages in that graph are not necessarily installed locally.
 
 ## Direct Dependencies
 
@@ -76,13 +135,19 @@ transitive runtime snapshot is:
 | --- | --- | --- |
 | `langchain-core` | 1.4.9 | Defines the document, embedding, prompt, model, parser, and runnable contracts imported by project code. |
 | `torch` | 2.13.0 | Executes Sentence Transformers and Hugging Face model inference on CPU or CUDA. |
-| `numpy` | 2.5.1 | Supplies array operations used by the ML provider stack and provider score outputs. |
+| `numpy` | 2.4.6 on Python 3.11; 2.5.1 on Python 3.12+ | Supplies array operations used by the ML provider stack and provider score outputs. |
 | `tokenizers` | 0.22.2 | Provides optimized Hugging Face tokenization where supported by a model. |
-| `onnxruntime` | 1.27.0 | Executes FastEmbed's local ONNX models. |
+| `onnxruntime` | 1.27.0 | Supplies FastEmbed's ONNX model support; the current BM25 path is lexical. |
+| `pydantic` | 2.13.4 | Supports LangChain/Qdrant contracts and the `Field` import in generation test doubles, not project-owned API schemas. |
 
 These packages are locked in `uv.lock` rather than maintained as independent
 application APIs. The full transitive graph contains additional implementation
 dependencies and can be inspected with `uv tree`.
+
+The build requirement is `setuptools>=68` with the `setuptools.build_meta`
+backend. Its isolated build-environment version is not pinned in
+`pyproject.toml`; a transitive setuptools entry in `uv.lock` is not a separate
+exact build-backend pin.
 
 Development tools are deliberately pinned exactly:
 
@@ -133,12 +198,19 @@ supported files to LangChain `Document` objects:
 - `.pdf`: pypdf emits one document per page so citations retain page identity.
 - `.docx`: docx2txt emits one logical document because Word pagination depends
   on rendering settings.
-- `.txt`, `.md`, `.markdown`, `.html`, and `.htm`: Python reads the file as
-  UTF-8 text by default. Markup is retained rather than semantically parsed.
+- `.txt`, `.md`, and `.markdown`: Python reads UTF-8 text by default without
+  transforming Markdown markup.
+- `.html` and `.htm`: the standard-library HTML parser removes tags, scripts,
+  styles, head content, navigation, and templates. Visible headings, paragraphs,
+  lists, table rows/cells, asides, and footers become normalized text.
 
 Metadata includes the resolved source path, filename, extension, byte size,
-extractor, and page information where available. The current implementation
-does not perform OCR, table extraction, image understanding, or HTML cleanup.
+extractor, and page information where available. HTML reports
+`extractor=html.parser`, so filters on the former `extractor=text` value need
+updating. HTML character offsets refer to the normalized extracted text; they
+are not raw file positions. Reindex HTML sources to replace obsolete markup
+chunks. The parser does not evaluate CSS visibility, extract image text, or
+guarantee visual reading order. PDF OCR and layout reconstruction remain absent.
 
 ### 2. Chunking
 
@@ -156,6 +228,11 @@ Trade-off: smaller chunks improve retrieval precision but may lose context;
 larger or overlapping chunks improve continuity but increase embedding work,
 storage, and prompt usage. Semantic chunking can improve topical coherence but
 adds an embedding pass during ingestion, so it remains opt-in and benchmarked.
+The [RQ-05 audit](docs/RQ05_EXTRACTION_CHUNKING.md) measured the pinned local
+embedding tokenizer: no v2 strategy chunk exceeded its 256-token cap. The
+synthetic HTML fixture did exceed it as raw markup but not after cleaning.
+These observations do not justify a global token-aware splitter or a change
+to recursive indexing defaults.
 
 ### 3. Dense Embeddings
 
@@ -199,6 +276,19 @@ default BM25 model's tokenization and stemming also need corpus-specific review.
 - Schemas: version 1 for dense and version 2 for hybrid collections
 - Writes: synchronous, validated, and batched
 - Identity: deterministic UUID-based point IDs for idempotent upserts
+
+The CLI `index` workflow now replaces the full point set for each discovered
+source. It snapshots existing source IDs, writes all new chunk vectors, then
+deletes IDs absent from the new set. Empty sources therefore clear their old
+points. `--prune-missing` explicitly adds absent files from one recursively
+scanned directory to the replacement scope; sources outside that directory
+remain untouched. The lower-level `LocalVectorStore.index()` method remains a
+general upsert for benchmark and programmatic callers.
+
+Replacement requires extra Qdrant reads and deletes. The synchronous batches
+are not transactional as a group: extraction and embedding failures happen
+before any write, while a Qdrant write or deletion failure may leave a partial
+update. Repeating the same indexing operation reconciles the source scope.
 
 The collection contract records and validates schema version, model identity,
 vector dimension, named-vector layout, distance metric, and sparse settings.
@@ -271,11 +361,58 @@ hosted judge model or an evaluation framework such as Ragas.
 Retrieval evaluation uses versioned JSON datasets and reports per-case and macro
 Precision@k, Recall@k, reciprocal rank, and MRR. Schema-v2 relevance labels use
 source metadata and content anchors instead of unstable chunk indices.
+Schema v3 preserves those positive selectors and adds explicit unsupported
+questions with empty relevance sets. Positive macro metrics exclude negative
+cases; negative cases separately report strict no-hit and false-positive rates.
+Direct Python case construction still rejects an empty relevance set unless
+`allow_empty_relevance=True` is passed; the v3 JSON loader supplies it for
+negative cases, preserving the earlier constructor default.
+Per-case diagnostics distinguish unique evidence selectors from overlapping
+chunk hits and identify missing selectors and unwanted result ranks. The new
+synthetic v3 corpus includes current and archived policy sources, but has no
+paired answer-evaluation labels. V1/v2 report shapes remain unchanged.
+
+With `evaluate-retrieval --compare-score-threshold`, the v3 evaluator reruns
+the same queries for a baseline gate and one or more candidate gates through
+one initialized retrieval pipeline. Its separate comparison report records
+the requested search mode, exact gates, observed first-stage score kind per
+case, existing metrics, lost/gained evidence selectors, and unwanted-hit
+changes. The comparison excludes reranking to isolate the first stage and
+never changes the index or the ordinary evaluator's JSON contract. Dense
+cosine and hybrid RRF gates require separate calibration; an empty hybrid
+sparse vector can fall back to cosine. `--no-score-threshold` explicitly
+disables the gate on answer-oriented commands whose default remains `0.2`.
+The [RQ-03 calibration record](docs/RQ03_SCORE_GATE_CALIBRATION.md) contains
+the local synthetic-corpus measurements; they are not production thresholds.
+
+With `evaluate-retrieval --rerank --compare-candidate-k`, a schema-v3 dataset
+is rerun at `--candidate-k` and each distinct comparison width. The application
+session exposes raw first-stage candidates and reranks exactly that pool,
+without reloading Qdrant or the models for each query. The report compares
+Recall@candidate-k, unreranked Recall@top-k, and reranked Recall@top-k, plus
+per-case first-stage misses, final-selection losses, score kinds, and observed
+retrieval/reranking wall time. Each width issues a real Qdrant query: hybrid
+fusion need not yield a simple prefix of a wider result set. Compare dense and
+hybrid collections separately against identical corpus and labels. Timings
+include lazy initialization and are not latency benchmarks. The
+[RQ-04 comparison record](docs/RQ04_CANDIDATE_RANKING.md) reports the small
+synthetic experiment without changing defaults.
 
 Answer evaluation reports normalized exact match, token F1, abstention accuracy,
 abstention precision/recall, answer rate, and citation-behavior rate. These are
 repeatable lexical and behavioral checks; they do not prove semantic
 faithfulness or business correctness.
+
+For paired schema-v2/v3 retrieval anchors and answerable cases, isolated
+benchmarks also record which exact source spans survive retrieval and prompt
+packing. The answer result retains the packed evidence prefixes used for
+generation; diagnostics separate missing retrieval, lost packing, and model
+abstention after packing. A non-abstaining answer is not automatically correct:
+exact match and token F1 remain separate. Legacy or unpaired labels leave this
+optional report absent, preserving existing artifact comparisons and gates.
+The [RQ-06 measurement](docs/RQ06_EVIDENCE_COVERAGE.md) found full prompt
+coverage at the default context cap on the synthetic v2 corpus, so it did not
+justify a packing-policy change.
 
 The benchmark runner rebuilds a temporary index from an exact corpus and records:
 
@@ -284,6 +421,7 @@ The benchmark runner rebuilds a temporary index from an exact corpus and records
 - Stage duration plus per-case retrieval and answer latency
 - Mean, p50, and p95 latency summaries
 - Retrieval and answer quality metrics
+- Optional per-anchor prompt-evidence diagnostics for paired source labels
 - Index storage size and total runtime
 - Compatible-run deltas and allowlisted regression gates
 
@@ -447,6 +585,9 @@ For an affected change:
 1. Inspect `pyproject.toml`, `uv.lock`, the changed implementation, and
    `.github/workflows/ci.yml` as applicable.
 2. Update the relevant section and the `Last verified` date.
+   When libraries change, also reconcile **Library Inventory**, the dependency
+   tables, and actual imports; preserve the distinction between direct,
+   transitive, development, and build dependencies.
 3. Keep implemented behavior separate from roadmap plans.
 4. Check consistency with `README.md`, `ARCHITECTURE.md`, and
    `CONTRIBUTING.md`.

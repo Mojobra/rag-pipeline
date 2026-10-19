@@ -407,6 +407,7 @@ class BenchmarkCliTests(unittest.TestCase):
         output_name: str,
         hybrid: bool = False,
         chunking_strategy: str = "recursive",
+        anchor_labels: bool = False,
     ) -> tuple[int, dict[str, object], str, Path]:
         """Run the CLI with local providers and return its saved artifact."""
         from rag_pipeline.__main__ import main
@@ -429,7 +430,7 @@ class BenchmarkCliTests(unittest.TestCase):
         retrieval_dataset.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2 if anchor_labels else 1,
                     "name": "benchmark-retrieval-v1",
                     "cases": [
                         {
@@ -437,9 +438,11 @@ class BenchmarkCliTests(unittest.TestCase):
                             "query": "Which receipt is required?",
                             "relevant": [
                                 {
-                                    "file_name": "expenses.md",
-                                    "chunk_index": 0,
+                                    "metadata": {"file_name": "expenses.md"},
+                                    "content_contains": "itemized receipts",
                                 }
+                                if anchor_labels
+                                else {"file_name": "expenses.md", "chunk_index": 0}
                             ],
                         }
                     ],
@@ -600,6 +603,7 @@ class BenchmarkCliTests(unittest.TestCase):
             artifact["results"]["answer"]["metrics"]["exact_match_rate"],
             1.0,
         )
+        self.assertNotIn("evidence_coverage", artifact["results"])
         self.assertTrue(artifact["threshold_gate"]["passed"])
         self.assertTrue(artifact["threshold_gate"]["applicability_verified"])
         self.assertEqual(len(artifact["timings"]["answer"]["cases"]), 2)
@@ -608,6 +612,32 @@ class BenchmarkCliTests(unittest.TestCase):
         self.assertNotIn(serialized_temp_path, serialized_artifact)
         self.assertIn("Threshold gate: PASS", output)
         self.assertIn("Artifact:", output)
+
+    def test_cli_reports_prompt_evidence_for_paired_anchor_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            exit_code, artifact, output, _ = self._run_benchmark(
+                temp_dir,
+                threshold_checks=[
+                    {
+                        "metric": "retrieval.mean_recall_at_k",
+                        "operator": "minimum",
+                        "value": 1.0,
+                    }
+                ],
+                output_name="anchor-coverage",
+                anchor_labels=True,
+            )
+
+        self.assertEqual(exit_code, 0)
+        evidence = artifact["results"]["evidence_coverage"]
+        self.assertEqual(evidence["answerable_case_count"], 1)
+        self.assertEqual(evidence["selector_count"], 1)
+        self.assertEqual(evidence["metrics"]["retrieval_coverage_rate"], 1.0)
+        self.assertEqual(evidence["metrics"]["packed_coverage_rate"], 1.0)
+        self.assertEqual(
+            evidence["cases"][0]["selectors"][0]["state"], "packed_and_answered"
+        )
+        self.assertIn("Prompt evidence: retrieved=1.000, packed=1.000", output)
 
     def test_cli_writes_failed_gate_and_returns_one(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -680,6 +710,17 @@ class BenchmarkCliTests(unittest.TestCase):
                         artifact["configuration"]["chunking"]["strategy"],
                         artifact_strategy,
                     )
+                    if cli_strategy == "structure-aware":
+                        self.assertEqual(
+                            artifact["configuration"]["chunking"]["recognized_markup"],
+                            ["markdown", "raw_html"],
+                        )
+                        self.assertEqual(
+                            artifact["configuration"]["chunking"][
+                                "cleaned_html_fallback"
+                            ],
+                            "recursive_character",
+                        )
                     self.assertEqual(artifact["index"]["chunk_count"], 1)
 
     def test_compare_cli_outputs_compatible_metric_deltas_as_json(self) -> None:
