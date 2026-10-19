@@ -290,8 +290,8 @@ branches and enforces an 80 percent floor. The
 ## Roadmap
 
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
-are in progress. See the [quality plan](docs/RETRIEVAL_QUALITY_PLAN.md) before
-Phase 4. Later work includes a FastAPI service, followed by
+are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
+for the six follow-ups. Phase 4 plans a FastAPI service, followed by
 authentication, logging, monitoring, containerization, and deployment CI/CD.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
