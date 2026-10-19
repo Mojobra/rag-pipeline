@@ -1,7 +1,7 @@
 # Retrieval Quality Implementation Plan
 
 Status: in progress. This document records follow-up work identified during a
-codebase review; RQ-01 and RQ-02 are integrated into `develop`. Later tasks remain
+codebase review; RQ-01 through RQ-03 are integrated into `develop`. Later tasks remain
 separately reviewable and are marked complete only after integration.
 
 ## Goal And Scope
@@ -27,7 +27,7 @@ facts, not measured quality results.
 | --- | --- | --- |
 | RQ-01 | Source-scoped index synchronization | Complete |
 | RQ-02 | Broader retrieval labels and metrics | Complete |
-| RQ-03 | Score-gate calibration | Planned |
+| RQ-03 | Score-gate calibration | Complete |
 | RQ-04 | Candidate and reranking comparison | Planned |
 | RQ-05 | Extraction and chunking quality | Planned |
 | RQ-06 | Evidence-to-prompt coverage | Planned |
@@ -127,10 +127,9 @@ and evidence that the chosen false-positive/false-negative trade-off is useful.
 missed answers. Provider scores are ranking signals, not calibrated confidence
 probabilities.
 
-The task-branch [synthetic calibration record](RQ03_SCORE_GATE_CALIBRATION.md)
+The [synthetic calibration record](RQ03_SCORE_GATE_CALIBRATION.md)
 documents the first dense and hybrid comparison, including exact settings and
-per-case losses. RQ-03 remains planned in the tracker until reviewed integration
-into `develop`.
+per-case losses. RQ-03 was integrated into `develop` in PR #16.
 
 ## RQ-04: Tune Candidate Retrieval And Reranking
 
@@ -154,6 +153,10 @@ otherwise the existing options remain available without extra complexity.
 **Trade-off.** Wider candidate pools and cross-encoders increase inference
 cost. A source-diversity rule could suppress multiple genuinely useful passages
 from the same document, so it requires labeled multi-evidence cases.
+
+The task-branch [synthetic candidate comparison](RQ04_CANDIDATE_RANKING.md)
+records the first width sweep and its per-query misses. RQ-04 remains planned
+in the tracker until reviewed integration into `develop`.
 
 ## RQ-05: Improve Extracted Text And Chunk Boundaries
 

@@ -33,7 +33,9 @@ def register_evaluation_commands(
             "Qdrant retrieval path and report binary top-k metrics. Optional "
             "filters, hybrid search, and reranking are included. Repeated "
             "--compare-score-threshold values compare first-stage gates on v3 "
-            "labels without reranking. Generation is never invoked and the "
+            "labels without reranking. Repeated --compare-candidate-k values "
+            "compare pool and final rankings with a cross-encoder on v3 labels. "
+            "Generation is never invoked and the "
             "index is not modified."
         ),
     )
@@ -63,13 +65,25 @@ def register_evaluation_commands(
         ),
     )
     retrieval_parser.add_argument(
+        "--compare-candidate-k",
+        action="append",
+        type=int,
+        metavar="N",
+        help=(
+            "Repeat to compare first-stage pool widths against --candidate-k "
+            "with --rerank on v3 labels. Each positive width must be at least "
+            "--top-k; wider pools add Qdrant work and cross-encoder inference. "
+            "Cannot combine with --compare-score-threshold."
+        ),
+    )
+    retrieval_parser.add_argument(
         "--output-format",
         choices=("table", "json"),
         default="table",
         help=(
             "Render case and aggregate metrics as a terminal table or JSON; "
-            "score-gate comparisons add per-case deltas. Use JSON to save or "
-            "compare runs programmatically (default: table)."
+            "comparison runs add stage or per-case diagnostics. Use JSON to "
+            "save or compare runs programmatically (default: table)."
         ),
     )
     retrieval_parser.set_defaults(_handler=run_evaluate_retrieval)
@@ -123,6 +137,12 @@ def run_evaluate_retrieval(
         open_local_retrieval_pipeline,
     )
     from rag_pipeline.cli.config import build_retrieval_runtime_config
+    from rag_pipeline.evaluation.candidate_ranking import (
+        candidate_ranking_to_dict,
+        evaluate_candidate_ranking,
+        format_candidate_ranking_table,
+        validate_candidate_widths,
+    )
     from rag_pipeline.evaluation.retrieval import (
         evaluate_retrieval,
         format_retrieval_evaluation_table,
@@ -148,6 +168,13 @@ def run_evaluate_retrieval(
     try:
         dataset = load_retrieval_evaluation_dataset(args.dataset)
         runtime_config = build_retrieval_runtime_config(args)
+        if args.compare_candidate_k and args.compare_score_threshold:
+            parser.error(
+                "--compare-candidate-k cannot be combined with "
+                "--compare-score-threshold."
+            )
+        if args.compare_candidate_k and not args.rerank:
+            parser.error("--compare-candidate-k requires --rerank.")
         if args.compare_score_threshold and args.rerank:
             parser.error(
                 "--compare-score-threshold evaluates the first stage only; "
@@ -161,6 +188,13 @@ def run_evaluate_retrieval(
                 baseline_gate=args.score_threshold,
                 candidate_gates=args.compare_score_threshold,
             )
+        if args.compare_candidate_k:
+            validate_candidate_widths(
+                dataset,
+                top_k=args.top_k,
+                search_mode=args.search_mode,
+                candidate_widths=(args.candidate_k, *args.compare_candidate_k),
+            )
     except (
         InvalidEmbeddingConfigurationError,
         InvalidPipelineConfigurationError,
@@ -173,7 +207,19 @@ def run_evaluate_retrieval(
         parser.error(str(exc))
 
     with open_local_retrieval_pipeline(runtime_config) as pipeline:
-        if args.compare_score_threshold:
+        if args.compare_candidate_k:
+            ranking_comparison = evaluate_candidate_ranking(
+                dataset,
+                lambda query, config: pipeline.retrieve_candidates(
+                    query, retrieval_config=config
+                ),
+                pipeline.rerank_candidates,
+                top_k=args.top_k,
+                search_mode=args.search_mode,
+                candidate_widths=(args.candidate_k, *args.compare_candidate_k),
+                retrieval_config=runtime_config.retrieval,
+            )
+        elif args.compare_score_threshold:
             comparison = evaluate_score_gates(
                 dataset,
                 lambda query, config: pipeline.retrieve(
@@ -195,7 +241,12 @@ def run_evaluate_retrieval(
                 top_k=args.top_k,
             )
 
-    if args.compare_score_threshold:
+    if args.compare_candidate_k:
+        if args.output_format == "json":
+            print(json.dumps(candidate_ranking_to_dict(ranking_comparison), indent=2))
+        else:
+            print(format_candidate_ranking_table(ranking_comparison))
+    elif args.compare_score_threshold:
         if args.output_format == "json":
             print(json.dumps(score_gate_comparison_to_dict(comparison), indent=2))
         else:

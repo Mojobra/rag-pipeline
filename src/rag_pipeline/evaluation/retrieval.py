@@ -353,9 +353,40 @@ def evaluate_retrieval(
         raise TypeError("retrieve must be callable.")
     _validate_top_k(top_k)
 
+    return score_retrieval_results(
+        dataset,
+        tuple(retrieve(case.query) for case in dataset.cases),
+        top_k=top_k,
+    )
+
+
+def score_retrieval_results(
+    dataset: RetrievalEvaluationDataset,
+    results_by_case: Sequence[Sequence[RetrievalResult]],
+    *,
+    top_k: int,
+) -> RetrievalEvaluationReport:
+    """Score precomputed rankings in dataset order without repeating retrieval.
+
+    This separates provider I/O from metric computation when an experiment
+    evaluates the same first-stage pool at several cutoffs. It rejects missing
+    or extra case rankings and delegates rank validation to the case scorer.
+    """
+    if not isinstance(dataset, RetrievalEvaluationDataset):
+        raise TypeError("dataset must be a RetrievalEvaluationDataset.")
+    _validate_top_k(top_k)
+    if isinstance(results_by_case, (str, bytes)) or not isinstance(
+        results_by_case, Sequence
+    ):
+        raise RetrievalEvaluationInputError("results_by_case must be a sequence.")
+    if len(results_by_case) != len(dataset.cases):
+        raise RetrievalEvaluationInputError(
+            "results_by_case must have one ranking per dataset case."
+        )
+
     case_metrics = tuple(
-        _evaluate_case(case, retrieve(case.query), top_k=top_k)
-        for case in dataset.cases
+        _evaluate_case(case, results, top_k=top_k)
+        for case, results in zip(dataset.cases, results_by_case, strict=True)
     )
     positive_cases = tuple(case for case in case_metrics if case.relevant_count > 0)
     negative_cases = tuple(case for case in case_metrics if case.relevant_count == 0)

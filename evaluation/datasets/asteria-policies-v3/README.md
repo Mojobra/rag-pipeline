@@ -69,3 +69,10 @@ calibration separately against a hybrid index with `--search-mode hybrid` and
 the matching sparse model; cosine and RRF scores are not interchangeable.
 These commands are a procedure, not measured quality results or a recommendation
 to use `0.2` for either mode.
+
+To inspect candidate-pool versus final-ranking misses, run
+`evaluate-retrieval` with `--rerank --top-k 2 --candidate-k 2` and repeated
+`--compare-candidate-k 3 --compare-candidate-k 4`. Use the same v3 labels and
+matching dense or hybrid collection, but run each mode separately. The
+[candidate comparison guide](../../../docs/CLI_REFERENCE.md#candidate-and-reranking-comparison)
+explains the stage metrics and the four-chunk limitation.
