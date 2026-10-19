@@ -36,6 +36,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Reranking | Sentence Transformers CrossEncoder | Jointly scores query and chunk pairs after first-stage retrieval. |
 | Vector storage | Embedded Qdrant | Persists vectors and metadata and executes dense or hybrid similarity search. |
 | Text splitting | LangChain Text Splitters | Provides recursive and Markdown-aware hard boundaries for chunks. |
+| HTML extraction | Python `html.parser` | Removes markup and non-content elements while preserving readable block and table text. |
 | PDF extraction | pypdf | Extracts one provenance-bearing document per PDF page. |
 | DOCX extraction | docx2txt | Extracts a Word document as one logical text document. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
@@ -87,7 +88,7 @@ manager, which can differ from Python import names.
 | `coverage[toml]` (Coverage.py) | Development | Measures statement and branch coverage for the offline test suite and enforces the configured coverage floor. |
 | `setuptools` | Build | Implements the `setuptools.build_meta` backend that packages the typed `src` layout into wheels and source distributions. |
 
-Python standard-library modules such as `argparse`, `pathlib`, `dataclasses`,
+Python standard-library modules such as `argparse`, `html.parser`, `pathlib`, `dataclasses`,
 `json`, `sqlite3`, and `unittest` do not require separate package installation.
 Python, uv, Git, GitHub, and GitHub Actions are tools or platforms, not additional
 application libraries; their responsibilities appear in **Stack At A Glance**
@@ -197,12 +198,19 @@ supported files to LangChain `Document` objects:
 - `.pdf`: pypdf emits one document per page so citations retain page identity.
 - `.docx`: docx2txt emits one logical document because Word pagination depends
   on rendering settings.
-- `.txt`, `.md`, `.markdown`, `.html`, and `.htm`: Python reads the file as
-  UTF-8 text by default. Markup is retained rather than semantically parsed.
+- `.txt`, `.md`, and `.markdown`: Python reads UTF-8 text by default without
+  transforming Markdown markup.
+- `.html` and `.htm`: the standard-library HTML parser removes tags, scripts,
+  styles, head content, navigation, and templates. Visible headings, paragraphs,
+  lists, table rows/cells, asides, and footers become normalized text.
 
 Metadata includes the resolved source path, filename, extension, byte size,
-extractor, and page information where available. The current implementation
-does not perform OCR, table extraction, image understanding, or HTML cleanup.
+extractor, and page information where available. HTML reports
+`extractor=html.parser`, so filters on the former `extractor=text` value need
+updating. HTML character offsets refer to the normalized extracted text; they
+are not raw file positions. Reindex HTML sources to replace obsolete markup
+chunks. The parser does not evaluate CSS visibility, extract image text, or
+guarantee visual reading order. PDF OCR and layout reconstruction remain absent.
 
 ### 2. Chunking
 
@@ -220,6 +228,11 @@ Trade-off: smaller chunks improve retrieval precision but may lose context;
 larger or overlapping chunks improve continuity but increase embedding work,
 storage, and prompt usage. Semantic chunking can improve topical coherence but
 adds an embedding pass during ingestion, so it remains opt-in and benchmarked.
+The [RQ-05 audit](docs/RQ05_EXTRACTION_CHUNKING.md) measured the pinned local
+embedding tokenizer: no v2 strategy chunk exceeded its 256-token cap. The
+synthetic HTML fixture did exceed it as raw markup but not after cleaning.
+These observations do not justify a global token-aware splitter or a change
+to recursive indexing defaults.
 
 ### 3. Dense Embeddings
 

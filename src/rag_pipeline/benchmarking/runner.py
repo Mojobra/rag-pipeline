@@ -640,7 +640,8 @@ def _chunking_configuration_to_dict(
             "strategy": "structure_aware_recursive",
             "chunk_size_characters": config.chunk_size,
             "chunk_overlap_characters": config.chunk_overlap,
-            "recognized_markup": ["html", "markdown"],
+            "recognized_markup": ["markdown", "raw_html"],
+            "cleaned_html_fallback": "recursive_character",
             "fallback": "recursive_character",
         }
     return {

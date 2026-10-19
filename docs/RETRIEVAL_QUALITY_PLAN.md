@@ -1,7 +1,7 @@
 # Retrieval Quality Implementation Plan
 
 Status: in progress. This document records follow-up work identified during a
-codebase review; RQ-01 through RQ-03 are integrated into `develop`. Later tasks remain
+codebase review; RQ-01 through RQ-04 are integrated into `develop`. Later tasks remain
 separately reviewable and are marked complete only after integration.
 
 ## Goal And Scope
@@ -28,7 +28,7 @@ facts, not measured quality results.
 | RQ-01 | Source-scoped index synchronization | Complete |
 | RQ-02 | Broader retrieval labels and metrics | Complete |
 | RQ-03 | Score-gate calibration | Complete |
-| RQ-04 | Candidate and reranking comparison | Planned |
+| RQ-04 | Candidate and reranking comparison | Complete |
 | RQ-05 | Extraction and chunking quality | Planned |
 | RQ-06 | Evidence-to-prompt coverage | Planned |
 
@@ -154,9 +154,9 @@ otherwise the existing options remain available without extra complexity.
 cost. A source-diversity rule could suppress multiple genuinely useful passages
 from the same document, so it requires labeled multi-evidence cases.
 
-The task-branch [synthetic candidate comparison](RQ04_CANDIDATE_RANKING.md)
-records the first width sweep and its per-query misses. RQ-04 remains planned
-in the tracker until reviewed integration into `develop`.
+The [synthetic candidate comparison](RQ04_CANDIDATE_RANKING.md) records the
+first width sweep and its per-query misses. RQ-04 was integrated into
+`develop` in PR #17.
 
 ## RQ-05: Improve Extracted Text And Chunk Boundaries
 
@@ -181,6 +181,10 @@ stable citation and collection-compatibility behavior.
 **Trade-off.** Cleaning can remove meaningful text; smaller or overlapping
 chunks increase index size; semantic boundaries add embedding work. Parser
 changes can invalidate existing offsets and evaluation anchors.
+
+The task-branch [extraction and chunking record](RQ05_EXTRACTION_CHUNKING.md)
+documents the fixture audit and matched v2 benchmarks. RQ-05 remains planned
+in the tracker until reviewed integration into `develop`.
 
 ## RQ-06: Measure Evidence That Reaches The Prompt
 

@@ -38,7 +38,7 @@ relevance anchors. Recursive chunking remains the default outside experiments.
 The [retrieval quality implementation plan](docs/RETRIEVAL_QUALITY_PLAN.md)
 records six separately reviewable tasks covering index freshness, evaluation
 coverage, score calibration, candidate ranking, source text and chunking, and
-evidence packing. RQ-01 through RQ-03 are integrated into `develop`; the original roadmap task
+evidence packing. RQ-01 through RQ-04 are integrated into `develop`; the original roadmap task
 numbers below remain unchanged.
 
 ## Phase 4: Production
