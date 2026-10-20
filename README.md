@@ -41,6 +41,8 @@ local bearer token; it is not a hosted production service.
   into a separate collection by default; it does not enforce source ACLs.
 - **Manual Confluence import:** bounded, read-only Cloud space page scan into
   a separate collection by default; it does not enforce page ACLs.
+- **Manual Google Drive import:** bounded, read-only folder scan of supported
+  files and Google Docs into a separate collection; it does not enforce Drive ACLs.
 
 ## Quick Start
 
@@ -144,6 +146,9 @@ enforced by retrieval.
 For a Confluence Cloud space, see the
 [Confluence setup and security contract](docs/CONFLUENCE.md). Its API-token
 import has the same retrieval-permission limitation.
+For a Google Drive folder, see the
+[Drive setup and security contract](docs/GOOGLE_DRIVE.md). Its read-only ADC
+import also does not carry source permissions into retrieval.
 
 ### Enable Hybrid Search And Reranking
 
@@ -208,6 +213,7 @@ answers, so reports from private data need the same protection as their sources.
 | `index` | Build or update a compatible dense or hybrid collection. |
 | `index-sharepoint` | Manually import supported files from one Graph drive; no ACL sync. |
 | `index-confluence` | Manually import current pages from one Cloud space; no ACL sync. |
+| `index-google-drive` | Manually import supported files and Google Docs from one Drive folder; no ACL sync. |
 | `retrieve` | Inspect ranked evidence, optionally filtered or reranked. |
 | `answer` | Generate an answer and citations from retrieved evidence. |
 | `evaluate-retrieval` | Score an existing collection against relevance labels. |
@@ -235,6 +241,9 @@ The optional SharePoint importer reads three `RAG_SHAREPOINT_*` environment
 variables, documented in [its setup guide](docs/SHAREPOINT.md).
 The optional Confluence importer reads three `RAG_CONFLUENCE_*` variables;
 see [its setup guide](docs/CONFLUENCE.md).
+The Google Drive importer uses Application Default Credentials. An optional
+`GOOGLE_APPLICATION_CREDENTIALS` path selects a private credential file;
+see [its setup guide](docs/GOOGLE_DRIVE.md).
 
 | Setting | Default | Practical effect |
 | --- | --- | --- |
@@ -243,7 +252,7 @@ see [its setup guide](docs/CONFLUENCE.md).
 | `--device` / `--generation-device` | `cpu` | Independent embedding and generation devices. CUDA requires compatible hardware and sufficient VRAM. |
 | `--chunk-size` / `--chunk-overlap` | `1000` / `200` characters | Balance evidence size against chunk count, duplicated text, and storage. |
 | `--store-path` | `.rag_data/qdrant` | Persistent embedded database directory; reuse it for subsequent queries. |
-| `--collection-name` | `rag_documents` (`index-sharepoint`: `sharepoint_documents`; `index-confluence`: `confluence_documents`) | Collection within the database; examples use explicit names to separate corpora. |
+| `--collection-name` | `rag_documents` (`index-sharepoint`: `sharepoint_documents`; `index-confluence`: `confluence_documents`; `index-google-drive`: `google_drive_documents`) | Collection within the database; examples use explicit names to separate corpora. |
 | `--search-mode` | `dense` | Select `hybrid` only for a collection indexed in that mode. |
 | `--top-k` | `4` | Maximum final evidence chunks per query. |
 | `--score-threshold` / `--no-score-threshold` | Disabled for `retrieve` and `evaluate-retrieval`; `0.2` for `answer`, `evaluate-answer`, and `benchmark` | Apply or explicitly disable the first-stage gate before reranking or generation. Scores are mode-specific, not confidence probabilities. |
@@ -301,6 +310,7 @@ package boundaries and the contracts enforced between stages.
 | Local generation | Hugging Face Transformers |
 | SharePoint import | MSAL and HTTPX against Microsoft Graph |
 | Confluence import | HTTPX against Confluence Cloud REST API v2 |
+| Google Drive import | Google Auth ADC and HTTPX against Drive REST API v3 |
 | Sparse embeddings | FastEmbed BM25 |
 | Vector storage | Embedded Qdrant via `qdrant-client` |
 | PDF / DOCX extraction | pypdf / docx2txt |
@@ -349,11 +359,13 @@ for registry access and limitations. No service is deployed automatically.
 - Metadata filters are not authorization. The HTTP service has one shared bearer
   credential but no user identities, RBAC, tenant isolation, rate limiting,
   hosted-model integration, upload endpoint, or production deployment. Citations
-  currently expose local source paths.
+  currently expose local source paths or remote source IDs.
 - SharePoint import has no per-user ACL enforcement, deletion sync, or scheduled
   refresh; its default collection is separate by name only, not by Qdrant file.
 - Confluence import has the same ACL and deletion limits; complex Storage-HTML
   macros and non-page content are not fully represented.
+- Google Drive import has the same ACL and deletion limits; only supported blob
+  file types and native Google Docs are imported, not Sheets or Slides.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
 
@@ -366,9 +378,10 @@ bearer guard, structured request logging, process-local monitoring metrics, and
 a local Docker image, and release-tag image publishing CI. Hosting and
 operating a production service are not implemented.
 
-Bounded manual SharePoint drive and Confluence Cloud space imports are
-implemented. Further enterprise connectors, permissions-aware retrieval, and
-multi-tenancy remain planned. See [ROADMAP.md](ROADMAP.md).
+Bounded manual SharePoint drive, Confluence Cloud space, and Google Drive
+folder imports are implemented. Further enterprise connectors,
+permissions-aware retrieval, and multi-tenancy remain planned. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 

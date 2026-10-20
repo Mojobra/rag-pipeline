@@ -20,6 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.115,<1.0",
+    "google-auth[requests]>=2.38,<3.0",
     "langchain>=1.0,<2.0",
     "langchain-huggingface>=1.2,<2.0",
     "langchain-qdrant>=1.1,<2.0",

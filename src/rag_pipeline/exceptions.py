@@ -64,6 +64,22 @@ class ConfluenceInputError(ConfluenceError, ValueError):
     """Raised when remote page data violates the import contract."""
 
 
+class GoogleDriveError(IngestionError):
+    """Base error for bounded, read-only Google Drive ingestion."""
+
+
+class GoogleDriveConfigurationError(GoogleDriveError, ValueError):
+    """Raised for invalid import limits or unavailable credentials."""
+
+
+class GoogleDriveProviderError(GoogleDriveError):
+    """Raised when Google authentication or a Drive request fails."""
+
+
+class GoogleDriveInputError(GoogleDriveError, ValueError):
+    """Raised when Drive metadata or content violates the import contract."""
+
+
 class ChunkingError(RagPipelineError):
     """Base error for document chunking failures."""
 

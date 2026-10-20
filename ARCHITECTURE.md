@@ -64,7 +64,8 @@ directory or a deeply nested clean-architecture hierarchy:
 - `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
   artifacts, comparisons, and regression thresholds.
 - `rag_pipeline.infrastructure` owns local dense and sparse model adapters,
-  Qdrant persistence, and the read-only Microsoft Graph and Confluence adapters.
+  Qdrant persistence, and the read-only Microsoft Graph, Confluence, and
+  Google Drive adapters.
   These modules perform provider or storage I/O but do not own CLI or
   application decisions.
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
@@ -229,6 +230,23 @@ configure storage, credentials, network exposure, or a running deployment.
   is a warning, not authorization. Attachments, comments, other content types,
   complex macro rendering, deletion sync, OAuth app flow, and live-tenant
   verification remain outside this task. See [the setup guide](docs/CONFLUENCE.md).
+
+## Current Google Drive Import Boundary
+
+- `index-google-drive` is an explicit CLI-only folder traversal. Google Auth
+  obtains scoped Application Default Credentials; HTTPX lists Drive v3 folder
+  children and downloads supported blobs or exports native Docs as plain text.
+  All remote requests, response bytes, and folder/page counts are bounded.
+- The application stages and extracts every listed file before invoking the
+  existing LangChain chunking, embedding, and Qdrant replacement use case.
+  Stable `gdrive://<file-id>` sources survive renames; `google_drive_documents`
+  is a separate default collection name in the same local store.
+- Remote-missing files are not deleted. The Drive listing is not a transactional
+  snapshot, and Qdrant writes are not atomic. A failed import should be rerun
+  after correcting its cause; no scheduled or incremental sync exists.
+- Drive read access controls the import only. The local API has no Drive user
+  identity or ACL enforcement. The required acknowledgement is a warning, not
+  authorization. See [the setup and security contract](docs/GOOGLE_DRIVE.md).
 
 ## Current Extraction Contract
 
