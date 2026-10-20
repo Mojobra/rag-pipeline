@@ -522,8 +522,9 @@ Current commands are:
 
 CLI configuration uses flags and typed immutable dataclasses. The API reads
 `RAG_API_*` environment values once at startup, including a required shared
-bearer token; `.env` is not loaded automatically. Generation and embedding
-remain local model providers.
+bearer token. The tracked [.env.example](.env.example) lists the current API
+and optional import variables; `.env` is not loaded automatically. Generation
+and embedding remain local model providers.
 The SharePoint importer additionally reads tenant ID, client ID, and client
 secret from `RAG_SHAREPOINT_*` environment variables. Its default collection
 is `sharepoint_documents`; the default store directory is unchanged. See
@@ -545,7 +546,7 @@ from `RAG_CONFLUENCE_*` environment variables. It defaults to a
 | Hugging Face cache | Dense and generation model artifacts | Managed outside tracked source |
 | `evaluation/datasets` | Synthetic Markdown corpus and versioned JSON labels | Tracked |
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
-| Local `.env` files | Potential secrets | Ignored by default; `.env.example` is the only allowed exception, and no hosted-provider contract is active |
+| Local `.env` files | Potential secrets | Ignored by default; tracked `.env.example` contains only blank credentials and documented local defaults, with no hosted-provider contract |
 | Temporary SharePoint extraction files | Downloaded plaintext before parsing | Removed after each file; keep the host filesystem and Qdrant directory restricted |
 
 Model factories may download artifacts on first use. After caches are populated,

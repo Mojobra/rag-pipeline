@@ -226,9 +226,11 @@ comparisons.
 
 Configuration uses CLI flags and typed Python configuration objects. The HTTP
 adapter reads `RAG_API_*` environment variables at startup, including the
-required `RAG_API_BEARER_TOKEN`; it does not load `.env` automatically. The
-pipeline does **not** load hosted-model settings or API keys from `.env`; no
-`.env.example` or active OpenAI, Gemini, or Anthropic integration is included.
+required `RAG_API_BEARER_TOKEN`. Copy [.env.example](.env.example) to a private
+`.env` as a configuration template, then export the needed values in your shell
+or pass the file to a launcher that supports environment files: the pipeline
+does not load `.env` automatically. Hosted OpenAI, Gemini, and Anthropic model
+integration is not active; the template contains no hosted-provider settings.
 The optional SharePoint importer reads three `RAG_SHAREPOINT_*` environment
 variables, documented in [its setup guide](docs/SHAREPOINT.md).
 The optional Confluence importer reads three `RAG_CONFLUENCE_*` variables;
