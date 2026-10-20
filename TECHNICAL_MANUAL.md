@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.3.0
-- **Last verified:** 2026-10-19
+- **Last verified:** 2026-10-20
 - **Current product surface:** Local Python CLI and read-only HTTP API
 
 ## How To Read Version Information
@@ -54,7 +54,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Formatting and linting | Ruff | Enforces formatting, imports, naming, correctness, and selected performance rules. |
 | Static typing | mypy | Checks all production modules in strict mode. |
 | Coverage | Coverage.py | Measures branch coverage and enforces an 80 percent minimum. |
-| CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests and `main`. |
+| CI and image delivery | GitHub Actions and GitHub Container Registry | Run locked quality checks on PRs, `main`, and release tags; smoke-test PR containers and publish a versioned image from validated tags. |
 | Version control | Git and GitHub | Provide reviewable branch history, pull requests, release tags, and benchmark commit provenance. |
 
 ## Library Inventory
@@ -579,10 +579,15 @@ source in strict mode. Coverage measures branches and fails below 80 percent.
 
 ### Continuous Integration
 
-GitHub Actions runs on pull requests and pushes to `main` with read-only
-repository permissions, concurrency cancellation, and a 30-minute timeout. The
-quality job uses Ubuntu, Python 3.11, uv 0.11.32, locked dependencies, Ruff,
-mypy, `unittest`, branch coverage, and package builds.
+GitHub Actions runs on pull requests, pushes to `main`, and version-tag pushes
+with concurrency cancellation. The 30-minute quality job uses read-only
+repository permissions, Ubuntu, Python 3.11, uv 0.11.32, locked dependencies,
+Ruff, mypy, `unittest`, branch coverage, and package builds. After quality
+passes, pull requests build the image and check the CLI and `/health` without
+registry credentials. A release-tag job checks annotation, package version,
+checked-out commit, and `origin/main` ancestry before building and testing the
+same image. Only that job receives `packages: write`; it publishes a versioned
+GHCR tag, not a mutable `latest` tag or a running service.
 
 The package advertises Python 3.11, 3.12, and 3.13 classifiers, but CI currently
 executes only Python 3.11. Additional matrix jobs would be required to claim
@@ -601,7 +606,8 @@ at once. Named volumes retain Qdrant and model caches independently of the
 container. See [the Docker workflow](docs/DOCKER.md) for exact commands and
 security limits. The base image and uv image use versioned tags rather than
 immutable digests, so the lockfile alone does not guarantee byte-identical
-rebuilds. Image publishing and deployment CI/CD remain Task 24 work.
+rebuilds. See [release images](docs/DOCKER.md#release-images) for the CI
+publication workflow and remaining deployment limits.
 
 ## Deliberately Project-Owned Logic
 
@@ -631,7 +637,7 @@ must not be presented as current behavior:
 - MCP servers, tool calling, or autonomous agents
 - Per-user identity, OIDC/Keycloak integration, RBAC, tenant isolation, or
   authorization policy enforcement
-- Kubernetes, cloud deployment, automated image publishing, or a remote Qdrant cluster
+- Kubernetes, cloud deployment, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting
 - OCR, scanned-document understanding, or multimodal extraction

@@ -254,13 +254,14 @@ storage locations and I/O behavior.
 |   |-- evaluation/          # Dataset schemas and quality metrics
 |   `-- benchmarking/        # Isolated runs, provenance, and comparisons
 |-- tests/                   # Offline unit and integration tests
+|-- scripts/                 # Release-tag verification for CI
 |-- evaluation/datasets/     # Versioned synthetic corpora and labels
 |-- docs/CLI_REFERENCE.md    # Detailed CLI workflows and contracts
 |-- docs/API_REFERENCE.md    # Local HTTP setup and endpoint contract
 |-- docs/DOCKER.md           # Local container build and run workflow
 |-- Dockerfile               # Runtime image for CLI and API
 |-- .dockerignore            # Build-context allowlist
-|-- .github/workflows/ci.yml # Automated quality checks
+|-- .github/workflows/ci.yml # Quality, container checks, release image publishing
 |-- pyproject.toml           # Package metadata and dependency constraints
 `-- uv.lock                  # Reproducible dependency graph
 ```
@@ -305,8 +306,12 @@ uv build
 Tests use provider doubles and temporary stores: no model downloads, API keys,
 network access, or GPU are needed for the default suite. Coverage includes
 branches and enforces an 80 percent floor. The
-[CI workflow](.github/workflows/ci.yml) runs on pull requests and pushes to
-`main`, currently on Ubuntu with Python 3.11.
+[CI workflow](.github/workflows/ci.yml) runs the Python checks on pull
+requests, pushes to `main`, and version tags. Pull requests also build and
+smoke-test the container. A matching annotated `vMAJOR.MINOR.PATCH` tag on a
+commit reachable from `main` publishes a versioned image to GitHub Container
+Registry after those checks pass. See [Docker setup](docs/DOCKER.md#release-images)
+for registry access and limitations. No service is deployed automatically.
 
 ## Limitations
 
@@ -332,7 +337,9 @@ The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
 for the six follow-ups. Phase 4 now includes the local FastAPI service, shared
 bearer guard, structured request logging, process-local monitoring metrics, and
-a local Docker image; deployment CI/CD remains planned.
+a local Docker image, and release-tag image publishing CI. Hosting and
+operating a production service are not implemented.
+
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 
