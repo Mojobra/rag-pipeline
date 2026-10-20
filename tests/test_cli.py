@@ -15,6 +15,7 @@ EXPECTED_COMMANDS = (
     "index",
     "index-sharepoint",
     "index-confluence",
+    "index-google-drive",
     "retrieve",
     "evaluate-retrieval",
     "evaluate-answer",

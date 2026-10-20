@@ -16,6 +16,10 @@ For `index-confluence`, see the
 from one Cloud space with environment-supplied API-token credentials, defaults
 to `confluence_documents`, and likewise does not enforce source permissions on
 retrieval.
+For `index-google-drive`, see the
+[Google Drive setup and security contract](GOOGLE_DRIVE.md). It scans one folder
+recursively through read-only Application Default Credentials, defaults to
+`google_drive_documents`, and does not enforce Drive permissions on retrieval.
 
 ## HTML Extraction
 

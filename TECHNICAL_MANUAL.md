@@ -6,8 +6,8 @@ trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.3.0
 - **Last verified:** 2026-10-20
-- **Current product surface:** Local Python CLI, manual SharePoint and
-  Confluence imports, and read-only HTTP API
+- **Current product surface:** Local Python CLI, manual SharePoint,
+  Confluence, and Google Drive imports, and read-only HTTP API
 
 ## How To Read Version Information
 
@@ -47,6 +47,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | DOCX extraction | docx2txt | Extracts a Word document as one logical text document. |
 | SharePoint import | MSAL and HTTPX | Obtains app-only Graph tokens and reads bounded drive listings and file content for manual local indexing. |
 | Confluence import | HTTPX and existing HTML parser | Reads bounded Cloud space pages with API-token credentials and normalizes Storage-HTML for manual local indexing. |
+| Google Drive import | Google Auth and HTTPX | Refreshes scoped ADC tokens and reads bounded Drive v3 folder listings, blob files, and native Docs exports for manual local indexing. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
 | Evaluation | Project-owned Python | Computes deterministic retrieval, answer, abstention, citation, latency, and regression metrics. |
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
@@ -92,8 +93,10 @@ manager, which can differ from Python import names.
 | `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
 | `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
 | `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
-| `httpx` | Direct runtime | Sends bounded Microsoft Graph and Confluence Cloud requests; handles the SharePoint content redirect without forwarding its bearer token. |
+| `httpx` | Direct runtime | Sends bounded Microsoft Graph, Confluence Cloud, and Google Drive requests; handles the SharePoint content redirect without forwarding its bearer token. |
 | `msal` | Direct runtime | Acquires app-only Microsoft Graph tokens from an Entra client credential supplied through environment variables. |
+| `google-auth[requests]` | Direct runtime | Discovers and refreshes scoped Application Default Credentials for the manual Drive import. |
+| `requests` | Transitive | Provides the Google Auth token-refresh transport; Drive content requests use HTTPX instead. |
 | `torch` (PyTorch) | Transitive | Executes dense embedding, generation, and reranking models; benchmark provenance also inspects its CUDA information lazily. |
 | `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
 | `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
@@ -147,8 +150,9 @@ reflects `uv.lock` as verified on the date at the top of this document.
 | `fastembed` | `>=0.3.3,<1.0` | 0.8.0 | Executes the optional local BM25 sparse model. |
 | `pypdf` | `>=6.0,<7.0` | 6.14.2 | Reads text and page metadata from PDFs. |
 | `docx2txt` | `>=0.9,<1.0` | 0.9 | Reads text from DOCX files. |
-| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements read-only Microsoft Graph and Confluence Cloud HTTP transports. |
+| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements read-only Microsoft Graph, Confluence Cloud, and Google Drive HTTP transports. |
 | `msal` | `>=1.31,<2.0` | 1.39.0 | Acquires app-only Graph tokens for a manual SharePoint drive import. |
+| `google-auth[requests]` | `>=2.38,<3.0` | 2.62.0 | Discovers and refreshes Drive read-only ADC credentials. |
 
 The code imports `langchain_core` contracts directly; that package is currently
 resolved through the declared LangChain family. The behaviorally important
@@ -162,6 +166,7 @@ transitive runtime snapshot is:
 | `tokenizers` | 0.22.2 | Provides optimized Hugging Face tokenization where supported by a model. |
 | `onnxruntime` | 1.27.0 | Supplies FastEmbed's ONNX model support; the current BM25 path is lexical. |
 | `starlette` | 1.9.0 | Supplies the ASGI request/response layer under FastAPI. |
+| `requests` | 2.34.2 | Supplies the Google Auth refresh transport for ADC. |
 
 These packages are locked in `uv.lock` rather than maintained as independent
 application APIs. The full transitive graph contains additional implementation
@@ -513,6 +518,7 @@ Current commands are:
 | `index` | Build or update a compatible dense or hybrid Qdrant collection. |
 | `index-sharepoint` | Manually read one Graph drive and replace listed sources in a local collection; no ACL sync. |
 | `index-confluence` | Manually read current Cloud space pages and replace listed sources; no ACL sync. |
+| `index-google-drive` | Manually read one Drive folder and replace listed file sources; no ACL sync. |
 | `retrieve` | Search the collection with filters and optional reranking. |
 | `answer` | Retrieve evidence and generate a grounded answer with citations. |
 | `evaluate-retrieval` | Run labeled retrieval cases and report top-k metrics. |
@@ -533,6 +539,9 @@ The Confluence importer also reads a site root, account email, and API token
 from `RAG_CONFLUENCE_*` environment variables. It defaults to a
 `confluence_documents` collection in the same local store. See
 [the Confluence setup and security contract](docs/CONFLUENCE.md).
+The Google Drive importer uses scoped Application Default Credentials. An
+optional `GOOGLE_APPLICATION_CREDENTIALS` path selects a credential file;
+see [the Drive setup and security contract](docs/GOOGLE_DRIVE.md).
 
 ## Local State And I/O
 
@@ -548,6 +557,7 @@ from `RAG_CONFLUENCE_*` environment variables. It defaults to a
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
 | Local `.env` files | Potential secrets | Ignored by default; tracked `.env.example` contains only blank credentials and documented local defaults, with no hosted-provider contract |
 | Temporary SharePoint extraction files | Downloaded plaintext before parsing | Removed after each file; keep the host filesystem and Qdrant directory restricted |
+| Temporary Google Drive extraction files | Downloaded plaintext before parsing | Removed after each file; keep ADC credential files outside the repository |
 
 Model factories may download artifacts on first use. After caches are populated,
 model inference runs locally without a hosted-provider API key. The HTTP adapter
