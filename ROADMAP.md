@@ -59,6 +59,7 @@ Task 26 - Confluence integration (bounded manual Cloud space page import
 implemented; ACL sync and remote deletion are not included)
 Task 27 - Google Drive integration (bounded manual folder import implemented;
 Google Drive ACL sync and remote deletion are not included)
-Task 28 - Slack / Teams integration
+Task 28 - Slack / Teams integration (bounded manual channel and thread imports
+implemented; ACL sync, remote deletion, and incremental refresh are not included)
 Task 29 - Permissions-aware retrieval
 Task 30 - Multi-tenant architecture

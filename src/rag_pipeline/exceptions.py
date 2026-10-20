@@ -80,6 +80,22 @@ class GoogleDriveInputError(GoogleDriveError, ValueError):
     """Raised when Drive metadata or content violates the import contract."""
 
 
+class ChannelImportError(IngestionError):
+    """Base error for bounded Slack and Teams channel imports."""
+
+
+class ChannelConfigurationError(ChannelImportError, ValueError):
+    """Raised for invalid channel import settings or missing credentials."""
+
+
+class ChannelProviderError(ChannelImportError):
+    """Raised when a channel provider or its authentication fails."""
+
+
+class ChannelInputError(ChannelImportError, ValueError):
+    """Raised when provider messages violate the bounded import contract."""
+
+
 class ChunkingError(RagPipelineError):
     """Base error for document chunking failures."""
 
