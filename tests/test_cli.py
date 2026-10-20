@@ -14,6 +14,7 @@ EXPECTED_COMMANDS = (
     "embed",
     "index",
     "index-sharepoint",
+    "index-confluence",
     "retrieve",
     "evaluate-retrieval",
     "evaluate-answer",

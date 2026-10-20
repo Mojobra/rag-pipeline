@@ -12,6 +12,7 @@ from rag_pipeline.exceptions import (
 from rag_pipeline.ingestion.extraction import (
     SUPPORTED_FILE_EXTENSIONS,
     extract_documents,
+    html_to_visible_text,
 )
 from rag_pipeline.ingestion.loading import (
     TEXT_FILE_EXTENSIONS,
@@ -29,5 +30,6 @@ __all__ = [
     "UnsupportedDocumentTypeError",
     "discover_files",
     "extract_documents",
+    "html_to_visible_text",
     "load_documents",
 ]

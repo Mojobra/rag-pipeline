@@ -11,6 +11,11 @@ For the optional `index-sharepoint` command, see the
 local chunking, embedding, and store settings but reads one Graph drive via
 environment-supplied app credentials, defaults to `sharepoint_documents`, and
 does not import source permissions.
+For `index-confluence`, see the
+[Confluence setup and security contract](CONFLUENCE.md). It reads current pages
+from one Cloud space with environment-supplied API-token credentials, defaults
+to `confluence_documents`, and likewise does not enforce source permissions on
+retrieval.
 
 ## HTML Extraction
 
