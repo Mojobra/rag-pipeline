@@ -48,6 +48,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Evaluation | Project-owned Python | Computes deterministic retrieval, answer, abstention, citation, latency, and regression metrics. |
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
 | Packaging | setuptools | Builds the typed `src`-layout package as a wheel and source distribution. |
+| Local container packaging | Docker and uv | Build a runtime-only Python 3.11 image from the locked environment; run CLI indexing and the API sequentially with persistent volumes. |
 | Tests | `unittest` | Runs deterministic unit and local integration tests without network access. |
 | HTTP tests | Starlette TestClient and `httpx2` | Exercise ASGI routes and lifespan with provider doubles. |
 | Formatting and linting | Ruff | Enforces formatting, imports, naming, correctness, and selected performance rules. |
@@ -522,6 +523,8 @@ remain local model providers.
 | `.rag_data/qdrant` | Embedded vector database | Ignored by Git |
 | `.rag_data/fastembed` | Sparse model cache | Ignored by Git |
 | `.rag_data/rerankers` | Cross-encoder cache | Ignored by Git |
+| Container `/app/.rag_data` | Embedded Qdrant plus optional sparse/reranker caches | Persist in a Docker volume; excluded from the image |
+| Container `/app/.cache` | Hugging Face model files | Persist in a separate Docker volume; excluded from the image |
 | Hugging Face cache | Dense and generation model artifacts | Managed outside tracked source |
 | `evaluation/datasets` | Synthetic Markdown corpus and versioned JSON labels | Tracked |
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
@@ -585,6 +588,21 @@ The package advertises Python 3.11, 3.12, and 3.13 classifiers, but CI currently
 executes only Python 3.11. Additional matrix jobs would be required to claim
 continuous verification on every advertised interpreter.
 
+### Local Container Image
+
+`Dockerfile` builds against the committed `uv.lock` with Python 3.11 and omits
+development tools. A separate runtime stage receives only the non-editable
+installed environment; `.dockerignore` allows just package inputs into the
+build context. The API starts under a non-root user with Uvicorn access logging
+disabled. Docker's health check calls `/health`, which checks liveness but not
+collection or model readiness. The same image can run `rag-pipeline index`
+before the API starts; both processes must not open the embedded Qdrant volume
+at once. Named volumes retain Qdrant and model caches independently of the
+container. See [the Docker workflow](docs/DOCKER.md) for exact commands and
+security limits. The base image and uv image use versioned tags rather than
+immutable digests, so the lockfile alone does not guarantee byte-identical
+rebuilds. Image publishing and deployment CI/CD remain Task 24 work.
+
 ## Deliberately Project-Owned Logic
 
 LangChain provides interfaces and focused adapters, but the following behavior
@@ -613,7 +631,7 @@ must not be presented as current behavior:
 - MCP servers, tool calling, or autonomous agents
 - Per-user identity, OIDC/Keycloak integration, RBAC, tenant isolation, or
   authorization policy enforcement
-- Docker, Kubernetes, cloud deployment, or a remote Qdrant cluster
+- Kubernetes, cloud deployment, automated image publishing, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting
 - OCR, scanned-document understanding, or multimodal extraction

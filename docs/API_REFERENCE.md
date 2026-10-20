@@ -6,6 +6,8 @@ retrieval and answer workflows. It does not ingest documents, host remote
 models, identify individual users, enforce document permissions, or make
 embedded Qdrant a multi-user database. Index documents with the CLI first;
 stop the API before modifying the same local Qdrant store with the CLI.
+Task 23 also packages these same CLI and API paths in a local image; see
+[Docker setup](DOCKER.md) for the volume and loopback-bound port workflow.
 
 ## Start Locally
 

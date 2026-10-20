@@ -35,6 +35,8 @@ local bearer token; it is not a hosted production service.
 - **Local HTTP API:** bearer-protected retrieval and cited answers from an
   existing collection, with bounded JSON requests, request IDs, structured
   operational logs, protected Prometheus metrics, and no per-request model loading.
+- **Local container image:** one runtime-only, non-root image for CLI indexing
+  and the read-only API, with persistent data and model-cache volumes.
 
 ## Quick Start
 
@@ -74,6 +76,8 @@ API writes one sanitized JSON event per request to stderr and returns
 `X-Request-ID` for correlation; `--no-access-log` prevents Uvicorn's raw URL
 access logs. Do not bind the service to a public network.
 
+For the equivalent local container workflow, see [Docker setup](docs/DOCKER.md).
+
 ## Requirements
 
 - Python **3.11 or newer**; CI currently runs Python 3.11.
@@ -83,9 +87,11 @@ access logs. Do not bind the service to a public network.
   downloads; disk space for dependencies, model caches, and the local index.
 
 The defaults run on CPU. A GPU, separate Qdrant server, Docker, and hosted-model
-API keys are not required. After dependencies and model artifacts are cached,
-inference runs locally. HTTP queries require a locally generated bearer token.
-The HTTP command uses bundled Uvicorn; no separate server install is needed.
+API keys are not required for the Python workflow. Docker Engine is required
+only for the optional container workflow. After dependencies and model artifacts
+are cached, inference runs locally. HTTP queries require a locally generated
+bearer token. The HTTP command uses bundled Uvicorn; no separate server install
+is needed.
 
 ## Installation
 
@@ -251,6 +257,9 @@ storage locations and I/O behavior.
 |-- evaluation/datasets/     # Versioned synthetic corpora and labels
 |-- docs/CLI_REFERENCE.md    # Detailed CLI workflows and contracts
 |-- docs/API_REFERENCE.md    # Local HTTP setup and endpoint contract
+|-- docs/DOCKER.md           # Local container build and run workflow
+|-- Dockerfile               # Runtime image for CLI and API
+|-- .dockerignore            # Build-context allowlist
 |-- .github/workflows/ci.yml # Automated quality checks
 |-- pyproject.toml           # Package metadata and dependency constraints
 `-- uv.lock                  # Reproducible dependency graph
@@ -273,6 +282,7 @@ package boundaries and the contracts enforced between stages.
 | Vector storage | Embedded Qdrant via `qdrant-client` |
 | PDF / DOCX extraction | pypdf / docx2txt |
 | Packaging and quality | uv, setuptools, unittest, Coverage.py, Ruff, mypy, GitHub Actions |
+| Local container packaging | Docker with a Python 3.11 runtime image |
 
 The [technical manual](TECHNICAL_MANUAL.md#library-inventory) contains the full
 application-library inventory, locked version snapshots, model defaults, and
@@ -311,7 +321,7 @@ branches and enforces an 80 percent floor. The
   interpreted; scanned PDFs still require OCR that is not implemented.
 - Metadata filters are not authorization. The HTTP service has one shared bearer
   credential but no user identities, RBAC, tenant isolation, rate limiting,
-  hosted-model integration, upload endpoint, or deployment setup. Citations
+  hosted-model integration, upload endpoint, or production deployment. Citations
   currently expose local source paths.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
@@ -321,8 +331,8 @@ branches and enforces an 80 percent floor. The
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
 for the six follow-ups. Phase 4 now includes the local FastAPI service, shared
-bearer guard, structured request logging, and process-local monitoring metrics;
-later tasks add containerization and deployment CI/CD.
+bearer guard, structured request logging, process-local monitoring metrics, and
+a local Docker image; deployment CI/CD remains planned.
 Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
 stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
 

@@ -1,0 +1,16 @@
+# Send only package inputs to the builder, never local data or credentials.
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src
+!src/**
+
+# Do not copy accidental generated or sensitive files from the source tree.
+**/__pycache__
+**/*.egg-info
+**/*.pyc
+**/*.pyo
+**/.env*
+**/*.pem
+**/*.key
