@@ -6,6 +6,12 @@ Run all commands from the repository root; multiline commands use PowerShell
 continuation syntax. The schemas shown below are JSON examples, not
 additional files installed by the application.
 
+For the optional `index-sharepoint` command, see the
+[SharePoint setup and security contract](SHAREPOINT.md). It shares `index`'s
+local chunking, embedding, and store settings but reads one Graph drive via
+environment-supplied app credentials, defaults to `sharepoint_documents`, and
+does not import source permissions.
+
 ## HTML Extraction
 
 `.html` and `.htm` files are decoded into normalized visible text before

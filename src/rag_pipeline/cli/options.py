@@ -374,6 +374,8 @@ def add_embedding_arguments(
 
 def add_vector_store_location_arguments(
     command_parser: argparse.ArgumentParser,
+    *,
+    default_collection_name: str = "rag_documents",
 ) -> None:
     """Attach persistent Qdrant location and collection identity options."""
     command_parser.add_argument(
@@ -388,11 +390,11 @@ def add_vector_store_location_arguments(
     )
     command_parser.add_argument(
         "--collection-name",
-        default="rag_documents",
+        default=default_collection_name,
         help=(
             "Qdrant collection within --store-path. Use separate names for corpora "
             "or incompatible embedding/search settings, and reuse the name when "
-            "querying (default: rag_documents)."
+            f"querying (default: {default_collection_name})."
         ),
     )
 

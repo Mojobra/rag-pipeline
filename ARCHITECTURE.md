@@ -63,9 +63,9 @@ directory or a deeply nested clean-architecture hierarchy:
   and report formatting.
 - `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
   artifacts, comparisons, and regression thresholds.
-- `rag_pipeline.infrastructure` owns local dense and sparse model adapters plus
-  Qdrant persistence. These modules perform provider or storage I/O but do not
-  own CLI or application workflow decisions.
+- `rag_pipeline.infrastructure` owns local dense and sparse model adapters,
+  Qdrant persistence, and the read-only Microsoft Graph adapter. These modules
+  perform provider or storage I/O but do not own CLI or application decisions.
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
   one stable, actionable error hierarchy without depending on another feature.
 
@@ -185,6 +185,28 @@ configure storage, credentials, network exposure, or a running deployment.
 - A failure before upsert leaves the collection unchanged. Multiple upsert and
   delete calls are not atomic; a database failure may require retrying the same
   source scope to finish synchronization.
+
+## Current SharePoint Import Boundary
+
+- `index-sharepoint` is an explicit CLI-only, app-only Graph import. MSAL reads
+  three `RAG_SHAREPOINT_*` environment variables; HTTPX lists a single drive
+  recursively and downloads supported files within count and byte caps.
+- The application stages and extracts every listed file before invoking the
+  existing LangChain chunking, embedding, and Qdrant replacement use case.
+  Stable `sharepoint://<drive>/<item>` sources survive renames; PDF page and
+  character provenance remain in metadata and citations.
+- The default `sharepoint_documents` collection prevents accidental mixing by
+  name, but shares the default Qdrant directory. Reimport replaces listed
+  sources only. Remote-missing items are not deleted; Qdrant writes are not
+  transactional.
+- Content redirects are fetched without the Graph bearer token and are limited
+  to HTTPS SharePoint hosts. HTTP and auth errors are sanitized before CLI
+  output. The app still holds plaintext document bytes during processing.
+- The local API does not carry SharePoint identities or ACLs. The required CLI
+  acknowledgement flags this gap, not a security control. Do not expose the
+  collection to anyone outside its intended readership. Delta sync, deletion,
+  permission-aware retrieval, and live tenant verification remain future work.
+  See [the setup and security contract](docs/SHAREPOINT.md).
 
 ## Current Extraction Contract
 

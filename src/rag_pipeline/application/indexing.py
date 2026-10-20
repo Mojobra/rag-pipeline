@@ -7,9 +7,11 @@ handlers. Domain services remain independently testable and reusable.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from langchain_core.documents import Document
 
 from rag_pipeline.exceptions import InvalidPipelineConfigurationError
 from rag_pipeline.infrastructure.embeddings import (
@@ -125,6 +127,29 @@ def index_local_documents(
             "prune_missing cannot index a file resolved outside its directory."
         )
     documents = load_documents(source_paths, recursive=False)
+    return index_extracted_documents(
+        documents,
+        sources={str(path) for path in source_paths},
+        config=config,
+        prune_root=prune_root,
+    )
+
+
+def index_extracted_documents(
+    documents: Sequence[Document],
+    *,
+    sources: Collection[str],
+    config: IndexingPipelineConfig,
+    prune_root: Path | None = None,
+) -> IndexingResult:
+    """Chunk, embed, and replace explicit sources in one local collection.
+
+    Both filesystem and remote import workflows supply already-extracted
+    LangChain documents. Model inference and Qdrant writes occur here; optional
+    local-directory pruning remains scoped to the caller's resolved directory.
+    """
+    if not isinstance(config, IndexingPipelineConfig):
+        raise TypeError("config must be an IndexingPipelineConfig.")
     chunks = chunk_documents(documents, config=config.chunking)
 
     # Import factories at execution time so constructing application objects
@@ -146,15 +171,15 @@ def index_local_documents(
     )
 
     with LocalVectorStore(config.vector_store) as vector_store:
-        sources = {str(path) for path in source_paths}
+        source_set = set(sources)
         if prune_root is not None:
-            sources.update(
+            source_set.update(
                 source
                 for source in vector_store.list_sources()
                 if Path(source).is_absolute()
                 and Path(source).is_relative_to(prune_root)
             )
-        if not sources:
+        if not source_set:
             return vector_store.index(
                 embedded_documents,
                 model_identifier=embedding_service.model_identifier,
@@ -165,7 +190,7 @@ def index_local_documents(
             )
         return vector_store.replace_sources(
             embedded_documents,
-            sources=sources,
+            sources=source_set,
             model_identifier=embedding_service.model_identifier,
             sparse_vectors=sparse_vectors,
             sparse_model_identifier=(

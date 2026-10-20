@@ -6,7 +6,8 @@ trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.3.0
 - **Last verified:** 2026-10-20
-- **Current product surface:** Local Python CLI and read-only HTTP API
+- **Current product surface:** Local Python CLI, manual SharePoint drive import,
+  and read-only HTTP API
 
 ## How To Read Version Information
 
@@ -44,6 +45,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | HTML extraction | Python `html.parser` | Removes markup and non-content elements while preserving readable block and table text. |
 | PDF extraction | pypdf | Extracts one provenance-bearing document per PDF page. |
 | DOCX extraction | docx2txt | Extracts a Word document as one logical text document. |
+| SharePoint import | MSAL and HTTPX | Obtains app-only Graph tokens and reads bounded drive listings and file content for manual local indexing. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
 | Evaluation | Project-owned Python | Computes deterministic retrieval, answer, abstention, citation, latency, and regression metrics. |
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
@@ -89,6 +91,8 @@ manager, which can differ from Python import names.
 | `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
 | `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
 | `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
+| `httpx` | Direct runtime | Sends bounded Microsoft Graph listing and content requests, including a token-free SharePoint download redirect. |
+| `msal` | Direct runtime | Acquires app-only Microsoft Graph tokens from an Entra client credential supplied through environment variables. |
 | `torch` (PyTorch) | Transitive | Executes dense embedding, generation, and reranking models; benchmark provenance also inspects its CUDA information lazily. |
 | `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
 | `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
@@ -142,6 +146,8 @@ reflects `uv.lock` as verified on the date at the top of this document.
 | `fastembed` | `>=0.3.3,<1.0` | 0.8.0 | Executes the optional local BM25 sparse model. |
 | `pypdf` | `>=6.0,<7.0` | 6.14.2 | Reads text and page metadata from PDFs. |
 | `docx2txt` | `>=0.9,<1.0` | 0.9 | Reads text from DOCX files. |
+| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements the read-only Microsoft Graph HTTP transport. |
+| `msal` | `>=1.31,<2.0` | 1.39.0 | Acquires app-only Graph tokens for a manual SharePoint drive import. |
 
 The code imports `langchain_core` contracts directly; that package is currently
 resolved through the declared LangChain family. The behaviorally important
@@ -504,6 +510,7 @@ Current commands are:
 | `chunk-experiment` | Compare candidate recursive chunking configurations. |
 | `embed` | Generate and validate dense chunk vectors. |
 | `index` | Build or update a compatible dense or hybrid Qdrant collection. |
+| `index-sharepoint` | Manually read one Graph drive and replace listed sources in a local collection; no ACL sync. |
 | `retrieve` | Search the collection with filters and optional reranking. |
 | `answer` | Retrieve evidence and generate a grounded answer with citations. |
 | `evaluate-retrieval` | Run labeled retrieval cases and report top-k metrics. |
@@ -515,6 +522,10 @@ CLI configuration uses flags and typed immutable dataclasses. The API reads
 `RAG_API_*` environment values once at startup, including a required shared
 bearer token; `.env` is not loaded automatically. Generation and embedding
 remain local model providers.
+The SharePoint importer additionally reads tenant ID, client ID, and client
+secret from `RAG_SHAREPOINT_*` environment variables. Its default collection
+is `sharepoint_documents`; the default store directory is unchanged. See
+[the SharePoint setup and security contract](docs/SHAREPOINT.md).
 
 ## Local State And I/O
 
@@ -529,6 +540,7 @@ remain local model providers.
 | `evaluation/datasets` | Synthetic Markdown corpus and versioned JSON labels | Tracked |
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
 | Local `.env` files | Potential secrets | Ignored by default; `.env.example` is the only allowed exception, and no hosted-provider contract is active |
+| Temporary SharePoint extraction files | Downloaded plaintext before parsing | Removed after each file; keep the host filesystem and Qdrant directory restricted |
 
 Model factories may download artifacts on first use. After caches are populated,
 model inference runs locally without a hosted-provider API key. The HTTP adapter

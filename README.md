@@ -37,6 +37,8 @@ local bearer token; it is not a hosted production service.
   operational logs, protected Prometheus metrics, and no per-request model loading.
 - **Local container image:** one runtime-only, non-root image for CLI indexing
   and the read-only API, with persistent data and model-cache volumes.
+- **Manual SharePoint import:** bounded, read-only Microsoft Graph drive scan
+  into a separate collection by default; it does not enforce source ACLs.
 
 ## Quick Start
 
@@ -133,6 +135,11 @@ whose source path is inside that directory. Index updates use multiple Qdrant
 operations and are not atomic; after an interrupted run, repeat the command to
 finish synchronization.
 
+For a manual Microsoft Graph document-library import, see the
+[SharePoint setup and security contract](docs/SHAREPOINT.md). This path needs an
+Entra app and explicit acknowledgement that SharePoint permissions are **not**
+enforced by retrieval.
+
 ### Enable Hybrid Search And Reranking
 
 Build a separate collection because hybrid search requires both dense and sparse
@@ -194,6 +201,7 @@ answers, so reports from private data need the same protection as their sources.
 | `chunk-experiment` | Compare chunk sizes and overlap costs without model inference. |
 | `embed` | Inspect dense-vector output without writing an index. |
 | `index` | Build or update a compatible dense or hybrid collection. |
+| `index-sharepoint` | Manually import supported files from one Graph drive; no ACL sync. |
 | `retrieve` | Inspect ranked evidence, optionally filtered or reranked. |
 | `answer` | Generate an answer and citations from retrieved evidence. |
 | `evaluate-retrieval` | Score an existing collection against relevance labels. |
@@ -215,6 +223,8 @@ adapter reads `RAG_API_*` environment variables at startup, including the
 required `RAG_API_BEARER_TOKEN`; it does not load `.env` automatically. The
 pipeline does **not** load hosted-model settings or API keys from `.env`; no
 `.env.example` or active OpenAI, Gemini, or Anthropic integration is included.
+The optional SharePoint importer reads three `RAG_SHAREPOINT_*` environment
+variables, documented in [its setup guide](docs/SHAREPOINT.md).
 
 | Setting | Default | Practical effect |
 | --- | --- | --- |
@@ -223,7 +233,7 @@ pipeline does **not** load hosted-model settings or API keys from `.env`; no
 | `--device` / `--generation-device` | `cpu` | Independent embedding and generation devices. CUDA requires compatible hardware and sufficient VRAM. |
 | `--chunk-size` / `--chunk-overlap` | `1000` / `200` characters | Balance evidence size against chunk count, duplicated text, and storage. |
 | `--store-path` | `.rag_data/qdrant` | Persistent embedded database directory; reuse it for subsequent queries. |
-| `--collection-name` | `rag_documents` | Collection within the database; examples use explicit names to separate corpora. |
+| `--collection-name` | `rag_documents` (`index-sharepoint`: `sharepoint_documents`) | Collection within the database; examples use explicit names to separate corpora. |
 | `--search-mode` | `dense` | Select `hybrid` only for a collection indexed in that mode. |
 | `--top-k` | `4` | Maximum final evidence chunks per query. |
 | `--score-threshold` / `--no-score-threshold` | Disabled for `retrieve` and `evaluate-retrieval`; `0.2` for `answer`, `evaluate-answer`, and `benchmark` | Apply or explicitly disable the first-stage gate before reranking or generation. Scores are mode-specific, not confidence probabilities. |
@@ -248,7 +258,7 @@ storage locations and I/O behavior.
 |   |-- api/                 # HTTP auth, routes, logging, and monitoring
 |   |-- application/         # Transport-neutral workflow orchestration
 |   |-- ingestion/           # Discovery, extraction, and chunking
-|   |-- infrastructure/      # Model adapters and Qdrant persistence
+|   |-- infrastructure/      # Model, Graph, and Qdrant adapters
 |   |-- retrieval/           # Search, filtering, and reranking
 |   |-- generation/          # Prompts, token budgets, and citations
 |   |-- evaluation/          # Dataset schemas and quality metrics
@@ -279,6 +289,7 @@ package boundaries and the contracts enforced between stages.
 | RAG interfaces and composition | LangChain and its Hugging Face/Qdrant integrations |
 | Dense embeddings and reranking | Sentence Transformers / PyTorch |
 | Local generation | Hugging Face Transformers |
+| SharePoint import | MSAL and HTTPX against Microsoft Graph |
 | Sparse embeddings | FastEmbed BM25 |
 | Vector storage | Embedded Qdrant via `qdrant-client` |
 | PDF / DOCX extraction | pypdf / docx2txt |
@@ -328,6 +339,8 @@ for registry access and limitations. No service is deployed automatically.
   credential but no user identities, RBAC, tenant isolation, rate limiting,
   hosted-model integration, upload endpoint, or production deployment. Citations
   currently expose local source paths.
+- SharePoint import has no per-user ACL enforcement, deletion sync, or scheduled
+  refresh; its default collection is separate by name only, not by Qdrant file.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
 
@@ -340,8 +353,9 @@ bearer guard, structured request logging, process-local monitoring metrics, and
 a local Docker image, and release-tag image publishing CI. Hosting and
 operating a production service are not implemented.
 
-Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
-stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
+A bounded manual SharePoint drive import is implemented. Further enterprise
+connectors, permissions-aware retrieval, and multi-tenancy remain planned. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 
