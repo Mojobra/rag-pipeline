@@ -48,6 +48,22 @@ class SharePointInputError(SharePointError, ValueError):
     """Raised when remote metadata or content violates import limits."""
 
 
+class ConfluenceError(IngestionError):
+    """Base error for bounded, read-only Confluence Cloud ingestion."""
+
+
+class ConfluenceConfigurationError(ConfluenceError, ValueError):
+    """Raised for invalid site settings, limits, or missing credentials."""
+
+
+class ConfluenceProviderError(ConfluenceError):
+    """Raised when a Confluence Cloud request fails."""
+
+
+class ConfluenceInputError(ConfluenceError, ValueError):
+    """Raised when remote page data violates the import contract."""
+
+
 class ChunkingError(RagPipelineError):
     """Base error for document chunking failures."""
 

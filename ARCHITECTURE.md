@@ -64,8 +64,9 @@ directory or a deeply nested clean-architecture hierarchy:
 - `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
   artifacts, comparisons, and regression thresholds.
 - `rag_pipeline.infrastructure` owns local dense and sparse model adapters,
-  Qdrant persistence, and the read-only Microsoft Graph adapter. These modules
-  perform provider or storage I/O but do not own CLI or application decisions.
+  Qdrant persistence, and the read-only Microsoft Graph and Confluence adapters.
+  These modules perform provider or storage I/O but do not own CLI or
+  application decisions.
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
   one stable, actionable error hierarchy without depending on another feature.
 
@@ -207,6 +208,27 @@ configure storage, credentials, network exposure, or a running deployment.
   collection to anyone outside its intended readership. Delta sync, deletion,
   permission-aware retrieval, and live tenant verification remain future work.
   See [the setup and security contract](docs/SHAREPOINT.md).
+
+## Current Confluence Import Boundary
+
+- `index-confluence` is an explicit CLI-only import of current pages from one
+  numeric Cloud space. HTTPX uses an environment-supplied account email and
+  API token; redirects are disabled and cursor URLs stay on the same site and
+  endpoint. A bounded traversal completes before indexing begins, but cursor
+  requests do not form a point-in-time snapshot.
+- The application turns Storage-HTML into visible text through the existing
+  HTML parser, prepends each page title, and passes LangChain Documents to the
+  shared chunking, embedding, and Qdrant replacement use case. Stable
+  `confluence://<host>/<page-id>` sources survive title changes; page version,
+  space ID, and a returned web URL remain metadata.
+- `confluence_documents` is only a separate default collection name in the
+  same local store. Reimport replaces listed page sources, never remote-missing
+  ones. There is no transaction around Qdrant upserts and deletions.
+- The account's read permission controls what the API returns, but those ACLs
+  are not persisted or enforced during retrieval. The required acknowledgement
+  is a warning, not authorization. Attachments, comments, other content types,
+  complex macro rendering, deletion sync, OAuth app flow, and live-tenant
+  verification remain outside this task. See [the setup guide](docs/CONFLUENCE.md).
 
 ## Current Extraction Contract
 
