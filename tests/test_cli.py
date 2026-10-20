@@ -13,6 +13,7 @@ EXPECTED_COMMANDS = (
     "chunk-experiment",
     "embed",
     "index",
+    "index-sharepoint",
     "retrieve",
     "evaluate-retrieval",
     "evaluate-answer",

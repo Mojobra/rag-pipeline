@@ -24,6 +24,8 @@ dependencies = [
     "langchain-huggingface>=1.2,<2.0",
     "langchain-qdrant>=1.1,<2.0",
     "langchain-text-splitters>=1.0,<2.0",
+    "httpx>=0.28,<1.0",
+    "msal>=1.31,<2.0",
     "pydantic>=2.0,<3.0",
     "prometheus-client>=0.20,<1.0",
     "qdrant-client>=1.18,<2.0",
@@ -97,6 +99,10 @@ show_error_codes = true
 
 [[tool.mypy.overrides]]
 module = ["docx2txt"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["msal"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

@@ -12,6 +12,7 @@ from rag_pipeline.cli.commands.query import (
     register_answer_command,
     register_retrieve_command,
 )
+from rag_pipeline.cli.commands.sharepoint import register_sharepoint_command
 
 
 def register_commands(
@@ -24,6 +25,7 @@ def register_commands(
     """
     register_document_commands(subparsers)
     register_indexing_commands(subparsers)
+    register_sharepoint_command(subparsers)
     register_retrieve_command(subparsers)
     register_evaluation_commands(subparsers)
     register_benchmark_commands(subparsers)

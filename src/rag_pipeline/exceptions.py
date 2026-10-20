@@ -32,6 +32,22 @@ class TextExtractionError(IngestionError):
     """Raised when text extraction fails for a supported document type."""
 
 
+class SharePointError(IngestionError):
+    """Base error for bounded, read-only SharePoint ingestion."""
+
+
+class SharePointConfigurationError(SharePointError, ValueError):
+    """Raised for invalid connector settings or missing credentials."""
+
+
+class SharePointProviderError(SharePointError):
+    """Raised when Microsoft Graph or token acquisition fails."""
+
+
+class SharePointInputError(SharePointError, ValueError):
+    """Raised when remote metadata or content violates import limits."""
+
+
 class ChunkingError(RagPipelineError):
     """Base error for document chunking failures."""
 
