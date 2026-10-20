@@ -7,7 +7,7 @@ trade-offs or limitations matter in a production discussion.
 - **Project version:** 0.3.0
 - **Last verified:** 2026-10-20
 - **Current product surface:** Local Python CLI, manual SharePoint,
-  Confluence, and Google Drive imports, and read-only HTTP API
+  Confluence, Google Drive, Slack, and Teams imports, and read-only HTTP API
 
 ## How To Read Version Information
 
@@ -48,6 +48,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | SharePoint import | MSAL and HTTPX | Obtains app-only Graph tokens and reads bounded drive listings and file content for manual local indexing. |
 | Confluence import | HTTPX and existing HTML parser | Reads bounded Cloud space pages with API-token credentials and normalizes Storage-HTML for manual local indexing. |
 | Google Drive import | Google Auth and HTTPX | Refreshes scoped ADC tokens and reads bounded Drive v3 folder listings, blob files, and native Docs exports for manual local indexing. |
+| Channel imports | HTTPX and MSAL | Read bounded Slack or Teams channel threads; Teams reuses app-only Graph authentication and the HTML parser. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
 | Evaluation | Project-owned Python | Computes deterministic retrieval, answer, abstention, citation, latency, and regression metrics. |
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
@@ -93,7 +94,7 @@ manager, which can differ from Python import names.
 | `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
 | `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
 | `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
-| `httpx` | Direct runtime | Sends bounded Microsoft Graph, Confluence Cloud, and Google Drive requests; handles the SharePoint content redirect without forwarding its bearer token. |
+| `httpx` | Direct runtime | Sends bounded Microsoft Graph, Confluence Cloud, Google Drive, and Slack requests; handles the SharePoint content redirect without forwarding its bearer token. |
 | `msal` | Direct runtime | Acquires app-only Microsoft Graph tokens from an Entra client credential supplied through environment variables. |
 | `google-auth[requests]` | Direct runtime | Discovers and refreshes scoped Application Default Credentials for the manual Drive import. |
 | `requests` | Transitive | Provides the Google Auth token-refresh transport; Drive content requests use HTTPX instead. |
@@ -150,8 +151,8 @@ reflects `uv.lock` as verified on the date at the top of this document.
 | `fastembed` | `>=0.3.3,<1.0` | 0.8.0 | Executes the optional local BM25 sparse model. |
 | `pypdf` | `>=6.0,<7.0` | 6.14.2 | Reads text and page metadata from PDFs. |
 | `docx2txt` | `>=0.9,<1.0` | 0.9 | Reads text from DOCX files. |
-| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements read-only Microsoft Graph, Confluence Cloud, and Google Drive HTTP transports. |
-| `msal` | `>=1.31,<2.0` | 1.39.0 | Acquires app-only Graph tokens for a manual SharePoint drive import. |
+| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements read-only Microsoft Graph, Confluence Cloud, Google Drive, and Slack HTTP transports. |
+| `msal` | `>=1.31,<2.0` | 1.39.0 | Acquires app-only Graph tokens for manual SharePoint and Teams imports. |
 | `google-auth[requests]` | `>=2.38,<3.0` | 2.62.0 | Discovers and refreshes Drive read-only ADC credentials. |
 
 The code imports `langchain_core` contracts directly; that package is currently
@@ -519,6 +520,8 @@ Current commands are:
 | `index-sharepoint` | Manually read one Graph drive and replace listed sources in a local collection; no ACL sync. |
 | `index-confluence` | Manually read current Cloud space pages and replace listed sources; no ACL sync. |
 | `index-google-drive` | Manually read one Drive folder and replace listed file sources; no ACL sync. |
+| `index-slack` | Manually read one bot-visible Slack channel and replies; no ACL sync. |
+| `index-teams` | Manually read one Graph-visible Teams channel and replies; no ACL sync. |
 | `retrieve` | Search the collection with filters and optional reranking. |
 | `answer` | Retrieve evidence and generate a grounded answer with citations. |
 | `evaluate-retrieval` | Run labeled retrieval cases and report top-k metrics. |
@@ -542,6 +545,10 @@ from `RAG_CONFLUENCE_*` environment variables. It defaults to a
 The Google Drive importer uses scoped Application Default Credentials. An
 optional `GOOGLE_APPLICATION_CREDENTIALS` path selects a credential file;
 see [the Drive setup and security contract](docs/GOOGLE_DRIVE.md).
+The Slack importer reads `RAG_SLACK_BOT_TOKEN` from the environment. The Teams
+importer reads tenant, client, and secret values from `RAG_TEAMS_*`. Both
+default to separate message collections in the same local store; see
+[the channel setup and security contract](docs/CHANNELS.md).
 
 ## Local State And I/O
 

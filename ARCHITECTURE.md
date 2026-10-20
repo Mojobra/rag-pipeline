@@ -64,8 +64,8 @@ directory or a deeply nested clean-architecture hierarchy:
 - `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
   artifacts, comparisons, and regression thresholds.
 - `rag_pipeline.infrastructure` owns local dense and sparse model adapters,
-  Qdrant persistence, and the read-only Microsoft Graph, Confluence, and
-  Google Drive adapters.
+  Qdrant persistence, and the read-only Microsoft Graph, Confluence, Google
+  Drive, Slack, and Teams adapters.
   These modules perform provider or storage I/O but do not own CLI or
   application decisions.
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
@@ -247,6 +247,29 @@ configure storage, credentials, network exposure, or a running deployment.
 - Drive read access controls the import only. The local API has no Drive user
   identity or ACL enforcement. The required acknowledgement is a warning, not
   authorization. See [the setup and security contract](docs/GOOGLE_DRIVE.md).
+
+## Current Channel Import Boundary
+
+- `index-slack` and `index-teams` are explicit CLI-only reads of one selected
+  channel and its replies. Slack uses a bot token and cursor-paginated Web API;
+  Teams uses app-only MSAL/Graph with expanded replies and validated
+  continuation URLs. Count, text-byte, response-byte, and request caps abort
+  a malformed or oversized traversal before local indexing begins.
+- The shared channel application workflow normalizes Teams HTML through the
+  existing parser and passes provenance-bearing LangChain Documents to the
+  existing chunking, embedding, and Qdrant replacement use case. Slack markup
+  is kept as returned. Workspace/channel/timestamp or team/channel/message
+  IDs form stable source keys; Teams reply keys also include their parent ID
+  because Graph only guarantees reply-ID uniqueness within a thread.
+- The default `slack_messages` and `teams_messages` collections are separate
+  names within the same local store. Reruns replace returned message sources,
+  including edited empty-text messages. Missing or deleted remote messages
+  are not pruned; provider pagination and Qdrant writes are not transactional.
+- Provider credentials gate import visibility only. The local API does not
+  enforce channel membership or message ACLs, and the required CLI flag only
+  acknowledges that risk. Chats, DMs, attachments, permission sync, retry/
+  backoff, incremental checkpoints, and live-provider verification remain
+  outside this task. See [channel setup and limits](docs/CHANNELS.md).
 
 ## Current Extraction Contract
 

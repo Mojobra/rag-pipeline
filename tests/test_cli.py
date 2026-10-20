@@ -16,6 +16,8 @@ EXPECTED_COMMANDS = (
     "index-sharepoint",
     "index-confluence",
     "index-google-drive",
+    "index-slack",
+    "index-teams",
     "retrieve",
     "evaluate-retrieval",
     "evaluate-answer",

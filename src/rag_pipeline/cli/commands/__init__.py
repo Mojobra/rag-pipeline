@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from rag_pipeline.cli.commands.benchmarks import register_benchmark_commands
+from rag_pipeline.cli.commands.channels import register_channel_commands
 from rag_pipeline.cli.commands.confluence import register_confluence_command
 from rag_pipeline.cli.commands.documents import register_document_commands
 from rag_pipeline.cli.commands.evaluation import register_evaluation_commands
@@ -30,6 +31,7 @@ def register_commands(
     register_sharepoint_command(subparsers)
     register_confluence_command(subparsers)
     register_google_drive_command(subparsers)
+    register_channel_commands(subparsers)
     register_retrieve_command(subparsers)
     register_evaluation_commands(subparsers)
     register_benchmark_commands(subparsers)

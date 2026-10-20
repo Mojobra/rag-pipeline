@@ -20,6 +20,10 @@ For `index-google-drive`, see the
 [Google Drive setup and security contract](GOOGLE_DRIVE.md). It scans one folder
 recursively through read-only Application Default Credentials, defaults to
 `google_drive_documents`, and does not enforce Drive permissions on retrieval.
+For `index-slack` and `index-teams`, see the
+[channel setup and security contract](CHANNELS.md). They read one channel and
+its replies, default to separate local collections, and do not enforce message
+permissions on retrieval.
 
 ## HTML Extraction
 
