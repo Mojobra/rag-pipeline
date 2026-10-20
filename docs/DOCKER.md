@@ -16,6 +16,33 @@ make the image large; first-use model downloads require network access and may
 take time. The final image contains the installed package, not the source tree,
 development tools, local documents, `.env` files, or existing Qdrant data.
 
+## Release Images
+
+The [CI workflow](../.github/workflows/ci.yml) builds the image on pull
+requests and smoke-tests `rag-pipeline --version` plus the API's `/health`
+endpoint with a disposable test token. It does not publish PR images. On a
+future pushed `vMAJOR.MINOR.PATCH` tag, the workflow reruns the Python quality
+suite, verifies that the annotated tag matches `project.version` and points
+to a commit reachable from `main`, then repeats the container smoke test. Only
+after those checks does it publish `ghcr.io/mojobra/rag-pipeline:vX.Y.Z` with
+the workflow's `GITHUB_TOKEN`. It never publishes a moving `latest` tag.
+
+Check the tag's GitHub Actions run before pulling an image; existing tags are
+not backfilled by adding this workflow. Registry package visibility is managed
+in GitHub and may require repository/package access for pulls. Replace the
+placeholder below with a tag whose publishing run succeeded:
+
+```powershell
+docker pull ghcr.io/mojobra/rag-pipeline:vX.Y.Z
+docker run --rm ghcr.io/mojobra/rag-pipeline:vX.Y.Z rag-pipeline --version
+```
+
+This is image delivery, not deployment. The container still needs the named
+volumes, source mounts, API token, and loopback-only exposure described below.
+The CI smoke test does not download models, check answer quality, or validate
+volume persistence. Protect release-tag creation with repository rules so only
+authorized maintainers can trigger publication.
+
 ## Index A Collection
 
 Create two named volumes. The first retains embedded Qdrant and optional
@@ -71,5 +98,5 @@ The raw token remains in the host environment and Docker container metadata;
 anyone with Docker daemon access can inspect it. Keep this a trusted local demo,
 do not publish port 8000 on all interfaces, and do not commit tokens or private
 documents. The image has no TLS, per-user identity, authorization, rate
-limiting, secret manager, backups, or deployment automation. Persistent volumes
-and read-only source mounts do not replace those controls.
+limiting, secret manager, backups, or runtime deployment automation. Persistent
+volumes and read-only source mounts do not replace those controls.

@@ -40,6 +40,13 @@ After that pull request is merged and `main` is current, create an annotated
 `vMAJOR.MINOR.PATCH` tag on the validated `main` commit and push that tag. Never
 tag an unmerged feature-branch commit.
 
+The CI workflow reruns quality checks for a pushed version tag, builds and
+smoke-tests the container, then publishes `ghcr.io/mojobra/rag-pipeline:vX.Y.Z`
+using the workflow's package-scoped token. The tag must be annotated, match
+`project.version`, and point to a commit reachable from `origin/main`. This
+publishes an image, not a running service; check the workflow result before
+announcing the image as available.
+
 ## Quality Checks
 
 Run the same checks used by CI before opening a pull request:

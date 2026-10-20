@@ -163,6 +163,12 @@ collection readiness. The documented host port binds to loopback only. This is
 local packaging, not an authenticated multi-user deployment; see
 [Docker setup](docs/DOCKER.md).
 
+The CI release boundary builds and smoke-tests this image on pull requests.
+For a matching annotated version tag on `main`, the workflow repeats quality
+checks and the container smoke test before publishing a versioned GHCR image.
+Only the tag job receives package-write permission. Publication does not
+configure storage, credentials, network exposure, or a running deployment.
+
 ---
 
 ## Current Index Synchronization Contract
@@ -410,8 +416,9 @@ approved from reviewed baselines; example values are not production defaults.
 - Coverage measures branches as well as statements and enforces an 80 percent
   repository floor.
 - GitHub Actions runs the locked environment, format check, lint, strict typing,
-  tests, coverage gate, and wheel/source-distribution build for pull requests
-  and updates to `main`.
+  tests, coverage gate, and wheel/source-distribution build for pull requests,
+  updates to `main`, and version tags. Pull requests additionally smoke-test
+  the image; validated version tags publish it to GHCR.
 
 These checks protect deterministic software contracts; they do not establish
 model quality, production throughput, dependency vulnerability status, or
