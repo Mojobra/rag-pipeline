@@ -78,11 +78,12 @@ uv run rag-pipeline retrieve 'When are expenses due?' `
   are not followed. Cursor links are accepted only for the same site and
   space-listing endpoint. Response bodies, tokens, and cursor links are not
   included in CLI errors.
-- **No Confluence ACLs are copied or enforced at query time.** Anyone who can
-  query this collection through the shared-token API or read its local Qdrant
-  files may see its content, regardless of Confluence page restrictions. The
-  `--acknowledge-no-acl` flag acknowledges this gap; it is not authorization.
-  Retrieval metadata filters are not a substitute for permission checks.
+- **No Confluence ACLs are copied or enforced at query time.** The default
+  shared-token API and local Qdrant files can expose content regardless of
+  page restrictions. The optional API source policy is manually maintained,
+  not a live Confluence permission check. The `--acknowledge-no-acl` flag
+  acknowledges this gap; it is not authorization. CLI metadata filters are
+  not a substitute for permission checks.
 - There is no scheduled refresh, webhook, deletion reconciliation, rate-limit
   retry, page-version checkpoint, audit log, OAuth app flow, or live-tenant
   test in the default suite. Correct credentials, permissions, and limits

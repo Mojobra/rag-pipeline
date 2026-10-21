@@ -33,8 +33,8 @@ local bearer token; it is not a hosted production service.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
 - **Local HTTP API:** bearer-protected retrieval and cited answers from an
-  existing collection, with bounded JSON requests, request IDs, structured
-  operational logs, protected Prometheus metrics, and no per-request model loading.
+  existing collection, optional manual source-scoped query tokens, bounded JSON
+  requests, request IDs, structured logs, and protected Prometheus metrics.
 - **Local container image:** one runtime-only, non-root image for CLI indexing
   and the read-only API, with persistent data and model-cache volumes.
 - **Manual SharePoint import:** bounded, read-only Microsoft Graph drive scan
@@ -366,10 +366,11 @@ for registry access and limitations. No service is deployed automatically.
 - HTML extraction keeps readable text and table rows while omitting scripts,
   styles, and navigation. CSS-dependent visibility and image text are not
   interpreted; scanned PDFs still require OCR that is not implemented.
-- Metadata filters are not authorization. The HTTP service has one shared bearer
-  credential but no user identities, RBAC, tenant isolation, rate limiting,
-  hosted-model integration, upload endpoint, or production deployment. Citations
-  currently expose local source paths or remote source IDs.
+- CLI metadata filters are not authorization. The HTTP service defaults to one
+  shared bearer credential; its optional manual source policy scopes query
+  tokens but is not SSO or remote ACL sync. There is no tenant isolation, rate
+  limiting, hosted-model integration, upload endpoint, or production deployment.
+  Citations can expose local source paths or remote source IDs.
 - SharePoint import has no per-user ACL enforcement, deletion sync, or scheduled
   refresh; its default collection is separate by name only, not by Qdrant file.
 - Confluence import has the same ACL and deletion limits; complex Storage-HTML
@@ -392,8 +393,10 @@ a local Docker image, and release-tag image publishing CI. Hosting and
 operating a production service are not implemented.
 
 Bounded manual SharePoint drive, Confluence Cloud space, Google Drive folder,
-Slack channel, and Teams channel imports are implemented. Permissions-aware
-retrieval and multi-tenancy remain planned. See
+Slack channel, and Teams channel imports are implemented. An opt-in local API
+policy now restricts retrieval by exact source and caller token; it does not
+sync remote ACLs. Multi-tenancy remains planned. See the
+[API access policy guide](docs/API_REFERENCE.md#optional-source-access-policy) and
 [ROADMAP.md](ROADMAP.md).
 
 ## Contributing

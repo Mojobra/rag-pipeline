@@ -12,6 +12,7 @@ from rag_pipeline.application.retrieval import (
     RetrievalPipeline,
     open_local_retrieval_pipeline,
 )
+from rag_pipeline.exceptions import RetrievalProviderError
 from rag_pipeline.generation import AnswerGenerator, create_local_answer_generator
 from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
 
@@ -20,12 +21,22 @@ class QueryRuntime(Protocol):
     """Read-only query contract consumed by the HTTP transport and test doubles."""
 
     def retrieve(
-        self, query: str, *, top_k: int, score_threshold: float | None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
     ) -> list[RetrievalResult]:
         """Return ranked evidence for one bounded query."""
 
     def answer(
-        self, query: str, *, top_k: int, score_threshold: float | None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
     ) -> AnswerOutcome:
         """Return a grounded answer or no-evidence abstention."""
 
@@ -50,28 +61,51 @@ class LocalApiRuntime:
         self._closed = False
 
     def retrieve(
-        self, query: str, *, top_k: int, score_threshold: float | None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
     ) -> list[RetrievalResult]:
         """Run retrieval under the process lock, reusing initialized providers."""
         with self._lock:
-            return self._pipeline().retrieve(
-                query,
-                retrieval_config=RetrievalConfig(
-                    top_k=top_k, score_threshold=score_threshold
-                ),
-            )
-
-    def answer(
-        self, query: str, *, top_k: int, score_threshold: float | None
-    ) -> AnswerOutcome:
-        """Retrieve and generate atomically against one open collection view."""
-        with self._lock:
+            if source_allowlist == ():
+                return []
             results = self._pipeline().retrieve(
                 query,
                 retrieval_config=RetrievalConfig(
-                    top_k=top_k, score_threshold=score_threshold
+                    top_k=top_k,
+                    score_threshold=score_threshold,
+                    source_allowlist=source_allowlist,
                 ),
             )
+            _assert_authorized_sources(results, source_allowlist)
+            return results
+
+    def answer(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
+    ) -> AnswerOutcome:
+        """Retrieve and generate atomically against one open collection view."""
+        with self._lock:
+            results = (
+                []
+                if source_allowlist == ()
+                else self._pipeline().retrieve(
+                    query,
+                    retrieval_config=RetrievalConfig(
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                        source_allowlist=source_allowlist,
+                    ),
+                )
+            )
+            _assert_authorized_sources(results, source_allowlist)
             return answer_from_results(
                 query,
                 results,
@@ -103,3 +137,14 @@ class LocalApiRuntime:
                 self._settings.generation_model
             )
         return self._generator
+
+
+def _assert_authorized_sources(
+    results: list[RetrievalResult], source_allowlist: tuple[str, ...] | None
+) -> None:
+    """Fail closed if a provider ever returns evidence outside its query scope."""
+    if source_allowlist is not None and any(
+        result.document.metadata.get("source") not in source_allowlist
+        for result in results
+    ):
+        raise RetrievalProviderError("Retrieved evidence violated the source policy.")

@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.3.0
-- **Last verified:** 2026-10-20
+- **Last verified:** 2026-10-21
 - **Current product surface:** Local Python CLI, manual SharePoint,
   Confluence, Google Drive, Slack, and Teams imports, and read-only HTTP API
 
@@ -32,7 +32,8 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | RAG contracts | LangChain | Supplies common document, embedding, prompt, model, parser, and vector-store interfaces. |
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
 | HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
-| HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Require a shared environment-supplied secret and compare fixed-size digests without adding an identity provider. |
+| HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Validate a shared admin secret and optional distinct query-principal tokens using fixed-size digests without an identity provider. |
+| HTTP source policy | Pydantic and Qdrant payload filters | Validate a private manual grant file and constrain dense/hybrid queries by exact source before top-k selection. |
 | HTTP request logging | Starlette ASGI middleware and Python `logging`/`json` | Emit bounded JSON events to stderr and correlate handled responses without storing request content. |
 | HTTP monitoring | Prometheus Python client | Expose bearer-protected process-local request and RAG outcome aggregates with bounded labels. |
 | HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
@@ -219,8 +220,9 @@ flowchart LR
 This is a layered modular monolith with CLI and local HTTP transports. The
 application and feature services are shared; provider details stay at explicit
 boundaries instead of being spread through command or route handlers. The API
-is read-only and uses one shared bearer credential. It does not enforce
-per-user identity or document authorization.
+is read-only and defaults to one shared bearer credential. Its optional local
+query-principal policy authorizes exact indexed sources, but does not verify
+external user identity or inherit source-system document permissions.
 
 ### Local HTTP Authentication Boundary
 
@@ -230,8 +232,16 @@ the query routes an OpenAPI security contract. Missing or incorrect credentials
 receive the same `401` Bearer challenge before provider work; `/health` and
 OpenAPI documentation remain public. The token is 32-256 URL-safe characters,
 should be generated from at least 32 random bytes, and is rotated by restarting
-the process. This shared secret is suitable for a trusted local demo, not user
-identity, document permissions, revocation per client, TLS, or rate limiting.
+the process. Without an access policy this shared secret allows all query
+sources. With `RAG_API_PRINCIPALS_JSON` and `RAG_API_ACCESS_POLICY_PATH`,
+distinct query tokens map to local principals and group memberships; the
+shared token remains for `/metrics` only. The private versioned policy grants
+exact indexed sources, denies missing sources, and is loaded once at startup.
+Qdrant receives a server-derived source filter before top-k selection, while
+the runtime rejects any returned source outside that scope before generation.
+This does not sync remote ACLs, protect CLI/direct-store access, or provide SSO,
+live revocation, TLS, rate limiting, or multi-tenancy. See
+[the API policy guide](docs/API_REFERENCE.md#optional-source-access-policy).
 
 ### Local HTTP Request Logging
 
@@ -671,8 +681,8 @@ must not be presented as current behavior:
 - OpenAI, Gemini, Claude, or other hosted model providers
 - API-key loading from `.env`
 - MCP servers, tool calling, or autonomous agents
-- Per-user identity, OIDC/Keycloak integration, RBAC, tenant isolation, or
-  authorization policy enforcement
+- Verified per-user identity, OIDC/Keycloak integration, enterprise RBAC,
+  tenant isolation, or synchronized source-system authorization
 - Kubernetes, cloud deployment, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting

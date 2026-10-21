@@ -75,12 +75,13 @@ uv run rag-pipeline retrieve 'What does the policy require?' `
   rerun the same command after resolving the failure.
 - Graph access uses an application token. The content redirect is fetched
   without forwarding that token and is restricted to HTTPS SharePoint hosts.
-- **No SharePoint ACLs are copied or enforced.** Anyone who can query the
-  selected collection through the shared-token API or local files can see
-  indexed content, regardless of their SharePoint permissions. The
-  `--acknowledge-no-acl` flag acknowledges this risk; it does not mitigate it.
-  Do not import restricted documents into a collection exposed to users who
-  should not read them. Retrieval filters are not authorization.
+- **No SharePoint ACLs are copied or enforced.** The default shared-token API
+  and local CLI/files can expose indexed content regardless of SharePoint
+  permissions. The optional API source policy is manually maintained, not a
+  live SharePoint permission check. The `--acknowledge-no-acl` flag acknowledges
+  this risk; it does not mitigate it. Do not import restricted documents into
+  a collection exposed to users who should not read them. CLI metadata filters
+  are not authorization.
 - There is no delta token, webhook, scheduled refresh, remote deletion, Graph
   throttling retry, audit trail, or live-tenant test in the default suite.
   Errors stop the import with sanitized messages; repeat it manually after

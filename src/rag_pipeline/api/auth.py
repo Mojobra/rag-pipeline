@@ -1,9 +1,8 @@
-"""Authenticate local HTTP queries with one server-owned bearer credential."""
+"""Authenticate local HTTP queries and derive optional source-scoped access."""
 
 from __future__ import annotations
 
 import os
-import re
 from hashlib import sha256
 from hmac import compare_digest
 from typing import Annotated, cast
@@ -11,7 +10,8 @@ from typing import Annotated, cast
 from fastapi import HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,256}\Z")
+from rag_pipeline.api.authorization import TOKEN_PATTERN, AccessPolicy
+
 _BEARER_SCHEME = HTTPBearer(auto_error=False)
 _UNAUTHORIZED = "A valid bearer token is required."
 
@@ -24,7 +24,7 @@ def load_bearer_token_digest() -> bytes:
     A missing or malformed token fails startup rather than disabling auth.
     """
     token = os.getenv("RAG_API_BEARER_TOKEN")
-    if token is None or _TOKEN_PATTERN.fullmatch(token) is None:
+    if token is None or TOKEN_PATTERN.fullmatch(token) is None:
         raise ValueError(
             "RAG_API_BEARER_TOKEN must contain 32-256 URL-safe characters. "
             "Generate a random token before starting the API."
@@ -38,7 +38,7 @@ def require_bearer_token(
         HTTPAuthorizationCredentials | None, Security(_BEARER_SCHEME)
     ],
 ) -> None:
-    """Reject missing or incorrect credentials before a query reaches models.
+    """Reject missing or incorrect admin credentials before protected work.
 
     All failures share one response and a Bearer challenge. Only the token's
     digest is stored for the lifetime of the process; rotation needs restart.
@@ -46,7 +46,7 @@ def require_bearer_token(
     if (
         credentials is None
         or credentials.scheme.lower() != "bearer"
-        or _TOKEN_PATTERN.fullmatch(credentials.credentials) is None
+        or TOKEN_PATTERN.fullmatch(credentials.credentials) is None
     ):
         raise _authentication_error()
 
@@ -54,6 +54,34 @@ def require_bearer_token(
     candidate_digest = sha256(credentials.credentials.encode("ascii")).digest()
     if not compare_digest(candidate_digest, expected_digest):
         raise _authentication_error()
+
+
+def require_query_access(
+    request: Request,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Security(_BEARER_SCHEME)
+    ],
+) -> tuple[str, ...] | None:
+    """Authenticate a query and derive its source allowlist server-side.
+
+    Legacy mode retains the shared token and unrestricted local behavior.
+    Policy mode accepts only principal tokens, never the metrics/admin token;
+    an empty tuple means the caller is valid but has no readable sources.
+    """
+    policy = cast(AccessPolicy | None, request.app.state.access_policy)
+    if policy is None:
+        require_bearer_token(request, credentials)
+        return None
+    if (
+        credentials is None
+        or credentials.scheme.lower() != "bearer"
+        or TOKEN_PATTERN.fullmatch(credentials.credentials) is None
+    ):
+        raise _authentication_error()
+    sources = policy.sources_for_token(credentials.credentials)
+    if sources is None:
+        raise _authentication_error()
+    return sources
 
 
 def _authentication_error() -> HTTPException:

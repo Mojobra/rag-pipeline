@@ -92,11 +92,15 @@ liveness-only check, also used by Docker's health check. The first authenticated
 query may load or download the models. If port 8000 is occupied, change only the
 host side of `--publish`, for example `127.0.0.1:8001:8000`, then use port 8001
 in the browser. See [API reference](API_REFERENCE.md) for request examples and
-all `RAG_API_*` settings. The API uses one process and CPU defaults.
+all `RAG_API_*` settings. For optional source-scoped queries, place the private
+policy at `/app/.rag_data/access-policy.json` in the mounted data volume and
+pass both policy variables described there; query tokens must differ from the
+metrics token. The API uses one process and CPU defaults.
 
 The raw token remains in the host environment and Docker container metadata;
 anyone with Docker daemon access can inspect it. Keep this a trusted local demo,
 do not publish port 8000 on all interfaces, and do not commit tokens or private
-documents. The image has no TLS, per-user identity, authorization, rate
-limiting, secret manager, backups, or runtime deployment automation. Persistent
-volumes and read-only source mounts do not replace those controls.
+documents. The optional local policy is not source-system ACL sync. The image
+has no TLS, verified per-user identity, rate limiting, secret manager, backups,
+or runtime deployment automation. Persistent volumes and read-only source
+mounts do not replace those controls.

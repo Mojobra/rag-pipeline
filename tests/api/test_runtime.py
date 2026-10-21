@@ -11,6 +11,7 @@ from langchain_core.documents import Document
 from rag_pipeline.api.runtime import LocalApiRuntime
 from rag_pipeline.api.settings import load_api_settings
 from rag_pipeline.application.retrieval import RetrievalPipelineConfig
+from rag_pipeline.exceptions import RetrievalProviderError
 from rag_pipeline.generation import AnswerGenerator, GeneratedAnswer
 from rag_pipeline.retrieval import RetrievalConfig, RetrievalResult
 
@@ -125,6 +126,67 @@ class LocalApiRuntimeTests(unittest.TestCase):
             runtime.close()
 
         self.assertIsNone(outcome.generated_answer)
+        factory.assert_not_called()
+
+    def test_empty_source_scope_skips_store_and_generator(self) -> None:
+        """A valid caller with no grants cannot trigger unfiltered retrieval."""
+        with (
+            patch(
+                "rag_pipeline.api.runtime.open_local_retrieval_pipeline"
+            ) as open_store,
+            patch("rag_pipeline.api.runtime.create_local_answer_generator") as factory,
+        ):
+            runtime = LocalApiRuntime(load_api_settings())
+            self.assertEqual(
+                runtime.retrieve(
+                    "Unknown?", top_k=4, score_threshold=None, source_allowlist=()
+                ),
+                [],
+            )
+            outcome = runtime.answer(
+                "Unknown?", top_k=4, score_threshold=0.2, source_allowlist=()
+            )
+            runtime.close()
+        self.assertIsNone(outcome.generated_answer)
+        open_store.assert_not_called()
+        factory.assert_not_called()
+
+    def test_provider_scope_violation_fails_before_answer_generation(self) -> None:
+        """Treat an incorrectly scoped provider result as a service failure."""
+        hit = RetrievalResult(
+            Document(page_content="Secret", metadata={"source": "secret.md"}),
+            score=0.9,
+            rank=1,
+        )
+        pipeline = RecordingPipeline([hit])
+
+        @contextmanager
+        def open_pipeline(_config: RetrievalPipelineConfig):
+            yield pipeline
+
+        with (
+            patch(
+                "rag_pipeline.api.runtime.open_local_retrieval_pipeline",
+                side_effect=open_pipeline,
+            ),
+            patch("rag_pipeline.api.runtime.create_local_answer_generator") as factory,
+        ):
+            runtime = LocalApiRuntime(load_api_settings())
+            with self.assertRaises(RetrievalProviderError):
+                runtime.retrieve(
+                    "Secret?",
+                    top_k=2,
+                    score_threshold=None,
+                    source_allowlist=("public.md",),
+                )
+            with self.assertRaises(RetrievalProviderError):
+                runtime.answer(
+                    "Secret?",
+                    top_k=2,
+                    score_threshold=None,
+                    source_allowlist=("public.md",),
+                )
+            runtime.close()
         factory.assert_not_called()
 
 
