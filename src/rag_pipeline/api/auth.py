@@ -10,7 +10,7 @@ from typing import Annotated, cast
 from fastapi import HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from rag_pipeline.api.authorization import TOKEN_PATTERN, AccessPolicy
+from rag_pipeline.api.authorization import TOKEN_PATTERN, AccessPolicy, QueryAccess
 
 _BEARER_SCHEME = HTTPBearer(auto_error=False)
 _UNAUTHORIZED = "A valid bearer token is required."
@@ -61,12 +61,12 @@ def require_query_access(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Security(_BEARER_SCHEME)
     ],
-) -> tuple[str, ...] | None:
+) -> QueryAccess | None:
     """Authenticate a query and derive its source allowlist server-side.
 
     Legacy mode retains the shared token and unrestricted local behavior.
     Policy mode accepts only principal tokens, never the metrics/admin token;
-    an empty tuple means the caller is valid but has no readable sources.
+    a QueryAccess with empty sources means the caller has no readable evidence.
     """
     policy = cast(AccessPolicy | None, request.app.state.access_policy)
     if policy is None:
@@ -78,10 +78,10 @@ def require_query_access(
         or TOKEN_PATTERN.fullmatch(credentials.credentials) is None
     ):
         raise _authentication_error()
-    sources = policy.sources_for_token(credentials.credentials)
-    if sources is None:
+    access = policy.access_for_token(credentials.credentials)
+    if access is None:
         raise _authentication_error()
-    return sources
+    return access
 
 
 def _authentication_error() -> HTTPException:

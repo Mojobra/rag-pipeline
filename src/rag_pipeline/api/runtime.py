@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
 from threading import Lock
 from typing import Protocol
 
+from rag_pipeline.api.authorization import TenantStorage
 from rag_pipeline.api.settings import ApiSettings
 from rag_pipeline.application.answering import AnswerOutcome, answer_from_results
 from rag_pipeline.application.retrieval import (
@@ -27,6 +29,7 @@ class QueryRuntime(Protocol):
         top_k: int,
         score_threshold: float | None,
         source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievalResult]:
         """Return ranked evidence for one bounded query."""
 
@@ -37,6 +40,7 @@ class QueryRuntime(Protocol):
         top_k: int,
         score_threshold: float | None,
         source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
     ) -> AnswerOutcome:
         """Return a grounded answer or no-evidence abstention."""
 
@@ -67,8 +71,11 @@ class LocalApiRuntime:
         top_k: int,
         score_threshold: float | None,
         source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievalResult]:
         """Run retrieval under the process lock, reusing initialized providers."""
+        if tenant_id is not None:
+            raise RetrievalProviderError("Tenant scope cannot use the default store.")
         with self._lock:
             if source_allowlist == ():
                 return []
@@ -90,8 +97,11 @@ class LocalApiRuntime:
         top_k: int,
         score_threshold: float | None,
         source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
     ) -> AnswerOutcome:
         """Retrieve and generate atomically against one open collection view."""
+        if tenant_id is not None:
+            raise RetrievalProviderError("Tenant scope cannot use the default store.")
         with self._lock:
             results = (
                 []
@@ -137,6 +147,86 @@ class LocalApiRuntime:
                 self._settings.generation_model
             )
         return self._generator
+
+
+class TenantApiRuntime:
+    """Route scoped queries to distinct local stores under one process lock.
+
+    Per-tenant runtimes remain lazy, so startup does not open stores or models.
+    The global lock bounds inference and embedded-store activity to one query
+    at a time; this favors predictable local memory over tenant throughput.
+    """
+
+    def __init__(
+        self, settings: ApiSettings, tenants: tuple[TenantStorage, ...]
+    ) -> None:
+        self._lock = Lock()
+        self._closed = False
+        self._runtimes: dict[str, LocalApiRuntime] = {}
+        for tenant in tenants:
+            store = replace(
+                settings.retrieval.vector_store,
+                path=tenant.store_path,
+                collection_name=tenant.collection_name,
+            )
+            retrieval = replace(settings.retrieval, vector_store=store)
+            self._runtimes[tenant.id] = LocalApiRuntime(
+                replace(settings, retrieval=retrieval)
+            )
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
+    ) -> list[RetrievalResult]:
+        """Search only the credential-bound tenant's configured collection."""
+        with self._lock:
+            return self._tenant_runtime(tenant_id, source_allowlist).retrieve(
+                query,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                source_allowlist=source_allowlist,
+            )
+
+    def answer(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        score_threshold: float | None,
+        source_allowlist: tuple[str, ...] | None = None,
+        tenant_id: str | None = None,
+    ) -> AnswerOutcome:
+        """Generate only from evidence read within the selected tenant store."""
+        with self._lock:
+            return self._tenant_runtime(tenant_id, source_allowlist).answer(
+                query,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                source_allowlist=source_allowlist,
+            )
+
+    def close(self) -> None:
+        """Release each lazy tenant runtime once when the API shuts down."""
+        with self._lock:
+            if not self._closed:
+                for runtime in self._runtimes.values():
+                    runtime.close()
+                self._closed = True
+
+    def _tenant_runtime(
+        self, tenant_id: str | None, source_allowlist: tuple[str, ...] | None
+    ) -> LocalApiRuntime:
+        if self._closed or tenant_id is None or source_allowlist is None:
+            raise RetrievalProviderError("Tenant query scope is unavailable.")
+        runtime = self._runtimes.get(tenant_id)
+        if runtime is None:
+            raise RetrievalProviderError("Tenant query scope is unavailable.")
+        return runtime
 
 
 def _assert_authorized_sources(

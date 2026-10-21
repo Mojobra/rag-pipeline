@@ -3,10 +3,11 @@
 Tasks 19-22 add a read-only FastAPI adapter with shared-token authentication,
 structured request logging, and process-local monitoring over the existing
 retrieval and answer workflows. Task 29 adds optional locally configured
-source-scoped query tokens. It does not ingest documents, host remote models,
-sync source-system ACLs, provide SSO, or make embedded Qdrant a multi-user
-database. Index documents with the CLI first;
-stop the API before modifying the same local Qdrant store with the CLI.
+source-scoped query tokens; Task 30 can bind each token to a separate local
+tenant store. It does not ingest documents, host remote models, sync
+source-system ACLs, provide SSO, or make embedded Qdrant a multi-user
+database. Index documents with the CLI first; stop the API before modifying
+any tenant store with the CLI.
 Task 23 also packages these same CLI and API paths in a local image; see
 [Docker setup](DOCKER.md) for the volume and loopback-bound port workflow.
 
@@ -39,10 +40,10 @@ settings; incompatible settings fail rather than silently mixing vectors.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `RAG_API_BEARER_TOKEN` | required | Shared 32-256-character URL-safe secret for queries in default mode and `/metrics` in both modes. Generate at least 32 random bytes; missing or malformed values prevent startup. Rotation requires restart. |
-| `RAG_API_PRINCIPALS_JSON` | unset | Optional JSON object containing `principals` with distinct `id`, 32-256-character URL-safe `token`, and optional `groups`. Set with the policy path to enable scoped query tokens. |
+| `RAG_API_PRINCIPALS_JSON` | unset | Optional JSON object containing `principals` with distinct `id`, 32-256-character URL-safe `token`, and optional `groups`. Policy v2 also requires each principal's `tenant`. Set with the policy path to enable scoped query tokens. |
 | `RAG_API_ACCESS_POLICY_PATH` | unset | Path to a private JSON source-grant file; required with `RAG_API_PRINCIPALS_JSON`. Prefer `.rag_data/access-policy.json` (ignored by Git). |
-| `RAG_API_STORE_PATH` | `.rag_data/qdrant` | Local embedded-Qdrant directory; use the same path as CLI `--store-path`. |
-| `RAG_API_COLLECTION_NAME` | `rag_documents` | Existing collection; use the CLI `--collection-name` value. |
+| `RAG_API_STORE_PATH` | `.rag_data/qdrant` | Local embedded-Qdrant directory in default/v1 mode; v2 uses each tenant's `store_path` instead. |
+| `RAG_API_COLLECTION_NAME` | `rag_documents` | Existing collection in default/v1 mode; v2 uses each tenant's `collection_name` instead. |
 | `RAG_API_SEARCH_MODE` | `dense` | `dense` or `hybrid`; must match the collection schema. |
 | `RAG_API_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Dense query model; must match the model used to index. |
 | `RAG_API_EMBEDDING_REVISION` | unset | Optional matching Hugging Face model revision. |
@@ -104,6 +105,78 @@ private policy file and environment, keep the API on loopback, and do not use
 this as an Internet-facing enterprise identity layer. The bounded 1,000-source
 allowlist is intended for a local collection; larger systems need indexed ACL
 metadata, a trusted identity provider, revocation, and operational audit.
+
+## Optional Local Tenant Isolation
+
+Policy version 2 assigns each query principal to exactly one tenant. The API
+derives that tenant from its bearer token and opens only the configured local
+Qdrant directory and collection. Grants are scoped by tenant as well as exact
+`metadata.source`, so two tenants may use the same source, group, and collection
+names without sharing evidence. Query JSON cannot select a tenant, collection,
+or store path. Version 1 and the default shared-token mode continue to work
+unchanged; migrate deliberately by adding tenant bindings and reindexing each
+tenant's documents separately.
+
+For example, put this **private** file at `.rag_data/access-policy.json`:
+
+```json
+{
+  "version": 2,
+  "tenants": [
+    {"id": "alpha", "store_path": ".rag_data/tenants/alpha", "collection_name": "documents"},
+    {"id": "beta", "store_path": ".rag_data/tenants/beta", "collection_name": "documents"}
+  ],
+  "sources": [
+    {"tenant": "alpha", "source": "expense.md", "groups": ["readers"]},
+    {"tenant": "beta", "source": "expense.md", "groups": ["readers"]}
+  ]
+}
+```
+
+The `source` values must equal the indexed `metadata.source` values. Before
+starting the API, index each tenant with its own store path; use the indexed
+source paths in the policy. For a local example using the bundled synthetic
+documents, run the index command separately for each tenant and **stop the API**
+while indexing:
+
+```powershell
+uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents --store-path .rag_data/tenants/alpha --collection-name documents
+uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents --store-path .rag_data/tenants/beta --collection-name documents
+```
+
+The resulting sources are the resolved document paths, not `expense.md`; adjust
+the example grants to those exact values before querying. Bind query tokens in
+the environment without adding them to the policy file:
+
+```powershell
+$alphaToken = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$betaToken = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$env:RAG_API_PRINCIPALS_JSON = @{
+  principals = @(
+    @{ id = 'alice'; token = $alphaToken; tenant = 'alpha'; groups = @('readers') },
+    @{ id = 'bob'; token = $betaToken; tenant = 'beta'; groups = @('readers') }
+  )
+} | ConvertTo-Json -Depth 4 -Compress
+$env:RAG_API_ACCESS_POLICY_PATH = '.rag_data/access-policy.json'
+```
+
+Set the distinct admin `RAG_API_BEARER_TOKEN` as in [Start Locally](#start-locally),
+then start the API. In v2 it remains valid only for `/metrics`. Invalid or
+overlapping tenant paths, duplicate tenant IDs, unscoped grants, unknown tenant
+bindings, and cross-tenant direct grants fail at startup. Paths resolve from
+the API process's working directory; use the same directory consistently when
+indexing and serving. Source grants and token rotations take effect only after
+restart. The embedding/search configuration remains shared and must be
+compatible with every tenant collection.
+
+This is application-level isolation within one trusted process, not OS-level
+storage protection. The CLI, direct filesystem access, and container operator
+can still read all stores. One worker serializes queries; per-tenant models and
+open stores are lazy but can accumulate in memory as tenants become active
+(up to 16 configured tenants). There is no tenant self-service, quotas, SSO,
+live ACL sync, audit trail, remote Qdrant cluster, or safe multi-worker access
+to embedded stores. Use separate credentials, storage permissions, and a
+production identity/storage design before serving untrusted organizations.
 
 ## Request Logging
 
@@ -214,7 +287,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/answer `
 
 Responses can include local source paths and document text. Keep this service
 on a trusted machine: the default shared token cannot restrict documents, and
-the optional local source policy is only as current as its manual grants.
+the optional local source/tenant policy is only as current as its manual grants.
 Tokens can be copied or stolen and are not a replacement for TLS, SSO, live
 source ACLs, per-client revocation, rate limiting, or audit logging. Do not put
 them in a URL, Git, or application logs. There is no upload, HTTP indexing,

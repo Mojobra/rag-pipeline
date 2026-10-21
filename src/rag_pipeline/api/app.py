@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from logging import Logger
-from typing import cast
+from typing import Annotated, cast
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
@@ -21,13 +21,13 @@ from rag_pipeline.api.auth import (
     require_bearer_token,
     require_query_access,
 )
-from rag_pipeline.api.authorization import load_access_policy
+from rag_pipeline.api.authorization import QueryAccess, load_access_policy
 from rag_pipeline.api.monitoring import ApiMetrics, RequestMetricsMiddleware
 from rag_pipeline.api.request_logging import (
     RequestLoggingMiddleware,
     default_request_logger,
 )
-from rag_pipeline.api.runtime import LocalApiRuntime, QueryRuntime
+from rag_pipeline.api.runtime import LocalApiRuntime, QueryRuntime, TenantApiRuntime
 from rag_pipeline.api.schemas import (
     AnswerRequest,
     AnswerResponse,
@@ -64,11 +64,16 @@ def create_app(
         application.state.access_policy = load_access_policy(
             application.state.bearer_token_digest
         )
-        runtime = (
-            LocalApiRuntime(load_api_settings())
-            if runtime_factory is None
-            else runtime_factory()
-        )
+        if runtime_factory is not None:
+            runtime = runtime_factory()
+        else:
+            settings = load_api_settings()
+            policy = application.state.access_policy
+            runtime = (
+                TenantApiRuntime(settings, policy.tenants)
+                if policy is not None and policy.tenants
+                else LocalApiRuntime(settings)
+            )
         application.state.query_runtime = runtime
         try:
             yield
@@ -130,20 +135,28 @@ def create_app(
     def retrieve(
         body: QueryRequest,
         request: Request,
-        sources: tuple[str, ...] | None = Depends(require_query_access),
+        access: Annotated[QueryAccess | None, Depends(require_query_access)],
     ) -> RetrievalResponse:
         """Search the configured collection and return ordered source evidence."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)
-        if sources is None:
+        if access is None:
             results = runtime.retrieve(
                 body.query, top_k=body.top_k, score_threshold=body.score_threshold
+            )
+        elif access.tenant_id is not None:
+            results = runtime.retrieve(
+                body.query,
+                top_k=body.top_k,
+                score_threshold=body.score_threshold,
+                source_allowlist=access.sources,
+                tenant_id=access.tenant_id,
             )
         else:
             results = runtime.retrieve(
                 body.query,
                 top_k=body.top_k,
                 score_threshold=body.score_threshold,
-                source_allowlist=sources,
+                source_allowlist=access.sources,
             )
         response = RetrievalResponse(
             results=[RetrievalHit.from_result(result) for result in results]
@@ -158,20 +171,28 @@ def create_app(
     def answer(
         body: AnswerRequest,
         request: Request,
-        sources: tuple[str, ...] | None = Depends(require_query_access),
+        access: Annotated[QueryAccess | None, Depends(require_query_access)],
     ) -> AnswerResponse:
         """Return a local grounded answer with deterministic source citations."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)
-        if sources is None:
+        if access is None:
             outcome = runtime.answer(
                 body.query, top_k=body.top_k, score_threshold=body.score_threshold
+            )
+        elif access.tenant_id is not None:
+            outcome = runtime.answer(
+                body.query,
+                top_k=body.top_k,
+                score_threshold=body.score_threshold,
+                source_allowlist=access.sources,
+                tenant_id=access.tenant_id,
             )
         else:
             outcome = runtime.answer(
                 body.query,
                 top_k=body.top_k,
                 score_threshold=body.score_threshold,
-                source_allowlist=sources,
+                source_allowlist=access.sources,
             )
         response = AnswerResponse.from_outcome(outcome)
         metrics.record_answer(
