@@ -119,13 +119,15 @@ def parse_metadata_filter(expression: str) -> MetadataFilter:
 class RetrievalConfig:
     """Validated selection policy for dense or fused retrieval results.
 
-    The configuration defines result width, an optional provider-score gate, and
-    exact metadata conditions that Qdrant applies before top-k selection.
+    The configuration defines result width, an optional provider-score gate,
+    exact metadata conditions, and an optional source allowlist applied inside
+    Qdrant before top-k selection. An empty allowlist denies all results.
     """
 
     top_k: int = 4
     score_threshold: float | None = None
     metadata_filters: tuple[MetadataFilter, ...] = ()
+    source_allowlist: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         """Validate result limits, score gate, and unique typed filter objects."""
@@ -179,6 +181,20 @@ class RetrievalConfig:
                 )
             seen_filter_keys.add(filter_key)
         object.__setattr__(self, "metadata_filters", metadata_filters)
+        if self.source_allowlist is not None:
+            if not isinstance(self.source_allowlist, tuple) or any(
+                not isinstance(source, str) or not source.strip()
+                for source in self.source_allowlist
+            ):
+                raise InvalidRetrievalConfigurationError(
+                    "source_allowlist must contain nonempty source strings."
+                )
+            if len(self.source_allowlist) > 1000 or len(
+                set(self.source_allowlist)
+            ) != len(self.source_allowlist):
+                raise InvalidRetrievalConfigurationError(
+                    "source_allowlist must contain at most 1000 unique sources."
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +272,8 @@ class RetrieverService:
             raise RetrievalInputError("query cannot be empty.")
 
         settings = config or RetrievalConfig()
+        if settings.source_allowlist == ():
+            return []
         query_embedding = self._embedding_service.embed_query(query)
         sparse_query_embedding = self._embed_sparse_query(query)
         self._vector_store.validate_compatibility(
@@ -269,7 +287,9 @@ class RetrieverService:
         )
 
         try:
-            qdrant_filter = _build_qdrant_metadata_filter(settings.metadata_filters)
+            qdrant_filter = _build_qdrant_metadata_filter(
+                settings.metadata_filters, settings.source_allowlist
+            )
             if sparse_query_embedding is None or sparse_query_embedding.is_empty:
                 langchain_store = self._vector_store.as_langchain_vector_store()
                 provider_results = (
@@ -415,21 +435,32 @@ class _PrecomputedSparseQueryEmbeddings(SparseEmbeddings):
 
 def _build_qdrant_metadata_filter(
     metadata_filters: tuple[MetadataFilter, ...],
+    source_allowlist: tuple[str, ...] | None = None,
 ) -> models.Filter | None:
     """Translate validated conditions into Qdrant payload filter objects.
 
     Conditions target LangChain's nested metadata payload and use Qdrant ``must``
-    semantics. No conditions return ``None`` so the provider performs an
-    unfiltered search.
+    semantics. A nonempty source list is OR-matched within a separate AND
+    condition. No conditions return ``None`` for an unfiltered search.
     """
-    if not metadata_filters:
+    if source_allowlist == ():
+        raise InvalidRetrievalConfigurationError(
+            "An empty source allowlist cannot be translated to a search filter."
+        )
+    if not metadata_filters and source_allowlist is None:
         return None
-    return models.Filter(
-        must=[
+    conditions: list[models.Condition] = [
+        models.FieldCondition(
+            key=f"{QdrantVectorStore.METADATA_KEY}.{condition.field}",
+            match=models.MatchValue(value=condition.value),
+        )
+        for condition in metadata_filters
+    ]
+    if source_allowlist:
+        conditions.append(
             models.FieldCondition(
-                key=f"{QdrantVectorStore.METADATA_KEY}.{condition.field}",
-                match=models.MatchValue(value=condition.value),
+                key=f"{QdrantVectorStore.METADATA_KEY}.source",
+                match=models.MatchAny(any=list(source_allowlist)),
             )
-            for condition in metadata_filters
-        ]
-    )
+        )
+    return models.Filter(must=conditions)

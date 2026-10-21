@@ -6,6 +6,25 @@ Run all commands from the repository root; multiline commands use PowerShell
 continuation syntax. The schemas shown below are JSON examples, not
 additional files installed by the application.
 
+For the optional `index-sharepoint` command, see the
+[SharePoint setup and security contract](SHAREPOINT.md). It shares `index`'s
+local chunking, embedding, and store settings but reads one Graph drive via
+environment-supplied app credentials, defaults to `sharepoint_documents`, and
+does not import source permissions.
+For `index-confluence`, see the
+[Confluence setup and security contract](CONFLUENCE.md). It reads current pages
+from one Cloud space with environment-supplied API-token credentials, defaults
+to `confluence_documents`, and likewise does not enforce source permissions on
+retrieval.
+For `index-google-drive`, see the
+[Google Drive setup and security contract](GOOGLE_DRIVE.md). It scans one folder
+recursively through read-only Application Default Credentials, defaults to
+`google_drive_documents`, and does not enforce Drive permissions on retrieval.
+For `index-slack` and `index-teams`, see the
+[channel setup and security contract](CHANNELS.md). They read one channel and
+its replies, default to separate local collections, and do not enforce message
+permissions on retrieval.
+
 ## HTML Extraction
 
 `.html` and `.htm` files are decoded into normalized visible text before
@@ -507,9 +526,10 @@ documents programmatically. A missing field or unmatched value produces no
 eligible chunks; the `answer` command then abstains before loading the LLM.
 
 Metadata filters improve relevance but are not an authorization system by
-themselves. A production API must inject mandatory tenant and ACL constraints
-server-side so callers cannot omit or replace them, and frequently filtered
-fields should receive Qdrant payload indexes at scale.
+themselves. The optional local HTTP source policy injects mandatory exact-source
+constraints server-side; CLI queries remain trusted operator operations. A
+production API still needs trusted identity, synchronized ACLs, tenant
+isolation, and Qdrant payload indexes for frequently filtered fields at scale.
 
 ## Hybrid Search
 

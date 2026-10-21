@@ -1,7 +1,8 @@
 # RAG Pipeline
 
-A local Python CLI that turns business documents into searchable evidence and
-source-cited answers using LangChain, Hugging Face models, and Qdrant.
+A local Python CLI and read-only HTTP API that turn business documents into
+searchable evidence and source-cited answers using LangChain, Hugging Face
+models, and Qdrant.
 
 [![CI](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Mojobra/rag-pipeline/actions/workflows/ci.yml)
 
@@ -13,8 +14,8 @@ locally, from document extraction and indexing to retrieval, generation, and
 evaluation.
 
 It is intended for developers and AI engineers who want to inspect, test, and
-compare RAG components on a reproducible baseline. The current interface is a
-CLI, not a hosted application or production service.
+compare RAG components on a reproducible baseline. The HTTP adapter requires a
+local bearer token; it is not a hosted production service.
 
 ## Features
 
@@ -31,6 +32,20 @@ CLI, not a hosted application or production service.
   latency reports, regression gates, and paired prompt-evidence coverage.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
+- **Local HTTP API:** bearer-protected retrieval and cited answers from an
+  existing collection, optional source-scoped query tokens and separate local
+  tenant stores, bounded JSON requests, request IDs, structured logs, and
+  protected Prometheus metrics.
+- **Local container image:** one runtime-only, non-root image for CLI indexing
+  and the read-only API, with persistent data and model-cache volumes.
+- **Manual SharePoint import:** bounded, read-only Microsoft Graph drive scan
+  into a separate collection by default; it does not enforce source ACLs.
+- **Manual Confluence import:** bounded, read-only Cloud space page scan into
+  a separate collection by default; it does not enforce page ACLs.
+- **Manual Google Drive import:** bounded, read-only folder scan of supported
+  files and Google Docs into a separate collection; it does not enforce Drive ACLs.
+- **Manual channel imports:** bounded, read-only Slack and Teams channel scans,
+  including replies, into separate collections; message ACLs are not enforced.
 
 ## Quick Start
 
@@ -52,17 +67,40 @@ Answers include a `Sources` section identifying the evidence used. The small
 default model is a functional baseline, not a guarantee of answer quality. Use
 `retrieve` to inspect evidence independently of generation.
 
+To query that collection over HTTP instead, start the local API in a second
+terminal:
+
+```powershell
+$token = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$token
+$env:RAG_API_BEARER_TOKEN = $token
+$env:RAG_API_COLLECTION_NAME = 'asteria_demo'
+uv run uvicorn rag_pipeline.api:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+Open `http://127.0.0.1:8000/docs` or see the [API reference](docs/API_REFERENCE.md)
+for authenticated query and `/metrics` examples. Keep the generated token private
+and provide it to your local client; a new token requires a server restart. The
+API writes one sanitized JSON event per request to stderr and returns
+`X-Request-ID` for correlation; `--no-access-log` prevents Uvicorn's raw URL
+access logs. Do not bind the service to a public network.
+
+For the equivalent local container workflow, see [Docker setup](docs/DOCKER.md).
+
 ## Requirements
 
-- Python **3.11 or newer**; CI currently runs Python 3.11.
+- Python **3.11 or newer**; CI verifies 3.11, 3.12, and 3.13.
 - [uv](https://docs.astral.sh/uv/) for dependency management and execution.
 - Git to clone the repository.
 - Network access for initial dependency installation and uncached model
   downloads; disk space for dependencies, model caches, and the local index.
 
-The defaults run on CPU. A GPU, separate Qdrant server, Docker, and API keys are
-not required. After dependencies and model artifacts are cached, inference runs
-locally.
+The defaults run on CPU. A GPU, separate Qdrant server, Docker, and hosted-model
+API keys are not required for the Python workflow. Docker Engine is required
+only for the optional container workflow. After dependencies and model artifacts
+are cached, inference runs locally. HTTP queries require a locally generated
+bearer token. The HTTP command uses bundled Uvicorn; no separate server install
+is needed.
 
 ## Installation
 
@@ -103,6 +141,20 @@ with `--prune-missing`; this requires recursive scanning and deletes only points
 whose source path is inside that directory. Index updates use multiple Qdrant
 operations and are not atomic; after an interrupted run, repeat the command to
 finish synchronization.
+
+For a manual Microsoft Graph document-library import, see the
+[SharePoint setup and security contract](docs/SHAREPOINT.md). This path needs an
+Entra app and explicit acknowledgement that SharePoint permissions are **not**
+enforced by retrieval.
+For a Confluence Cloud space, see the
+[Confluence setup and security contract](docs/CONFLUENCE.md). Its API-token
+import has the same retrieval-permission limitation.
+For a Google Drive folder, see the
+[Drive setup and security contract](docs/GOOGLE_DRIVE.md). Its read-only ADC
+import also does not carry source permissions into retrieval.
+For a Slack or Teams channel, see the
+[channel setup and security contract](docs/CHANNELS.md). These manual imports
+include replies but do not preserve message permissions at retrieval time.
 
 ### Enable Hybrid Search And Reranking
 
@@ -165,6 +217,11 @@ answers, so reports from private data need the same protection as their sources.
 | `chunk-experiment` | Compare chunk sizes and overlap costs without model inference. |
 | `embed` | Inspect dense-vector output without writing an index. |
 | `index` | Build or update a compatible dense or hybrid collection. |
+| `index-sharepoint` | Manually import supported files from one Graph drive; no ACL sync. |
+| `index-confluence` | Manually import current pages from one Cloud space; no ACL sync. |
+| `index-google-drive` | Manually import supported files and Google Docs from one Drive folder; no ACL sync. |
+| `index-slack` | Manually import one bot-visible Slack channel and replies; no ACL sync. |
+| `index-teams` | Manually import one Graph-visible Teams channel and replies; no ACL sync. |
 | `retrieve` | Inspect ranked evidence, optionally filtered or reranked. |
 | `answer` | Generate an answer and citations from retrieved evidence. |
 | `evaluate-retrieval` | Score an existing collection against relevance labels. |
@@ -181,9 +238,22 @@ comparisons.
 
 ## Configuration
 
-Configuration uses CLI flags and typed Python configuration objects. The current
-pipeline does **not** load model settings or API keys from `.env`; no
-`.env.example` or active OpenAI, Gemini, or Anthropic integration is included.
+Configuration uses CLI flags and typed Python configuration objects. The HTTP
+adapter reads `RAG_API_*` environment variables at startup, including the
+required `RAG_API_BEARER_TOKEN`. Copy [.env.example](.env.example) to a private
+`.env` as a configuration template, then export the needed values in your shell
+or pass the file to a launcher that supports environment files: the pipeline
+does not load `.env` automatically. Hosted OpenAI, Gemini, and Anthropic model
+integration is not active; the template contains no hosted-provider settings.
+The optional SharePoint importer reads three `RAG_SHAREPOINT_*` environment
+variables, documented in [its setup guide](docs/SHAREPOINT.md).
+The optional Confluence importer reads three `RAG_CONFLUENCE_*` variables;
+see [its setup guide](docs/CONFLUENCE.md).
+The Google Drive importer uses Application Default Credentials. An optional
+`GOOGLE_APPLICATION_CREDENTIALS` path selects a private credential file;
+see [its setup guide](docs/GOOGLE_DRIVE.md).
+The Slack importer reads `RAG_SLACK_BOT_TOKEN`; the Teams importer reads three
+`RAG_TEAMS_*` Entra app credentials. See [channel setup](docs/CHANNELS.md).
 
 | Setting | Default | Practical effect |
 | --- | --- | --- |
@@ -192,7 +262,7 @@ pipeline does **not** load model settings or API keys from `.env`; no
 | `--device` / `--generation-device` | `cpu` | Independent embedding and generation devices. CUDA requires compatible hardware and sufficient VRAM. |
 | `--chunk-size` / `--chunk-overlap` | `1000` / `200` characters | Balance evidence size against chunk count, duplicated text, and storage. |
 | `--store-path` | `.rag_data/qdrant` | Persistent embedded database directory; reuse it for subsequent queries. |
-| `--collection-name` | `rag_documents` | Collection within the database; examples use explicit names to separate corpora. |
+| `--collection-name` | `rag_documents` (remote import defaults: `sharepoint_documents`, `confluence_documents`, `google_drive_documents`, `slack_messages`, `teams_messages`) | Collection within the database; examples use explicit names to separate corpora. |
 | `--search-mode` | `dense` | Select `hybrid` only for a collection indexed in that mode. |
 | `--top-k` | `4` | Maximum final evidence chunks per query. |
 | `--score-threshold` / `--no-score-threshold` | Disabled for `retrieve` and `evaluate-retrieval`; `0.2` for `answer`, `evaluate-answer`, and `benchmark` | Apply or explicitly disable the first-stage gate before reranking or generation. Scores are mode-specific, not confidence probabilities. |
@@ -214,17 +284,23 @@ storage locations and I/O behavior.
 .
 |-- src/rag_pipeline/
 |   |-- cli/                 # Argument parsing and terminal output
+|   |-- api/                 # HTTP auth, routes, logging, and monitoring
 |   |-- application/         # Transport-neutral workflow orchestration
 |   |-- ingestion/           # Discovery, extraction, and chunking
-|   |-- infrastructure/      # Model adapters and Qdrant persistence
+|   |-- infrastructure/      # Model, remote-source, and Qdrant adapters
 |   |-- retrieval/           # Search, filtering, and reranking
 |   |-- generation/          # Prompts, token budgets, and citations
 |   |-- evaluation/          # Dataset schemas and quality metrics
 |   `-- benchmarking/        # Isolated runs, provenance, and comparisons
 |-- tests/                   # Offline unit and integration tests
+|-- scripts/                 # Release-tag verification for CI
 |-- evaluation/datasets/     # Versioned synthetic corpora and labels
 |-- docs/CLI_REFERENCE.md    # Detailed CLI workflows and contracts
-|-- .github/workflows/ci.yml # Automated quality checks
+|-- docs/API_REFERENCE.md    # Local HTTP setup and endpoint contract
+|-- docs/DOCKER.md           # Local container build and run workflow
+|-- Dockerfile               # Runtime image for CLI and API
+|-- .dockerignore            # Build-context allowlist
+|-- .github/workflows/ci.yml # Quality, container checks, release image publishing
 |-- pyproject.toml           # Package metadata and dependency constraints
 `-- uv.lock                  # Reproducible dependency graph
 ```
@@ -238,13 +314,19 @@ package boundaries and the contracts enforced between stages.
 | Area | Technology |
 | --- | --- |
 | Language and CLI | Python 3.11+, standard-library `argparse` |
+| HTTP API and monitoring | FastAPI, Uvicorn, `prometheus-client` |
 | RAG interfaces and composition | LangChain and its Hugging Face/Qdrant integrations |
 | Dense embeddings and reranking | Sentence Transformers / PyTorch |
 | Local generation | Hugging Face Transformers |
+| SharePoint import | MSAL and HTTPX against Microsoft Graph |
+| Confluence import | HTTPX against Confluence Cloud REST API v2 |
+| Google Drive import | Google Auth ADC and HTTPX against Drive REST API v3 |
+| Channel imports | HTTPX against Slack Web API and MSAL/Graph for Teams |
 | Sparse embeddings | FastEmbed BM25 |
 | Vector storage | Embedded Qdrant via `qdrant-client` |
 | PDF / DOCX extraction | pypdf / docx2txt |
 | Packaging and quality | uv, setuptools, unittest, Coverage.py, Ruff, mypy, GitHub Actions |
+| Local container packaging | Docker with a Python 3.11 runtime image |
 
 The [technical manual](TECHNICAL_MANUAL.md#library-inventory) contains the full
 application-library inventory, locked version snapshots, model defaults, and
@@ -267,8 +349,12 @@ uv build
 Tests use provider doubles and temporary stores: no model downloads, API keys,
 network access, or GPU are needed for the default suite. Coverage includes
 branches and enforces an 80 percent floor. The
-[CI workflow](.github/workflows/ci.yml) runs on pull requests and pushes to
-`main`, currently on Ubuntu with Python 3.11.
+[CI workflow](.github/workflows/ci.yml) runs the Python checks on pull
+requests, pushes to `main`, and version tags. Pull requests also build and
+smoke-test the container. A matching annotated `vMAJOR.MINOR.PATCH` tag on a
+commit reachable from `main` publishes a versioned image to GitHub Container
+Registry after those checks pass. See [Docker setup](docs/DOCKER.md#release-images)
+for registry access and limitations. No service is deployed automatically.
 
 ## Limitations
 
@@ -281,9 +367,22 @@ branches and enforces an 80 percent floor. The
 - HTML extraction keeps readable text and table rows while omitting scripts,
   styles, and navigation. CSS-dependent visibility and image text are not
   interpreted; scanned PDFs still require OCR that is not implemented.
-- Metadata filters are not authorization. There is no authentication, RBAC,
-  tenant isolation, hosted-model integration, HTTP service, or deployment setup.
-  Citations currently expose local source paths.
+- CLI metadata filters are not authorization. The HTTP service defaults to one
+  shared bearer credential; its optional manual policy scopes query tokens to
+  exact sources and, in policy v2, separate local tenant stores. This is not
+  SSO, remote ACL sync, OS-level tenant isolation, or a multi-user database.
+  There is no rate limiting, hosted-model integration, upload endpoint, or
+  production deployment.
+  Citations can expose local source paths or remote source IDs.
+- SharePoint import has no per-user ACL enforcement, deletion sync, or scheduled
+  refresh; its default collection is separate by name only, not by Qdrant file.
+- Confluence import has the same ACL and deletion limits; complex Storage-HTML
+  macros and non-page content are not fully represented.
+- Google Drive import has the same ACL and deletion limits; only supported blob
+  file types and native Google Docs are imported, not Sheets or Slides.
+- Slack and Teams imports lack message ACL enforcement, deletion sync, and
+  automatic refresh. They read channel text and replies, not DMs/chats or
+  attachments; provider throttling aborts rather than retrying.
 - Semantic chunking is benchmark-only and needs corpus-specific validation
   before use beyond experiments.
 
@@ -291,10 +390,18 @@ branches and enforces an 80 percent floor. The
 
 The local pipeline, retrieval-quality follow-ups, evaluation, and benchmarking
 are implemented. See the [completed quality plan](docs/RETRIEVAL_QUALITY_PLAN.md)
-for the six follow-ups. Phase 4 plans a FastAPI service, followed by
-authentication, logging, monitoring, containerization, and deployment CI/CD.
-Enterprise connectors, permissions-aware retrieval, and multi-tenancy are later
-stages. See [ROADMAP.md](ROADMAP.md); these are plans, not current features.
+for the six follow-ups. Phase 4 now includes the local FastAPI service, shared
+bearer guard, structured request logging, process-local monitoring metrics, and
+a local Docker image, and release-tag image publishing CI. Hosting and
+operating a production service are not implemented.
+
+Bounded manual SharePoint drive, Confluence Cloud space, Google Drive folder,
+Slack channel, and Teams channel imports are implemented. An opt-in local API
+policy now restricts retrieval by exact source and caller token; policy v2
+adds local tenant-separated stores. It does not sync remote ACLs. See the
+[API access policy guide](docs/API_REFERENCE.md#optional-source-access-policy),
+[tenant isolation guide](docs/API_REFERENCE.md#optional-local-tenant-isolation), and
+[ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 

@@ -3,6 +3,43 @@
 Notable project milestones are recorded here. Versions follow Semantic
 Versioning while the package remains in initial development.
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- A read-only FastAPI service for health checks, ranked retrieval, and cited
+  answers over an existing local collection, with bounded request schemas.
+- Shared bearer-token authentication, structured request events with generated
+  IDs, and a protected endpoint for process-local Prometheus metrics.
+- An opt-in private source-access policy with distinct query-principal tokens,
+  exact-source grants, and Qdrant filtering before top-k selection.
+- Policy version 2 binds each query principal and grant to one tenant and routes
+  queries to a separate local Qdrant directory and collection.
+- A non-root local Docker image for CLI indexing and API queries, plus pull
+  request container checks and version-tagged image publication in CI.
+- Bounded manual CLI imports for SharePoint drives, Confluence Cloud spaces,
+  Google Drive folders, and Slack and Teams channels with replies.
+- A sanitized `.env.example` and setup/security guides for the API, container,
+  and manual source integrations.
+
+### Changed
+
+- The local HTTP API now requires `RAG_API_BEARER_TOKEN` at startup and a matching
+  `Authorization: Bearer` header for retrieval and answer requests. Without an
+  access policy the shared token still reads all sources; with a policy, query
+  tokens are separate and the shared token protects `/metrics` only.
+- CI quality checks now run on Python 3.11, 3.12, and 3.13. The local Docker
+  image remains based on Python 3.11.
+
+### Known Limitations
+
+- Remote imports are manual snapshots. Source-system ACLs and remote deletions
+  are not synchronized; identity verification and automatic refresh are absent.
+- Tenant separation is limited to server-routed local stores in one trusted
+  process; there is no OS-level isolation, rate limiting, or audit trail.
+- The container CI smoke test checks CLI startup and API liveness, not a
+  model-backed query. Hosting, TLS, and production operations are not supplied.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added
