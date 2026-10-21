@@ -2,9 +2,10 @@
 
 Tasks 19-22 add a read-only FastAPI adapter with shared-token authentication,
 structured request logging, and process-local monitoring over the existing
-retrieval and answer workflows. It does not ingest documents, host remote
-models, identify individual users, enforce document permissions, or make
-embedded Qdrant a multi-user database. Index documents with the CLI first;
+retrieval and answer workflows. Task 29 adds optional locally configured
+source-scoped query tokens. It does not ingest documents, host remote models,
+sync source-system ACLs, provide SSO, or make embedded Qdrant a multi-user
+database. Index documents with the CLI first;
 stop the API before modifying the same local Qdrant store with the CLI.
 Task 23 also packages these same CLI and API paths in a local image; see
 [Docker setup](DOCKER.md) for the volume and loopback-bound port workflow.
@@ -37,7 +38,9 @@ settings; incompatible settings fail rather than silently mixing vectors.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `RAG_API_BEARER_TOKEN` | required | Shared 32-256-character URL-safe secret for query routes. Generate at least 32 random bytes; missing or malformed values prevent startup. Rotation requires restart. |
+| `RAG_API_BEARER_TOKEN` | required | Shared 32-256-character URL-safe secret for queries in default mode and `/metrics` in both modes. Generate at least 32 random bytes; missing or malformed values prevent startup. Rotation requires restart. |
+| `RAG_API_PRINCIPALS_JSON` | unset | Optional JSON object containing `principals` with distinct `id`, 32-256-character URL-safe `token`, and optional `groups`. Set with the policy path to enable scoped query tokens. |
+| `RAG_API_ACCESS_POLICY_PATH` | unset | Path to a private JSON source-grant file; required with `RAG_API_PRINCIPALS_JSON`. Prefer `.rag_data/access-policy.json` (ignored by Git). |
 | `RAG_API_STORE_PATH` | `.rag_data/qdrant` | Local embedded-Qdrant directory; use the same path as CLI `--store-path`. |
 | `RAG_API_COLLECTION_NAME` | `rag_documents` | Existing collection; use the CLI `--collection-name` value. |
 | `RAG_API_SEARCH_MODE` | `dense` | `dense` or `hybrid`; must match the collection schema. |
@@ -50,6 +53,57 @@ settings; incompatible settings fail rather than silently mixing vectors.
 The API currently uses CPU defaults, no reranker, and the same 1,200-character
 generation context policy as the CLI default. Other CLI tuning flags are not
 HTTP configuration in this first adapter.
+
+## Optional Source Access Policy
+
+Without both opt-in variables, the existing shared bearer token can query all
+indexed sources. With both set, `/v1/retrieve` and `/v1/answer` accept only
+configured principal tokens; the shared `RAG_API_BEARER_TOKEN` still protects
+`/metrics` but cannot query documents. Each principal may have direct and/or
+group-based grants. A source absent from the policy is denied to everyone.
+
+Create a private file at `.rag_data/access-policy.json` with the exact indexed
+`metadata.source` values (including any path or remote-source prefix):
+
+```json
+{
+  "version": 1,
+  "sources": [
+    {"source": "expense.md", "principals": ["alice"]},
+    {"source": "finance.md", "groups": ["finance"]}
+  ]
+}
+```
+
+The examples are illustrative; these sources must already exist in your
+collection to produce results. Configure a *different* random query token in
+PowerShell before launching the API:
+
+```powershell
+$queryToken = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+$env:RAG_API_PRINCIPALS_JSON = @{
+  principals = @(@{ id = 'alice'; token = $queryToken; groups = @('finance') })
+} | ConvertTo-Json -Depth 4 -Compress
+$env:RAG_API_ACCESS_POLICY_PATH = '.rag_data/access-policy.json'
+```
+
+Use `Authorization: Bearer <query token>` for queries. The policy and tokens
+are validated at startup; a missing file, partial configuration, duplicate
+identity/token/source, unknown principal, or malformed grant prevents startup.
+No grant yields empty retrieval and a no-evidence answer without model startup.
+The server combines the source allowlist with any retrieval metadata conditions
+inside Qdrant **before** top-k selection and checks returned sources again
+before generating an answer. Query bodies cannot supply or widen the scope.
+
+This is a manually maintained local allowlist, not live authorization against
+SharePoint, Confluence, Drive, Slack, or Teams. Operators must update grants
+when access changes and restart the API; they must also remove or reindex stale
+documents separately. The CLI and direct access to the Qdrant files are trusted
+operator paths and are **not** restricted by this HTTP policy. Protect the
+private policy file and environment, keep the API on loopback, and do not use
+this as an Internet-facing enterprise identity layer. The bounded 1,000-source
+allowlist is intended for a local collection; larger systems need indexed ACL
+metadata, a trusted identity provider, revocation, and operational audit.
 
 ## Request Logging
 
@@ -101,8 +155,9 @@ plain HTTP in this local setup.
 ## Endpoints
 
 `POST /v1/retrieve`, `POST /v1/answer`, and `GET /metrics` require
-`Authorization: Bearer <token>`. Copy the generated value securely into a
-second terminal or use the OpenAPI explorer's **Authorize** control. The
+`Authorization: Bearer <token>`. In policy mode, query routes use a principal
+token and `/metrics` uses the admin/shared token. Copy the appropriate value
+securely into a second terminal or use the OpenAPI explorer's **Authorize** control. The
 OpenAPI document and `/health` remain public and reveal no indexed text.
 
 ### `GET /health`
@@ -158,9 +213,9 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/answer `
 - `500`: unexpected server failure.
 
 Responses can include local source paths and document text. Keep this service
-on a trusted machine: the shared token does not identify a caller or restrict
-which documents they can read. It can be copied or stolen and is not a
-replacement for TLS, per-user identity, permission-aware retrieval, per-client
-rotation and revocation, rate limiting, or audit logging. Do not put it in a URL,
-Git, or application logs. There is no upload, HTTP indexing, CORS policy,
-distributed worker, streaming, or remote-Qdrant support.
+on a trusted machine: the default shared token cannot restrict documents, and
+the optional local source policy is only as current as its manual grants.
+Tokens can be copied or stolen and are not a replacement for TLS, SSO, live
+source ACLs, per-client revocation, rate limiting, or audit logging. Do not put
+them in a URL, Git, or application logs. There is no upload, HTTP indexing,
+CORS policy, distributed worker, streaming, or remote-Qdrant support.

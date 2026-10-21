@@ -236,6 +236,41 @@ class SemanticRetrievalTests(unittest.TestCase):
         self.assertEqual(results[0].document.page_content, "Current finance policy.")
         self.assertEqual(results[0].rank, 1)
 
+    def test_source_scope_is_applied_before_top_k(self) -> None:
+        """A top-1 query returns the allowed source, not an unfiltered winner."""
+        records = [
+            make_record(
+                "Restricted policy",
+                source="secret.md",
+                chunk_index=0,
+                vector=(1.0, 0.0),
+            ),
+            make_record(
+                "Allowed policy",
+                source="public.md",
+                chunk_index=0,
+                vector=(0.8, 0.6),
+            ),
+        ]
+        service = EmbeddingService(QueryEmbeddings([1.0, 0.0]), model_name="test-model")
+        with LocalVectorStore(
+            VectorStoreConfig(path=None, collection_name="source-scope")
+        ) as store:
+            store.index(records, model_identifier="test-model")
+            retriever = RetrieverService(service, store)
+            results = retriever.retrieve(
+                "policy",
+                config=RetrievalConfig(top_k=1, source_allowlist=("public.md",)),
+            )
+            denied = retriever.retrieve(
+                "policy",
+                config=RetrievalConfig(top_k=1, source_allowlist=("not-indexed.md",)),
+            )
+        self.assertEqual(
+            [hit.document.metadata["source"] for hit in results], ["public.md"]
+        )
+        self.assertEqual(denied, [])
+
     def test_hybrid_rrf_promotes_exact_terms_and_preserves_filters(self) -> None:
         records = [
             make_record(
@@ -293,6 +328,7 @@ class SemanticRetrievalTests(unittest.TestCase):
                 config=RetrievalConfig(
                     top_k=2,
                     metadata_filters=(MetadataFilter("department", "finance"),),
+                    source_allowlist=("exact.txt",),
                 ),
             )
 
@@ -307,6 +343,7 @@ class SemanticRetrievalTests(unittest.TestCase):
             "hr.txt",
             [result.document.metadata["source"] for result in results],
         )
+        self.assertEqual(len(results), 1)
 
     def test_hybrid_retrieval_falls_back_to_dense_for_empty_sparse_query(self) -> None:
         record = make_record(

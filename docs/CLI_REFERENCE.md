@@ -526,9 +526,10 @@ documents programmatically. A missing field or unmatched value produces no
 eligible chunks; the `answer` command then abstains before loading the LLM.
 
 Metadata filters improve relevance but are not an authorization system by
-themselves. A production API must inject mandatory tenant and ACL constraints
-server-side so callers cannot omit or replace them, and frequently filtered
-fields should receive Qdrant payload indexes at scale.
+themselves. The optional local HTTP source policy injects mandatory exact-source
+constraints server-side; CLI queries remain trusted operator operations. A
+production API still needs trusted identity, synchronized ACLs, tenant
+isolation, and Qdrant payload indexes for frequently filtered fields at scale.
 
 ## Hybrid Search
 

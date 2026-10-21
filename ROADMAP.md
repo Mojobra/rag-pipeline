@@ -61,5 +61,7 @@ Task 27 - Google Drive integration (bounded manual folder import implemented;
 Google Drive ACL sync and remote deletion are not included)
 Task 28 - Slack / Teams integration (bounded manual channel and thread imports
 implemented; ACL sync, remote deletion, and incremental refresh are not included)
-Task 29 - Permissions-aware retrieval
+Task 29 - Permissions-aware retrieval (opt-in local HTTP source policy,
+principal tokens, and pre-top-k Qdrant filtering implemented; remote ACL sync
+and identity-provider integration remain future work)
 Task 30 - Multi-tenant architecture

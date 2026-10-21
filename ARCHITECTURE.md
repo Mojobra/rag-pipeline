@@ -15,7 +15,7 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Local read-only FastAPI adapter with shared bearer authentication and request logging
+14. Local read-only FastAPI adapter with bearer authentication, optional source policy, and request logging
 15. Process-local API and RAG outcome monitoring
 16. Frontend/UI (planned)
 17. Local CLI/API container packaging (implemented); deployment infrastructure (planned)
@@ -48,8 +48,8 @@ directory or a deeply nested clean-architecture hierarchy:
 
 - `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
   rendering.
-- `rag_pipeline.api` owns bearer authentication, bounded HTTP schemas,
-  loopback-oriented service configuration, provider lifetime, HTTP errors,
+- `rag_pipeline.api` owns bearer authentication, optional source authorization,
+  bounded HTTP schemas, loopback-oriented service configuration, provider lifetime, HTTP errors,
   sanitized request events, and bounded operational metrics.
 - `rag_pipeline.application` owns transport-neutral indexing, retrieval, and
   answer use cases that coordinate multiple pipeline stages.
@@ -145,10 +145,12 @@ request/response schemas, and error mapping live in `rag_pipeline.api`.
   cited, or model-abstained answers. These aggregates cannot establish factual
   answer quality, per-user usage, or document-level access. One process owns
   one registry; multi-worker aggregation and alerting are not implemented.
-- The shared token authenticates possession, not a person or document scope.
-  There is no user identity, authorization, rate limiting, or permission-aware
-  retrieval. It must stay on loopback; source paths and document text in
-  responses may be sensitive. See
+- The default shared token authenticates possession, not a person or document
+  scope. Optional query-principal tokens and a private exact-source grant policy
+  restrict HTTP evidence before Qdrant top-k and before generation, but do not
+  sync source ACLs or protect CLI/direct-store access. There is no SSO, rate
+  limiting, or tenant isolation. Keep the API on loopback; source paths and
+  document text in responses may be sensitive. See
   [the API reference](docs/API_REFERENCE.md).
 
 ## Current Container Boundary
@@ -207,7 +209,7 @@ configure storage, credentials, network exposure, or a running deployment.
 - The local API does not carry SharePoint identities or ACLs. The required CLI
   acknowledgement flags this gap, not a security control. Do not expose the
   collection to anyone outside its intended readership. Delta sync, deletion,
-  permission-aware retrieval, and live tenant verification remain future work.
+  live ACL synchronization and live tenant verification remain future work.
   See [the setup and security contract](docs/SHAREPOINT.md).
 
 ## Current Confluence Import Boundary
@@ -514,8 +516,8 @@ production tasks.
 
 ## Business Features To Add Later
 
-- Per-user authentication and identity-provider integration
-- Role-based access control
+- Identity-provider integration and live ACL synchronization
+- Enterprise role-based access control
 - Multi-tenancy
 - Audit logging
 - Cost monitoring

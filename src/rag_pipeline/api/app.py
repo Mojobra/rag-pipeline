@@ -1,7 +1,7 @@
 """Expose authenticated local retrieval and grounded answers over HTTP.
 
-The adapter has no authorization or document write endpoints. A shared bearer
-credential protects query routes, but the service must remain on loopback.
+An optional local policy scopes query evidence by source. There are no document
+write endpoints; the embedded service must remain on loopback.
 """
 
 from __future__ import annotations
@@ -16,7 +16,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from rag_pipeline import __version__
-from rag_pipeline.api.auth import load_bearer_token_digest, require_bearer_token
+from rag_pipeline.api.auth import (
+    load_bearer_token_digest,
+    require_bearer_token,
+    require_query_access,
+)
+from rag_pipeline.api.authorization import load_access_policy
 from rag_pipeline.api.monitoring import ApiMetrics, RequestMetricsMiddleware
 from rag_pipeline.api.request_logging import (
     RequestLoggingMiddleware,
@@ -56,6 +61,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.bearer_token_digest = load_bearer_token_digest()
+        application.state.access_policy = load_access_policy(
+            application.state.bearer_token_digest
+        )
         runtime = (
             LocalApiRuntime(load_api_settings())
             if runtime_factory is None
@@ -118,16 +126,25 @@ def create_app(
     @application.post(
         "/v1/retrieve",
         response_model=RetrievalResponse,
-        dependencies=[Depends(require_bearer_token)],
     )
-    def retrieve(body: QueryRequest, request: Request) -> RetrievalResponse:
+    def retrieve(
+        body: QueryRequest,
+        request: Request,
+        sources: tuple[str, ...] | None = Depends(require_query_access),
+    ) -> RetrievalResponse:
         """Search the configured collection and return ordered source evidence."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)
-        results = runtime.retrieve(
-            body.query,
-            top_k=body.top_k,
-            score_threshold=body.score_threshold,
-        )
+        if sources is None:
+            results = runtime.retrieve(
+                body.query, top_k=body.top_k, score_threshold=body.score_threshold
+            )
+        else:
+            results = runtime.retrieve(
+                body.query,
+                top_k=body.top_k,
+                score_threshold=body.score_threshold,
+                source_allowlist=sources,
+            )
         response = RetrievalResponse(
             results=[RetrievalHit.from_result(result) for result in results]
         )
@@ -137,16 +154,25 @@ def create_app(
     @application.post(
         "/v1/answer",
         response_model=AnswerResponse,
-        dependencies=[Depends(require_bearer_token)],
     )
-    def answer(body: AnswerRequest, request: Request) -> AnswerResponse:
+    def answer(
+        body: AnswerRequest,
+        request: Request,
+        sources: tuple[str, ...] | None = Depends(require_query_access),
+    ) -> AnswerResponse:
         """Return a local grounded answer with deterministic source citations."""
         runtime = cast(QueryRuntime, request.app.state.query_runtime)
-        outcome = runtime.answer(
-            body.query,
-            top_k=body.top_k,
-            score_threshold=body.score_threshold,
-        )
+        if sources is None:
+            outcome = runtime.answer(
+                body.query, top_k=body.top_k, score_threshold=body.score_threshold
+            )
+        else:
+            outcome = runtime.answer(
+                body.query,
+                top_k=body.top_k,
+                score_threshold=body.score_threshold,
+                source_allowlist=sources,
+            )
         response = AnswerResponse.from_outcome(outcome)
         metrics.record_answer(
             generated=response.generated, cited=bool(response.citations)
