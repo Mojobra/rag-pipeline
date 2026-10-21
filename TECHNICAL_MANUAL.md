@@ -4,7 +4,7 @@ This manual is the implementation-level inventory for the RAG pipeline. It
 explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
-- **Project version:** 0.3.0
+- **Project version:** 0.4.0 (prepared, not yet released)
 - **Last verified:** 2026-10-21
 - **Current product surface:** Local Python CLI, manual SharePoint,
   Confluence, Google Drive, Slack, and Teams imports, and read-only HTTP API
@@ -633,18 +633,19 @@ source in strict mode. Coverage measures branches and fails below 80 percent.
 ### Continuous Integration
 
 GitHub Actions runs on pull requests, pushes to `main`, and version-tag pushes
-with concurrency cancellation. The 30-minute quality job uses read-only
-repository permissions, Ubuntu, Python 3.11, uv 0.11.32, locked dependencies,
-Ruff, mypy, `unittest`, branch coverage, and package builds. After quality
-passes, pull requests build the image and check the CLI and `/health` without
+with concurrency cancellation. Each quality-matrix job has a 30-minute limit
+and uses read-only repository permissions, Ubuntu, Python 3.11, 3.12, or 3.13,
+uv 0.11.32, locked dependencies, Ruff, mypy, `unittest`, branch coverage, and
+package builds. After all quality jobs pass, pull requests build the image and
+check the CLI and `/health` without
 registry credentials. A release-tag job checks annotation, package version,
 checked-out commit, and `origin/main` ancestry before building and testing the
 same image. Only that job receives `packages: write`; it publishes a versioned
 GHCR tag, not a mutable `latest` tag or a running service.
 
-The package advertises Python 3.11, 3.12, and 3.13 classifiers, but CI currently
-executes only Python 3.11. Additional matrix jobs would be required to claim
-continuous verification on every advertised interpreter.
+The quality matrix verifies every advertised Python interpreter. The Docker
+image and release-tag guard continue to use Python 3.11; no 3.12/3.13 container
+image is built.
 
 ### Local Container Image
 

@@ -89,7 +89,7 @@ For the equivalent local container workflow, see [Docker setup](docs/DOCKER.md).
 
 ## Requirements
 
-- Python **3.11 or newer**; CI currently runs Python 3.11.
+- Python **3.11 or newer**; CI verifies 3.11, 3.12, and 3.13.
 - [uv](https://docs.astral.sh/uv/) for dependency management and execution.
 - Git to clone the repository.
 - Network access for initial dependency installation and uncached model
