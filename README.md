@@ -33,8 +33,9 @@ local bearer token; it is not a hosted production service.
 - **Chunking experiments:** recursive chunk diagnostics plus opt-in
   structure-aware and semantic strategies in isolated benchmarks.
 - **Local HTTP API:** bearer-protected retrieval and cited answers from an
-  existing collection, optional manual source-scoped query tokens, bounded JSON
-  requests, request IDs, structured logs, and protected Prometheus metrics.
+  existing collection, optional source-scoped query tokens and separate local
+  tenant stores, bounded JSON requests, request IDs, structured logs, and
+  protected Prometheus metrics.
 - **Local container image:** one runtime-only, non-root image for CLI indexing
   and the read-only API, with persistent data and model-cache volumes.
 - **Manual SharePoint import:** bounded, read-only Microsoft Graph drive scan
@@ -367,9 +368,11 @@ for registry access and limitations. No service is deployed automatically.
   styles, and navigation. CSS-dependent visibility and image text are not
   interpreted; scanned PDFs still require OCR that is not implemented.
 - CLI metadata filters are not authorization. The HTTP service defaults to one
-  shared bearer credential; its optional manual source policy scopes query
-  tokens but is not SSO or remote ACL sync. There is no tenant isolation, rate
-  limiting, hosted-model integration, upload endpoint, or production deployment.
+  shared bearer credential; its optional manual policy scopes query tokens to
+  exact sources and, in policy v2, separate local tenant stores. This is not
+  SSO, remote ACL sync, OS-level tenant isolation, or a multi-user database.
+  There is no rate limiting, hosted-model integration, upload endpoint, or
+  production deployment.
   Citations can expose local source paths or remote source IDs.
 - SharePoint import has no per-user ACL enforcement, deletion sync, or scheduled
   refresh; its default collection is separate by name only, not by Qdrant file.
@@ -394,9 +397,10 @@ operating a production service are not implemented.
 
 Bounded manual SharePoint drive, Confluence Cloud space, Google Drive folder,
 Slack channel, and Teams channel imports are implemented. An opt-in local API
-policy now restricts retrieval by exact source and caller token; it does not
-sync remote ACLs. Multi-tenancy remains planned. See the
-[API access policy guide](docs/API_REFERENCE.md#optional-source-access-policy) and
+policy now restricts retrieval by exact source and caller token; policy v2
+adds local tenant-separated stores. It does not sync remote ACLs. See the
+[API access policy guide](docs/API_REFERENCE.md#optional-source-access-policy),
+[tenant isolation guide](docs/API_REFERENCE.md#optional-local-tenant-isolation), and
 [ROADMAP.md](ROADMAP.md).
 
 ## Contributing

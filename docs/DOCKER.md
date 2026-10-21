@@ -95,7 +95,10 @@ in the browser. See [API reference](API_REFERENCE.md) for request examples and
 all `RAG_API_*` settings. For optional source-scoped queries, place the private
 policy at `/app/.rag_data/access-policy.json` in the mounted data volume and
 pass both policy variables described there; query tokens must differ from the
-metrics token. The API uses one process and CPU defaults.
+metrics token. For policy v2 tenant isolation, keep every `store_path` beneath
+`/app/.rag_data/tenants/<id>` in that same mounted volume and index each tenant
+path separately before starting the API. The API uses one process and CPU
+defaults; separate Docker workers must not open the same embedded store.
 
 The raw token remains in the host environment and Docker container metadata;
 anyone with Docker daemon access can inspect it. Keep this a trusted local demo,

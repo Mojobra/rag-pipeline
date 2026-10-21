@@ -64,4 +64,6 @@ implemented; ACL sync, remote deletion, and incremental refresh are not included
 Task 29 - Permissions-aware retrieval (opt-in local HTTP source policy,
 principal tokens, and pre-top-k Qdrant filtering implemented; remote ACL sync
 and identity-provider integration remain future work)
-Task 30 - Multi-tenant architecture
+Task 30 - Multi-tenant architecture (opt-in v2 local HTTP policy binds each
+query token and exact-source grants to one tenant and disjoint embedded-Qdrant
+store; production identity, quotas, and distributed isolation remain future work)

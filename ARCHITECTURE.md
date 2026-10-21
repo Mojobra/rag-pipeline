@@ -147,10 +147,13 @@ request/response schemas, and error mapping live in `rag_pipeline.api`.
   one registry; multi-worker aggregation and alerting are not implemented.
 - The default shared token authenticates possession, not a person or document
   scope. Optional query-principal tokens and a private exact-source grant policy
-  restrict HTTP evidence before Qdrant top-k and before generation, but do not
-  sync source ACLs or protect CLI/direct-store access. There is no SSO, rate
-  limiting, or tenant isolation. Keep the API on loopback; source paths and
-  document text in responses may be sensitive. See
+  restrict HTTP evidence before Qdrant top-k and before generation. Policy v2
+  also binds each query token to one tenant and one disjoint local Qdrant
+  directory/collection; request bodies cannot choose or widen this scope.
+  These rules do not sync source ACLs or protect CLI/direct-store access.
+  There is no SSO, rate limiting, OS-level tenant isolation, or multi-worker
+  embedded-store access. Keep the API on loopback; source paths and document
+  text in responses may be sensitive. See
   [the API reference](docs/API_REFERENCE.md).
 
 ## Current Container Boundary
@@ -518,7 +521,7 @@ production tasks.
 
 - Identity-provider integration and live ACL synchronization
 - Enterprise role-based access control
-- Multi-tenancy
+- Production multi-tenancy beyond local process/store isolation
 - Audit logging
 - Cost monitoring
 - Feedback collection

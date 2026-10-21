@@ -33,7 +33,7 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
 | HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
 | HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Validate a shared admin secret and optional distinct query-principal tokens using fixed-size digests without an identity provider. |
-| HTTP source policy | Pydantic and Qdrant payload filters | Validate a private manual grant file and constrain dense/hybrid queries by exact source before top-k selection. |
+| HTTP source/tenant policy | Pydantic and Qdrant payload filters | Validate private v1/v2 grants, constrain dense/hybrid queries by exact source before top-k, and route v2 tokens to separate local tenant stores. |
 | HTTP request logging | Starlette ASGI middleware and Python `logging`/`json` | Emit bounded JSON events to stderr and correlate handled responses without storing request content. |
 | HTTP monitoring | Prometheus Python client | Expose bearer-protected process-local request and RAG outcome aggregates with bounded labels. |
 | HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
@@ -221,8 +221,9 @@ This is a layered modular monolith with CLI and local HTTP transports. The
 application and feature services are shared; provider details stay at explicit
 boundaries instead of being spread through command or route handlers. The API
 is read-only and defaults to one shared bearer credential. Its optional local
-query-principal policy authorizes exact indexed sources, but does not verify
-external user identity or inherit source-system document permissions.
+query-principal policy authorizes exact indexed sources; v2 also binds a token
+to one local tenant store. Neither version verifies external user identity or
+inherits source-system document permissions.
 
 ### Local HTTP Authentication Boundary
 
@@ -239,8 +240,14 @@ shared token remains for `/metrics` only. The private versioned policy grants
 exact indexed sources, denies missing sources, and is loaded once at startup.
 Qdrant receives a server-derived source filter before top-k selection, while
 the runtime rejects any returned source outside that scope before generation.
-This does not sync remote ACLs, protect CLI/direct-store access, or provide SSO,
-live revocation, TLS, rate limiting, or multi-tenancy. See
+Policy v2 requires a tenant on each principal and grant, validates disjoint
+resolved Qdrant directories, and routes HTTP retrieval and generation to that
+tenant's collection. The tenant comes from the token, not from the request;
+the local default store cannot serve tenant-scoped queries. Store/model sessions
+open lazily and queries are serialized, but active tenants can retain separate
+models and consume more memory. This does not sync remote ACLs, protect CLI or
+direct-store access, or provide SSO, live revocation, TLS, rate limiting, or
+production multi-tenancy. See
 [the API policy guide](docs/API_REFERENCE.md#optional-source-access-policy).
 
 ### Local HTTP Request Logging
@@ -682,7 +689,8 @@ must not be presented as current behavior:
 - API-key loading from `.env`
 - MCP servers, tool calling, or autonomous agents
 - Verified per-user identity, OIDC/Keycloak integration, enterprise RBAC,
-  tenant isolation, or synchronized source-system authorization
+  OS-level or distributed tenant isolation, or synchronized source-system
+  authorization (local HTTP tenant-store routing is implemented)
 - Kubernetes, cloud deployment, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting
