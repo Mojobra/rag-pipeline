@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import argparse
 
+from rag_pipeline.application.answering import (
+    DEFAULT_ANSWER_SCORE_THRESHOLD as APPLICATION_ANSWER_SCORE_THRESHOLD,
+)
 from rag_pipeline.infrastructure.embeddings import DEFAULT_LOCAL_EMBEDDING_MODEL
 from rag_pipeline.infrastructure.sparse_embeddings import (
     DEFAULT_FASTEMBED_CACHE_DIR,
@@ -19,7 +22,7 @@ from rag_pipeline.retrieval.reranking import (
     DEFAULT_RERANKER_CACHE_DIR,
 )
 
-DEFAULT_ANSWER_SCORE_THRESHOLD = 0.2
+DEFAULT_ANSWER_SCORE_THRESHOLD = APPLICATION_ANSWER_SCORE_THRESHOLD
 
 
 def add_retrieval_arguments(
@@ -371,6 +374,8 @@ def add_embedding_arguments(
 
 def add_vector_store_location_arguments(
     command_parser: argparse.ArgumentParser,
+    *,
+    default_collection_name: str = "rag_documents",
 ) -> None:
     """Attach persistent Qdrant location and collection identity options."""
     command_parser.add_argument(
@@ -385,11 +390,11 @@ def add_vector_store_location_arguments(
     )
     command_parser.add_argument(
         "--collection-name",
-        default="rag_documents",
+        default=default_collection_name,
         help=(
             "Qdrant collection within --store-path. Use separate names for corpora "
             "or incompatible embedding/search settings, and reuse the name when "
-            "querying (default: rag_documents)."
+            f"querying (default: {default_collection_name})."
         ),
     )
 

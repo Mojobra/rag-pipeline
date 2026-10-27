@@ -40,6 +40,13 @@ After that pull request is merged and `main` is current, create an annotated
 `vMAJOR.MINOR.PATCH` tag on the validated `main` commit and push that tag. Never
 tag an unmerged feature-branch commit.
 
+The CI workflow reruns quality checks for a pushed version tag, builds and
+smoke-tests the container, then publishes `ghcr.io/mojobra/rag-pipeline:vX.Y.Z`
+using the workflow's package-scoped token. The tag must be annotated, match
+`project.version`, and point to a commit reachable from `origin/main`. This
+publishes an image, not a running service; check the workflow result before
+announcing the image as available.
+
 ## Quality Checks
 
 Run the same checks used by CI before opening a pull request:
@@ -67,6 +74,11 @@ depend on an existing local Qdrant collection.
 ## Change Design
 
 - Keep CLI parsing and terminal rendering in `rag_pipeline.cli`.
+- Keep HTTP authentication, schemas, settings, lifecycle, and error mapping in
+  `rag_pipeline.api`; reuse application workflows rather than importing CLI
+  command handlers into API routes.
+- Keep authentication tests offline with dummy credentials. Never commit a real
+  bearer token or make missing configuration silently disable protection.
 - Put transport-neutral workflow orchestration in `rag_pipeline.application`.
 - Put document discovery, extraction, and chunking in `rag_pipeline.ingestion`;
   search and reranking in `rag_pipeline.retrieval`; prompts, citations, and model

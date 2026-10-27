@@ -73,13 +73,24 @@ def _extract_html_file(path: Path, *, encoding: str) -> Document:
     Result offsets used by chunking and citations refer to that text, not to
     byte positions in the HTML file. Reading and decoding can raise I/O errors.
     """
-    parser = _VisibleHtmlParser()
-    parser.feed(path.read_text(encoding=encoding))
-    parser.close()
     return Document(
-        page_content=parser.visible_text(),
+        page_content=html_to_visible_text(path.read_text(encoding=encoding)),
         metadata=_build_metadata(path, extractor="html.parser"),
     )
+
+
+def html_to_visible_text(markup: str) -> str:
+    """Normalize visible HTML text without filesystem I/O or script execution.
+
+    Both local HTML files and remote Confluence storage bodies use the same
+    parser so chunk offsets refer to the extracted text, not raw markup.
+    """
+    if not isinstance(markup, str):
+        raise TypeError("markup must be a string.")
+    parser = _VisibleHtmlParser()
+    parser.feed(markup)
+    parser.close()
+    return parser.visible_text()
 
 
 class _VisibleHtmlParser(HTMLParser):

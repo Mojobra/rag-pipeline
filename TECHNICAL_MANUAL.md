@@ -4,9 +4,10 @@ This manual is the implementation-level inventory for the RAG pipeline. It
 explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
-- **Project version:** 0.3.0
-- **Last verified:** 2026-10-19
-- **Current product surface:** Local Python CLI
+- **Project version:** 0.4.0 (prepared, not yet released)
+- **Last verified:** 2026-10-27
+- **Current product surface:** Local Python CLI, manual SharePoint,
+  Confluence, Google Drive, Slack, and Teams imports, and read-only HTTP API
 
 ## How To Read Version Information
 
@@ -30,6 +31,12 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | Language | Python 3.11+ | Implements the CLI, application services, RAG stages, validation, and tests. |
 | RAG contracts | LangChain | Supplies common document, embedding, prompt, model, parser, and vector-store interfaces. |
 | CLI | `argparse` | Defines all commands, options, validation handoff, and terminal entry points without an extra CLI framework. |
+| HTTP adapter | FastAPI and Uvicorn | Serve bearer-protected retrieval and answer routes over an existing local collection on loopback. |
+| HTTP authentication | FastAPI HTTPBearer plus Python `hashlib` and `hmac` | Validate a shared admin secret and optional distinct query-principal tokens using fixed-size digests without an identity provider. |
+| HTTP source/tenant policy | Pydantic and Qdrant payload filters | Validate private v1/v2 grants, constrain dense/hybrid queries by exact source before top-k, and route v2 tokens to separate local tenant stores. |
+| HTTP request logging | Starlette ASGI middleware and Python `logging`/`json` | Emit bounded JSON events to stderr and correlate handled responses without storing request content. |
+| HTTP monitoring | Prometheus Python client | Expose bearer-protected process-local request and RAG outcome aggregates with bounded labels. |
+| HTTP schemas | Pydantic | Validates request limits and serializes selected provenance and citations. |
 | Dense embeddings | LangChain Hugging Face + Sentence Transformers | Converts chunks and questions into normalized dense vectors for semantic search. |
 | Sparse embeddings | FastEmbed through LangChain Qdrant | Produces BM25 sparse vectors for optional lexical retrieval. |
 | Generation | Hugging Face Transformers through LangChain | Runs a local text-to-text model for grounded answer generation. |
@@ -39,15 +46,21 @@ Always change constraints in `pyproject.toml` and refresh `uv.lock` with
 | HTML extraction | Python `html.parser` | Removes markup and non-content elements while preserving readable block and table text. |
 | PDF extraction | pypdf | Extracts one provenance-bearing document per PDF page. |
 | DOCX extraction | docx2txt | Extracts a Word document as one logical text document. |
+| SharePoint import | MSAL and HTTPX | Obtains app-only Graph tokens and reads bounded drive listings and file content for manual local indexing. |
+| Confluence import | HTTPX and existing HTML parser | Reads bounded Cloud space pages with API-token credentials and normalizes Storage-HTML for manual local indexing. |
+| Google Drive import | Google Auth and HTTPX | Refreshes scoped ADC tokens and reads bounded Drive v3 folder listings, blob files, and native Docs exports for manual local indexing. |
+| Channel imports | HTTPX and MSAL | Read bounded Slack or Teams channel threads; Teams reuses app-only Graph authentication and the HTML parser. |
 | Data contracts | JSON and Markdown | Store synthetic corpora, evaluation labels, benchmark artifacts, and human-readable reports. |
 | Evaluation | Project-owned Python | Computes deterministic retrieval, answer, abstention, citation, latency, and regression metrics. |
 | Dependency management | uv | Creates the environment, resolves and locks dependencies, runs tools, and builds packages. |
 | Packaging | setuptools | Builds the typed `src`-layout package as a wheel and source distribution. |
+| Local container packaging | Docker and uv | Build a runtime-only Python 3.11 image from the locked environment; run CLI indexing and the API sequentially with persistent volumes. |
 | Tests | `unittest` | Runs deterministic unit and local integration tests without network access. |
+| HTTP tests | Starlette TestClient and `httpx2` | Exercise ASGI routes and lifespan with provider doubles. |
 | Formatting and linting | Ruff | Enforces formatting, imports, naming, correctness, and selected performance rules. |
 | Static typing | mypy | Checks all production modules in strict mode. |
 | Coverage | Coverage.py | Measures branch coverage and enforces an 80 percent minimum. |
-| CI | GitHub Actions | Repeats locked installation, quality checks, tests, coverage, and package builds on pull requests and `main`. |
+| CI and image delivery | GitHub Actions and GitHub Container Registry | Run locked quality checks on PRs, `main`, and release tags; smoke-test PR containers and publish a versioned image from validated tags. |
 | Version control | Git and GitHub | Provide reviewable branch history, pull requests, release tags, and benchmark commit provenance. |
 
 ## Library Inventory
@@ -67,6 +80,10 @@ manager, which can differ from Python import names.
 | Library / package | Dependency type | Purpose and use in this project |
 | --- | --- | --- |
 | `langchain` | Direct runtime | Declares the RAG framework family; concrete application imports use its core contracts and integration packages below. |
+| `fastapi` | Direct runtime | Defines the local read-only HTTP app, bearer security scheme, OpenAPI schema, routes, and exception mapping. |
+| `uvicorn` | Direct runtime | Runs the ASGI app on a local listening socket. |
+| `prometheus-client` | Direct runtime | Maintains an app-owned registry of HTTP and RAG outcome counters, a latency histogram, and an in-flight gauge; renders `/metrics`. |
+| `starlette` | Transitive | Provides FastAPI's ASGI request/response and test-client infrastructure. |
 | `langchain-core` | Transitive | Supplies `Document`, `Embeddings`, model, prompt, parser, and runnable contracts across ingestion, retrieval, generation, and tests. |
 | `langchain-huggingface` | Direct runtime | Provides `HuggingFaceEmbeddings` for dense vectors and `HuggingFacePipeline` for local answer generation. |
 | `langchain-qdrant` | Direct runtime | Adapts Qdrant retrieval and supplies sparse-vector contracts and the `FastEmbedSparse` provider. |
@@ -78,11 +95,16 @@ manager, which can differ from Python import names.
 | `fastembed` | Direct runtime | Provides local BM25 sparse embeddings through `FastEmbedSparse` when hybrid retrieval is enabled. |
 | `pypdf` | Direct runtime | Extracts PDF text page by page so document metadata retains citation page identity. |
 | `docx2txt` | Direct runtime | Extracts DOCX text as one logical document without claiming stable rendered page numbers. |
+| `httpx` | Direct runtime | Sends bounded Microsoft Graph, Confluence Cloud, Google Drive, and Slack requests; handles the SharePoint content redirect without forwarding its bearer token. |
+| `msal` | Direct runtime | Acquires app-only Microsoft Graph tokens from an Entra client credential supplied through environment variables. |
+| `google-auth[requests]` | Direct runtime | Discovers and refreshes scoped Application Default Credentials for the manual Drive import. |
+| `requests` | Transitive | Provides the Google Auth token-refresh transport; Drive content requests use HTTPX instead. |
 | `torch` (PyTorch) | Transitive | Executes dense embedding, generation, and reranking models; benchmark provenance also inspects its CUDA information lazily. |
 | `numpy` | Transitive | Supplies numerical arrays used by the model and vector-provider stack, including reranker score outputs. |
 | `tokenizers` | Transitive | Supplies optimized tokenization used by supported Hugging Face and FastEmbed models. |
 | `onnxruntime` | Transitive | Supplies FastEmbed's ONNX model support; the current BM25 sparse path is lexical, not neural ONNX inference. |
-| `pydantic` | Transitive | Supports LangChain/Qdrant model contracts; generation tests import `Field` for an LLM test double. It is not a project-owned HTTP schema layer. |
+| `pydantic` | Direct runtime | Supports provider contracts and defines the API's bounded request and response schemas. |
+| `httpx2` | Development | Backs the current Starlette TestClient used in deterministic HTTP tests. |
 | `ruff` | Development | Checks and formats source and tests, including imports and the configured correctness rules. |
 | `mypy` | Development | Statically checks production code with the project's strict typing configuration. |
 | `coverage[toml]` (Coverage.py) | Development | Measures statement and branch coverage for the offline test suite and enforces the configured coverage floor. |
@@ -115,17 +137,24 @@ reflects `uv.lock` as verified on the date at the top of this document.
 
 | Package | Declared range | Locked | Why it exists |
 | --- | --- | --- | --- |
+| `fastapi` | `>=0.115,<1.0` | 0.148.0 | Exposes typed local HTTP retrieval and answer routes. |
 | `langchain` | `>=1.0,<2.0` | 1.3.13 | Declares the LangChain framework family used by the pipeline. |
 | `langchain-huggingface` | `>=1.2,<2.0` | 1.2.2 | Adapts local Hugging Face embedding and generation models to LangChain contracts. |
 | `langchain-qdrant` | `>=1.1,<2.0` | 1.1.0 | Connects LangChain retrieval contracts to Qdrant and exposes FastEmbed sparse embeddings. |
 | `langchain-text-splitters` | `>=1.0,<2.0` | 1.1.2 | Supplies recursive character and language-aware splitters. |
+| `pydantic` | `>=2.0,<3.0` | 2.13.4 | Defines and validates project-owned HTTP request and response models. |
+| `prometheus-client` | `>=0.20,<1.0` | 0.26.0 | Exposes process-local, bearer-protected operational metrics without custom exposition code. |
 | `qdrant-client` | `>=1.18,<2.0` | 1.18.0 | Runs the embedded Qdrant database and its query/filter API. |
 | `sentence-transformers` | `>=5.2,<6.0` | 5.6.0 | Provides the dense embedding backend and cross-encoder reranker. |
 | `sentencepiece` | `>=0.2,<1.0` | 0.2.2 | Supports tokenization for the default T5-family generation model. |
 | `transformers` | `>=4.48,<5.0` | 4.57.6 | Loads the local text-to-text generation pipeline and tokenizer. |
+| `uvicorn` | `>=0.30,<1.0` | 0.54.0 | Runs the local ASGI service. |
 | `fastembed` | `>=0.3.3,<1.0` | 0.8.0 | Executes the optional local BM25 sparse model. |
 | `pypdf` | `>=6.0,<7.0` | 6.14.2 | Reads text and page metadata from PDFs. |
 | `docx2txt` | `>=0.9,<1.0` | 0.9 | Reads text from DOCX files. |
+| `httpx` | `>=0.28,<1.0` | 0.28.1 | Implements read-only Microsoft Graph, Confluence Cloud, Google Drive, and Slack HTTP transports. |
+| `msal` | `>=1.31,<2.0` | 1.39.0 | Acquires app-only Graph tokens for manual SharePoint and Teams imports. |
+| `google-auth[requests]` | `>=2.38,<3.0` | 2.62.0 | Discovers and refreshes Drive read-only ADC credentials. |
 
 The code imports `langchain_core` contracts directly; that package is currently
 resolved through the declared LangChain family. The behaviorally important
@@ -138,7 +167,8 @@ transitive runtime snapshot is:
 | `numpy` | 2.4.6 on Python 3.11; 2.5.1 on Python 3.12+ | Supplies array operations used by the ML provider stack and provider score outputs. |
 | `tokenizers` | 0.22.2 | Provides optimized Hugging Face tokenization where supported by a model. |
 | `onnxruntime` | 1.27.0 | Supplies FastEmbed's ONNX model support; the current BM25 path is lexical. |
-| `pydantic` | 2.13.4 | Supports LangChain/Qdrant contracts and the `Field` import in generation test doubles, not project-owned API schemas. |
+| `starlette` | 1.9.0 | Supplies the ASGI request/response layer under FastAPI. |
+| `requests` | 2.34.2 | Supplies the Google Auth refresh transport for ADC. |
 
 These packages are locked in `uv.lock` rather than maintained as independent
 application APIs. The full transitive graph contains additional implementation
@@ -156,12 +186,15 @@ Development tools are deliberately pinned exactly:
 | `ruff` | 0.16.1 | Formatting plus configured lint rule families. |
 | `mypy` | 2.3.0 | Strict type checking under `src/rag_pipeline`. |
 | `coverage[toml]` | 7.15.2 | Branch coverage with `fail_under = 80`. |
+| `httpx2` | 2.14.0 | Supports offline ASGI route and lifespan tests through Starlette TestClient. |
 
 ## Architecture And Ownership
 
 ```mermaid
 flowchart LR
     CLI["argparse CLI"] --> APP["Application use cases"]
+    API["FastAPI HTTP adapter"] --> AUTH["Bearer query guard"]
+    AUTH --> APP
     APP --> ING["Ingestion and chunking"]
     APP --> INF["Model and Qdrant adapters"]
     INF --> RET["Retrieval and reranking"]
@@ -174,7 +207,8 @@ flowchart LR
 | Package | Ownership |
 | --- | --- |
 | `rag_pipeline.cli` | Parses terminal input, maps arguments to typed configuration, invokes services, and renders output. |
-| `rag_pipeline.application` | Coordinates transport-neutral indexing and retrieval lifecycles. |
+| `rag_pipeline.api` | Validates bearer credentials and bounded read-only HTTP requests, owns local provider lifecycle, emits sanitized request events and bounded metrics, and serializes source-cited JSON responses. |
+| `rag_pipeline.application` | Coordinates transport-neutral indexing, retrieval, and answer workflows. |
 | `rag_pipeline.ingestion` | Discovers files, extracts text, creates chunks, and runs chunking experiments. |
 | `rag_pipeline.infrastructure` | Owns dense/sparse model adapters and Qdrant persistence. |
 | `rag_pipeline.retrieval` | Defines retrieval policy, metadata filters, result provenance, and reranking. |
@@ -183,10 +217,62 @@ flowchart LR
 | `rag_pipeline.benchmarking` | Rebuilds isolated pipelines, records provenance and timing, compares artifacts, and enforces thresholds. |
 | `rag_pipeline.exceptions` | Provides stage-specific errors shared across package boundaries. |
 
-This is a layered modular monolith. The CLI is the only transport, while the
-application and feature services remain reusable by a future API. Provider
-details are kept at explicit boundaries instead of being spread through command
-handlers.
+This is a layered modular monolith with CLI and local HTTP transports. The
+application and feature services are shared; provider details stay at explicit
+boundaries instead of being spread through command or route handlers. The API
+is read-only and defaults to one shared bearer credential. Its optional local
+query-principal policy authorizes exact indexed sources; v2 also binds a token
+to one local tenant store. Neither version verifies external user identity or
+inherits source-system document permissions.
+
+### Local HTTP Authentication Boundary
+
+The API validates `RAG_API_BEARER_TOKEN` during lifespan startup and retains
+only its SHA-256 digest in process state. FastAPI's HTTPBearer dependency gives
+the query routes an OpenAPI security contract. Missing or incorrect credentials
+receive the same `401` Bearer challenge before provider work; `/health` and
+OpenAPI documentation remain public. The token is 32-256 URL-safe characters,
+should be generated from at least 32 random bytes, and is rotated by restarting
+the process. Without an access policy this shared secret allows all query
+sources. With `RAG_API_PRINCIPALS_JSON` and `RAG_API_ACCESS_POLICY_PATH`,
+distinct query tokens map to local principals and group memberships; the
+shared token remains for `/metrics` only. The private versioned policy grants
+exact indexed sources, denies missing sources, and is loaded once at startup.
+Qdrant receives a server-derived source filter before top-k selection, while
+the runtime rejects any returned source outside that scope before generation.
+Policy v2 requires a tenant on each principal and grant, validates disjoint
+resolved Qdrant directories, and routes HTTP retrieval and generation to that
+tenant's collection. The tenant comes from the token, not from the request;
+the local default store cannot serve tenant-scoped queries. Store/model sessions
+open lazily and queries are serialized, but active tenants can retain separate
+models and consume more memory. This does not sync remote ACLs, protect CLI or
+direct-store access, or provide SSO, live revocation, TLS, rate limiting, or
+production multi-tenancy. See
+[the API policy guide](docs/API_REFERENCE.md#optional-source-access-policy).
+
+### Local HTTP Request Logging
+
+A pure ASGI middleware emits one JSON line per HTTP request to stderr with a
+UTC timestamp, generated request ID, method, available route template, status,
+and duration in milliseconds. It appends `X-Request-ID` to handled responses
+for correlation. It neither trusts inbound IDs nor records bodies, headers,
+query strings, raw paths, document text, or source metadata. The documented
+Uvicorn command uses `--no-access-log` because its separate access logger can
+record full request URLs. Error logs from Uvicorn or dependencies are separate;
+request logs are not an audit trail. Monitoring metrics use a separate in-memory
+registry.
+
+### Local HTTP Monitoring
+
+An app-owned Prometheus registry tracks HTTP request totals by method, route
+template, and status; request durations in seconds by method and route; and an
+unlabeled in-flight gauge. Completed retrieval and answer workflows also count
+fixed outcome categories. `GET /metrics` uses the shared bearer guard and is
+excluded from request metrics to avoid self-scrape skew. Unknown paths and
+uncommon methods collapse to fixed labels; no questions, tokens, source paths,
+or model identifiers become labels. The registry resets on restart and is not
+aggregated across workers. These are operational indicators, not offline answer
+quality metrics, tracing, alerting, or an identity-aware audit system.
 
 ## RAG Execution Flow
 
@@ -431,10 +517,11 @@ concurrency, confidence intervals, memory peaks, or hosted-provider costs.
 
 ## CLI And Configuration
 
-The CLI uses only Python's `argparse`. The installed console script and module
-entry point are equivalent:
+The CLI uses only Python's `argparse`. Both installed console scripts and the
+module entry point are equivalent:
 
 ```powershell
+uv run rag --help
 uv run rag-pipeline --help
 uv run python -m rag_pipeline --help
 ```
@@ -448,6 +535,11 @@ Current commands are:
 | `chunk-experiment` | Compare candidate recursive chunking configurations. |
 | `embed` | Generate and validate dense chunk vectors. |
 | `index` | Build or update a compatible dense or hybrid Qdrant collection. |
+| `index-sharepoint` | Manually read one Graph drive and replace listed sources in a local collection; no ACL sync. |
+| `index-confluence` | Manually read current Cloud space pages and replace listed sources; no ACL sync. |
+| `index-google-drive` | Manually read one Drive folder and replace listed file sources; no ACL sync. |
+| `index-slack` | Manually read one bot-visible Slack channel and replies; no ACL sync. |
+| `index-teams` | Manually read one Graph-visible Teams channel and replies; no ACL sync. |
 | `retrieve` | Search the collection with filters and optional reranking. |
 | `answer` | Retrieve evidence and generate a grounded answer with citations. |
 | `evaluate-retrieval` | Run labeled retrieval cases and report top-k metrics. |
@@ -455,9 +547,26 @@ Current commands are:
 | `benchmark` | Rebuild and measure an isolated end-to-end pipeline. |
 | `compare-benchmarks` | Compare compatible artifacts and regression thresholds. |
 
-Configuration is currently supplied through CLI flags and typed immutable
-dataclasses. There is no active `.env` model-provider configuration on `main`,
-and the current generation and embedding paths are local model providers.
+CLI configuration uses flags and typed immutable dataclasses. The API reads
+`RAG_API_*` environment values once at startup, including a required shared
+bearer token. The tracked [.env.example](.env.example) lists the current API
+and optional import variables; `.env` is not loaded automatically. Generation
+and embedding remain local model providers.
+The SharePoint importer additionally reads tenant ID, client ID, and client
+secret from `RAG_SHAREPOINT_*` environment variables. Its default collection
+is `sharepoint_documents`; the default store directory is unchanged. See
+[the SharePoint setup and security contract](docs/SHAREPOINT.md).
+The Confluence importer also reads a site root, account email, and API token
+from `RAG_CONFLUENCE_*` environment variables. It defaults to a
+`confluence_documents` collection in the same local store. See
+[the Confluence setup and security contract](docs/CONFLUENCE.md).
+The Google Drive importer uses scoped Application Default Credentials. An
+optional `GOOGLE_APPLICATION_CREDENTIALS` path selects a credential file;
+see [the Drive setup and security contract](docs/GOOGLE_DRIVE.md).
+The Slack importer reads `RAG_SLACK_BOT_TOKEN` from the environment. The Teams
+importer reads tenant, client, and secret values from `RAG_TEAMS_*`. Both
+default to separate message collections in the same local store; see
+[the channel setup and security contract](docs/CHANNELS.md).
 
 ## Local State And I/O
 
@@ -466,14 +575,19 @@ and the current generation and embedding paths are local model providers.
 | `.rag_data/qdrant` | Embedded vector database | Ignored by Git |
 | `.rag_data/fastembed` | Sparse model cache | Ignored by Git |
 | `.rag_data/rerankers` | Cross-encoder cache | Ignored by Git |
+| Container `/app/.rag_data` | Embedded Qdrant plus optional sparse/reranker caches | Persist in a Docker volume; excluded from the image |
+| Container `/app/.cache` | Hugging Face model files | Persist in a separate Docker volume; excluded from the image |
 | Hugging Face cache | Dense and generation model artifacts | Managed outside tracked source |
 | `evaluation/datasets` | Synthetic Markdown corpus and versioned JSON labels | Tracked |
 | Benchmark JSON artifacts | Configuration, provenance, metrics, and timings | Written only when requested |
-| Local `.env` files | Potential secrets | Ignored by default; `.env.example` is the only allowed exception, and no active provider contract exists on `main` |
+| Local `.env` files | Potential secrets | Ignored by default; tracked `.env.example` contains only blank credentials and documented local defaults, with no hosted-provider contract |
+| Temporary SharePoint extraction files | Downloaded plaintext before parsing | Removed after each file; keep the host filesystem and Qdrant directory restricted |
+| Temporary Google Drive extraction files | Downloaded plaintext before parsing | Removed after each file; keep ADC credential files outside the repository |
 
 Model factories may download artifacts on first use. After caches are populated,
-the pipeline runs locally without an API key. Default automated tests use stubs
-and in-memory or temporary storage, so they require neither downloads nor
+model inference runs locally without a hosted-provider API key. The HTTP adapter
+still requires its locally generated bearer token. Default automated tests use
+stubs and in-memory or temporary storage, so they require neither downloads nor
 network access.
 
 ## Engineering Toolchain
@@ -519,14 +633,36 @@ source in strict mode. Coverage measures branches and fails below 80 percent.
 
 ### Continuous Integration
 
-GitHub Actions runs on pull requests and pushes to `main` with read-only
-repository permissions, concurrency cancellation, and a 30-minute timeout. The
-quality job uses Ubuntu, Python 3.11, uv 0.11.32, locked dependencies, Ruff,
-mypy, `unittest`, branch coverage, and package builds.
+GitHub Actions runs on pull requests, pushes to `main`, and version-tag pushes
+with concurrency cancellation. Each quality-matrix job has a 30-minute limit
+and uses read-only repository permissions, Ubuntu, Python 3.11, 3.12, or 3.13,
+uv 0.11.32, locked dependencies, Ruff, mypy, `unittest`, branch coverage, and
+package builds. After all quality jobs pass, pull requests build the image and
+check the CLI and `/health` without
+registry credentials. A release-tag job checks annotation, package version,
+checked-out commit, and `origin/main` ancestry before building and testing the
+same image. Only that job receives `packages: write`; it publishes a versioned
+GHCR tag, not a mutable `latest` tag or a running service.
 
-The package advertises Python 3.11, 3.12, and 3.13 classifiers, but CI currently
-executes only Python 3.11. Additional matrix jobs would be required to claim
-continuous verification on every advertised interpreter.
+The quality matrix verifies every advertised Python interpreter. The Docker
+image and release-tag guard continue to use Python 3.11; no 3.12/3.13 container
+image is built.
+
+### Local Container Image
+
+`Dockerfile` builds against the committed `uv.lock` with Python 3.11 and omits
+development tools. A separate runtime stage receives only the non-editable
+installed environment; `.dockerignore` allows just package inputs into the
+build context. The API starts under a non-root user with Uvicorn access logging
+disabled. Docker's health check calls `/health`, which checks liveness but not
+collection or model readiness. The same image can run `rag-pipeline index`
+before the API starts; both processes must not open the embedded Qdrant volume
+at once. Named volumes retain Qdrant and model caches independently of the
+container. See [the Docker workflow](docs/DOCKER.md) for exact commands and
+security limits. The base image and uv image use versioned tags rather than
+immutable digests, so the lockfile alone does not guarantee byte-identical
+rebuilds. See [release images](docs/DOCKER.md#release-images) for the CI
+publication workflow and remaining deployment limits.
 
 ## Deliberately Project-Owned Logic
 
@@ -547,16 +683,17 @@ hiding the entire application behind an opaque chain or agent abstraction.
 
 ## Not In The Current Stack
 
-The following technologies or capabilities are not implemented on `main` and
+The following technologies or capabilities are not implemented in this code and
 must not be presented as current behavior:
 
-- FastAPI, REST endpoints, or an HTTP service
-- Pydantic request/response schemas owned by this project
+- Publicly deployable HTTP service, document uploads, or HTTP indexing
 - OpenAI, Gemini, Claude, or other hosted model providers
 - API-key loading from `.env`
 - MCP servers, tool calling, or autonomous agents
-- RBAC, authentication, tenant isolation, or authorization policy enforcement
-- Docker, Kubernetes, cloud deployment, or a remote Qdrant cluster
+- Verified per-user identity, OIDC/Keycloak integration, enterprise RBAC,
+  OS-level or distributed tenant isolation, or synchronized source-system
+  authorization (local HTTP tenant-store routing is implemented)
+- Kubernetes, cloud deployment, or a remote Qdrant cluster
 - Distributed workers, queues, schedulers, or streaming ingestion
 - Production telemetry, tracing, dashboards, or alerting
 - OCR, scanned-document understanding, or multimodal extraction

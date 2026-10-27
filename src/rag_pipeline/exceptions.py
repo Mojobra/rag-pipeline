@@ -32,6 +32,70 @@ class TextExtractionError(IngestionError):
     """Raised when text extraction fails for a supported document type."""
 
 
+class SharePointError(IngestionError):
+    """Base error for bounded, read-only SharePoint ingestion."""
+
+
+class SharePointConfigurationError(SharePointError, ValueError):
+    """Raised for invalid connector settings or missing credentials."""
+
+
+class SharePointProviderError(SharePointError):
+    """Raised when Microsoft Graph or token acquisition fails."""
+
+
+class SharePointInputError(SharePointError, ValueError):
+    """Raised when remote metadata or content violates import limits."""
+
+
+class ConfluenceError(IngestionError):
+    """Base error for bounded, read-only Confluence Cloud ingestion."""
+
+
+class ConfluenceConfigurationError(ConfluenceError, ValueError):
+    """Raised for invalid site settings, limits, or missing credentials."""
+
+
+class ConfluenceProviderError(ConfluenceError):
+    """Raised when a Confluence Cloud request fails."""
+
+
+class ConfluenceInputError(ConfluenceError, ValueError):
+    """Raised when remote page data violates the import contract."""
+
+
+class GoogleDriveError(IngestionError):
+    """Base error for bounded, read-only Google Drive ingestion."""
+
+
+class GoogleDriveConfigurationError(GoogleDriveError, ValueError):
+    """Raised for invalid import limits or unavailable credentials."""
+
+
+class GoogleDriveProviderError(GoogleDriveError):
+    """Raised when Google authentication or a Drive request fails."""
+
+
+class GoogleDriveInputError(GoogleDriveError, ValueError):
+    """Raised when Drive metadata or content violates the import contract."""
+
+
+class ChannelImportError(IngestionError):
+    """Base error for bounded Slack and Teams channel imports."""
+
+
+class ChannelConfigurationError(ChannelImportError, ValueError):
+    """Raised for invalid channel import settings or missing credentials."""
+
+
+class ChannelProviderError(ChannelImportError):
+    """Raised when a channel provider or its authentication fails."""
+
+
+class ChannelInputError(ChannelImportError, ValueError):
+    """Raised when provider messages violate the bounded import contract."""
+
+
 class ChunkingError(RagPipelineError):
     """Base error for document chunking failures."""
 

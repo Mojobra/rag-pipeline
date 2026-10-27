@@ -43,18 +43,27 @@ original roadmap task numbers below remain unchanged.
 
 ## Phase 4: Production
 
-Task 19 - FastAPI service
-Task 20 - Authentication
-Task 21 - Logging
-Task 22 - Monitoring
-Task 23 - Dockerization
-Task 24 - Deployment CI/CD (pull-request quality CI is already in place)
+Task 19 - FastAPI service (local read-only API implemented)
+Task 20 - Authentication (shared bearer token for local HTTP queries implemented)
+Task 21 - Logging (privacy-conscious structured HTTP request events implemented)
+Task 22 - Monitoring (protected process-local API and RAG outcome metrics implemented)
+Task 23 - Dockerization (local CLI/API image and persistent-volume workflow implemented)
+Task 24 - Deployment CI/CD (PR container checks and release-tag image publishing
+implemented; hosting a service remains future work)
 
 ## Phase 5: Enterprise
 
-Task 25 - SharePoint integration
-Task 26 - Confluence integration
-Task 27 - Google Drive integration
-Task 28 - Slack / Teams integration
-Task 29 - Permissions-aware retrieval
-Task 30 - Multi-tenant architecture
+Task 25 - SharePoint integration (bounded manual Graph drive import implemented;
+ACL sync and remote deletion are not included)
+Task 26 - Confluence integration (bounded manual Cloud space page import
+implemented; ACL sync and remote deletion are not included)
+Task 27 - Google Drive integration (bounded manual folder import implemented;
+Google Drive ACL sync and remote deletion are not included)
+Task 28 - Slack / Teams integration (bounded manual channel and thread imports
+implemented; ACL sync, remote deletion, and incremental refresh are not included)
+Task 29 - Permissions-aware retrieval (opt-in local HTTP source policy,
+principal tokens, and pre-top-k Qdrant filtering implemented; remote ACL sync
+and identity-provider integration remain future work)
+Task 30 - Multi-tenant architecture (opt-in v2 local HTTP policy binds each
+query token and exact-source grants to one tenant and disjoint embedded-Qdrant
+store; production identity, quotas, and distributed isolation remain future work)

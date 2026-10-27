@@ -8,7 +8,7 @@ import tempfile
 import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from importlib.metadata import version
+from importlib.metadata import distribution, version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,6 +29,17 @@ class PromptTokenizerStub:
 
 
 class PackageSmokeTests(unittest.TestCase):
+    def test_console_script_aliases_share_cli_entry_point(self) -> None:
+        """Keep both installed commands on the same maintained CLI adapter."""
+        console_scripts = {
+            entry_point.name: entry_point.value
+            for entry_point in distribution("rag-pipeline").entry_points
+            if entry_point.group == "console_scripts"
+        }
+
+        self.assertEqual(console_scripts["rag-pipeline"], "rag_pipeline.cli:main")
+        self.assertEqual(console_scripts["rag"], console_scripts["rag-pipeline"])
+
     def test_package_version_matches_project_and_distribution_metadata(self) -> None:
         import rag_pipeline
 

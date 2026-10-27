@@ -15,10 +15,10 @@
 11. Citation System
 12. Versioned Retrieval and Answer Evaluation Framework with Test Datasets
 13. Isolated Benchmark Runner, Artifacts, Comparisons, and Regression Gates
-14. Monitoring & Observability (planned)
-15. API Layer (planned)
+14. Local read-only FastAPI adapter with bearer authentication, optional source policy, and request logging
+15. Process-local API and RAG outcome monitoring
 16. Frontend/UI (planned)
-17. Deployment Infrastructure (planned)
+17. Local CLI/API container packaging (implemented); deployment infrastructure (planned)
 
 ---
 
@@ -48,8 +48,11 @@ directory or a deeply nested clean-architecture hierarchy:
 
 - `rag_pipeline.cli` owns argparse configuration, command dispatch, and terminal
   rendering.
-- `rag_pipeline.application` owns transport-neutral indexing and retrieval use
-  cases that coordinate multiple pipeline stages.
+- `rag_pipeline.api` owns bearer authentication, optional source authorization,
+  bounded HTTP schemas, loopback-oriented service configuration, provider lifetime, HTTP errors,
+  sanitized request events, and bounded operational metrics.
+- `rag_pipeline.application` owns transport-neutral indexing, retrieval, and
+  answer use cases that coordinate multiple pipeline stages.
 - `rag_pipeline.ingestion` owns filesystem discovery, format extraction,
   recursive and experimental chunking policies, and structural diagnostics.
 - `rag_pipeline.retrieval` owns first-stage search and optional cross-encoder
@@ -60,9 +63,11 @@ directory or a deeply nested clean-architecture hierarchy:
   and report formatting.
 - `rag_pipeline.benchmarking` owns isolated execution, provenance, timings,
   artifacts, comparisons, and regression thresholds.
-- `rag_pipeline.infrastructure` owns local dense and sparse model adapters plus
-  Qdrant persistence. These modules perform provider or storage I/O but do not
-  own CLI or application workflow decisions.
+- `rag_pipeline.infrastructure` owns local dense and sparse model adapters,
+  Qdrant persistence, and the read-only Microsoft Graph, Confluence, Google
+  Drive, Slack, and Teams adapters.
+  These modules perform provider or storage I/O but do not own CLI or
+  application decisions.
 - `rag_pipeline.exceptions` remains a shared root module so every layer can use
   one stable, actionable error hierarchy without depending on another feature.
 
@@ -94,8 +99,8 @@ function.
 - CLI configuration builders translate dynamic argparse values into validated
   application configuration objects before model or storage side effects.
 - Command handlers are grouped by document, indexing, query, evaluation, and
-  benchmark responsibilities. They delegate reusable indexing and retrieval
-  lifecycles to `rag_pipeline.application`.
+  benchmark responsibilities. They delegate reusable indexing, retrieval,
+  and no-evidence answer behavior to `rag_pipeline.application`.
 - Application use cases own cross-stage invariants, provider lifecycle, and
   orchestration. They accept explicit dependencies where useful for deterministic
   tests and do not import argparse or terminal output helpers.
@@ -106,9 +111,70 @@ function.
   orchestration and can be tested without provider calls.
 
 The application layer is intentionally small. It coordinates existing domain
-services rather than replacing their validation or algorithms. A future API can
-reuse these use cases without importing CLI handlers; API-specific request,
-response, authentication, and error-mapping concerns remain future work.
+services rather than replacing their validation or algorithms. The API reuses
+these contracts without importing CLI handlers. HTTP authentication,
+request/response schemas, and error mapping live in `rag_pipeline.api`.
+
+## Current HTTP Boundary
+
+- `GET /health` checks process liveness only. `POST /v1/retrieve` and
+  `POST /v1/answer` read an existing local collection; no upload or indexing
+  route is exposed.
+- Startup requires a 32-256-character URL-safe `RAG_API_BEARER_TOKEN`. Only its
+  SHA-256 digest stays in app state. FastAPI's bearer dependency rejects
+  unauthenticated query requests before model or storage work; `/health` and
+  OpenAPI documentation remain public. A token change requires restart.
+- The API reads model and collection identity from server-owned `RAG_API_*`
+  environment variables at startup, never from per-request file paths.
+- One process lazily opens embedded Qdrant and the embedding model on first
+  query, then loads generation only when answer evidence exists. A lifespan
+  hook closes the store at shutdown; a lock serializes queries against these
+  shared local resources.
+- Pydantic bounds query length, result count, and score thresholds. Known
+  collection errors receive stable HTTP statuses; provider details are hidden
+  behind a generic unavailable response.
+- A pure ASGI middleware emits one JSON request event to stderr and adds a
+  server-generated `X-Request-ID` to handled responses. Events contain route
+  templates, statuses, and duration, but never raw URLs, bodies, credentials,
+  or source text. Documented Uvicorn startup disables its separate URL-bearing
+  access log. This is operational logging, not audit logging.
+- A second ASGI middleware records request count, duration, and in-flight load
+  in an app-owned Prometheus registry. Route templates and fixed outcome labels
+  bound cardinality; the protected `/metrics` scrape is excluded from counting.
+  Successful query handlers also count empty/nonempty retrieval and no-evidence,
+  cited, or model-abstained answers. These aggregates cannot establish factual
+  answer quality, per-user usage, or document-level access. One process owns
+  one registry; multi-worker aggregation and alerting are not implemented.
+- The default shared token authenticates possession, not a person or document
+  scope. Optional query-principal tokens and a private exact-source grant policy
+  restrict HTTP evidence before Qdrant top-k and before generation. Policy v2
+  also binds each query token to one tenant and one disjoint local Qdrant
+  directory/collection; request bodies cannot choose or widen this scope.
+  These rules do not sync source ACLs or protect CLI/direct-store access.
+  There is no SSO, rate limiting, OS-level tenant isolation, or multi-worker
+  embedded-store access. Keep the API on loopback; source paths and document
+  text in responses may be sensitive. See
+  [the API reference](docs/API_REFERENCE.md).
+
+## Current Container Boundary
+
+The optional Docker image installs the locked runtime package in a builder stage
+and copies only its non-editable virtual environment into a Python 3.11 runtime
+stage. The final process runs as a non-root user. Both CLI indexing and the
+single-process API use the same image; they must run sequentially against one
+embedded Qdrant volume. The default working directory preserves the existing
+`.rag_data/qdrant` path, while a second volume retains Hugging Face model caches.
+The image does not include source documents or credentials. Its Docker health
+check calls public `/health`, so it indicates process liveness rather than
+collection readiness. The documented host port binds to loopback only. This is
+local packaging, not an authenticated multi-user deployment; see
+[Docker setup](docs/DOCKER.md).
+
+The CI release boundary builds and smoke-tests this image on pull requests.
+For a matching annotated version tag on `main`, the workflow repeats quality
+checks and the container smoke test before publishing a versioned GHCR image.
+Only the tag job receives package-write permission. Publication does not
+configure storage, credentials, network exposure, or a running deployment.
 
 ---
 
@@ -126,6 +192,89 @@ response, authentication, and error-mapping concerns remain future work.
 - A failure before upsert leaves the collection unchanged. Multiple upsert and
   delete calls are not atomic; a database failure may require retrying the same
   source scope to finish synchronization.
+
+## Current SharePoint Import Boundary
+
+- `index-sharepoint` is an explicit CLI-only, app-only Graph import. MSAL reads
+  three `RAG_SHAREPOINT_*` environment variables; HTTPX lists a single drive
+  recursively and downloads supported files within count and byte caps.
+- The application stages and extracts every listed file before invoking the
+  existing LangChain chunking, embedding, and Qdrant replacement use case.
+  Stable `sharepoint://<drive>/<item>` sources survive renames; PDF page and
+  character provenance remain in metadata and citations.
+- The default `sharepoint_documents` collection prevents accidental mixing by
+  name, but shares the default Qdrant directory. Reimport replaces listed
+  sources only. Remote-missing items are not deleted; Qdrant writes are not
+  transactional.
+- Content redirects are fetched without the Graph bearer token and are limited
+  to HTTPS SharePoint hosts. HTTP and auth errors are sanitized before CLI
+  output. The app still holds plaintext document bytes during processing.
+- The local API does not carry SharePoint identities or ACLs. The required CLI
+  acknowledgement flags this gap, not a security control. Do not expose the
+  collection to anyone outside its intended readership. Delta sync, deletion,
+  live ACL synchronization and live tenant verification remain future work.
+  See [the setup and security contract](docs/SHAREPOINT.md).
+
+## Current Confluence Import Boundary
+
+- `index-confluence` is an explicit CLI-only import of current pages from one
+  numeric Cloud space. HTTPX uses an environment-supplied account email and
+  API token; redirects are disabled and cursor URLs stay on the same site and
+  endpoint. A bounded traversal completes before indexing begins, but cursor
+  requests do not form a point-in-time snapshot.
+- The application turns Storage-HTML into visible text through the existing
+  HTML parser, prepends each page title, and passes LangChain Documents to the
+  shared chunking, embedding, and Qdrant replacement use case. Stable
+  `confluence://<host>/<page-id>` sources survive title changes; page version,
+  space ID, and a returned web URL remain metadata.
+- `confluence_documents` is only a separate default collection name in the
+  same local store. Reimport replaces listed page sources, never remote-missing
+  ones. There is no transaction around Qdrant upserts and deletions.
+- The account's read permission controls what the API returns, but those ACLs
+  are not persisted or enforced during retrieval. The required acknowledgement
+  is a warning, not authorization. Attachments, comments, other content types,
+  complex macro rendering, deletion sync, OAuth app flow, and live-tenant
+  verification remain outside this task. See [the setup guide](docs/CONFLUENCE.md).
+
+## Current Google Drive Import Boundary
+
+- `index-google-drive` is an explicit CLI-only folder traversal. Google Auth
+  obtains scoped Application Default Credentials; HTTPX lists Drive v3 folder
+  children and downloads supported blobs or exports native Docs as plain text.
+  All remote requests, response bytes, and folder/page counts are bounded.
+- The application stages and extracts every listed file before invoking the
+  existing LangChain chunking, embedding, and Qdrant replacement use case.
+  Stable `gdrive://<file-id>` sources survive renames; `google_drive_documents`
+  is a separate default collection name in the same local store.
+- Remote-missing files are not deleted. The Drive listing is not a transactional
+  snapshot, and Qdrant writes are not atomic. A failed import should be rerun
+  after correcting its cause; no scheduled or incremental sync exists.
+- Drive read access controls the import only. The local API has no Drive user
+  identity or ACL enforcement. The required acknowledgement is a warning, not
+  authorization. See [the setup and security contract](docs/GOOGLE_DRIVE.md).
+
+## Current Channel Import Boundary
+
+- `index-slack` and `index-teams` are explicit CLI-only reads of one selected
+  channel and its replies. Slack uses a bot token and cursor-paginated Web API;
+  Teams uses app-only MSAL/Graph with expanded replies and validated
+  continuation URLs. Count, text-byte, response-byte, and request caps abort
+  a malformed or oversized traversal before local indexing begins.
+- The shared channel application workflow normalizes Teams HTML through the
+  existing parser and passes provenance-bearing LangChain Documents to the
+  existing chunking, embedding, and Qdrant replacement use case. Slack markup
+  is kept as returned. Workspace/channel/timestamp or team/channel/message
+  IDs form stable source keys; Teams reply keys also include their parent ID
+  because Graph only guarantees reply-ID uniqueness within a thread.
+- The default `slack_messages` and `teams_messages` collections are separate
+  names within the same local store. Reruns replace returned message sources,
+  including edited empty-text messages. Missing or deleted remote messages
+  are not pruned; provider pagination and Qdrant writes are not transactional.
+- Provider credentials gate import visibility only. The local API does not
+  enforce channel membership or message ACLs, and the required CLI flag only
+  acknowledges that risk. Chats, DMs, attachments, permission sync, retry/
+  backoff, incremental checkpoints, and live-provider verification remain
+  outside this task. See [channel setup and limits](docs/CHANNELS.md).
 
 ## Current Extraction Contract
 
@@ -357,8 +506,9 @@ approved from reviewed baselines; example values are not production defaults.
 - Coverage measures branches as well as statements and enforces an 80 percent
   repository floor.
 - GitHub Actions runs the locked environment, format check, lint, strict typing,
-  tests, coverage gate, and wheel/source-distribution build for pull requests
-  and updates to `main`.
+  tests, coverage gate, and wheel/source-distribution build for pull requests,
+  updates to `main`, and version tags. Pull requests additionally smoke-test
+  the image; validated version tags publish it to GHCR.
 
 These checks protect deterministic software contracts; they do not establish
 model quality, production throughput, dependency vulnerability status, or
@@ -369,9 +519,9 @@ production tasks.
 
 ## Business Features To Add Later
 
-- User authentication
-- Role-based access control
-- Multi-tenancy
+- Identity-provider integration and live ACL synchronization
+- Enterprise role-based access control
+- Production multi-tenancy beyond local process/store isolation
 - Audit logging
 - Cost monitoring
 - Feedback collection
