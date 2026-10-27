@@ -55,8 +55,8 @@ With [the prerequisites](#requirements) installed, run:
 git clone https://github.com/Mojobra/rag-pipeline.git
 cd rag-pipeline
 uv sync --locked
-uv run rag-pipeline index evaluation/datasets/asteria-policies-v2/documents --collection-name asteria_demo
-uv run rag-pipeline answer "When must expense claims be submitted?" --collection-name asteria_demo
+uv run rag index evaluation/datasets/asteria-policies-v2/documents --collection-name asteria_demo
+uv run rag answer "When must expense claims be submitted?" --collection-name asteria_demo
 ```
 
 This indexes five fictional business policies included in the repository, then
@@ -112,12 +112,12 @@ repository root.
 Check the installation and available commands:
 
 ```powershell
-uv run rag-pipeline --version
-uv run rag-pipeline --help
+uv run rag --version
+uv run rag --help
 ```
 
-`uv run python -m rag_pipeline` is the equivalent module entry point; it accepts
-the same subcommands and flags.
+`rag` is the short alias for `rag-pipeline`; both installed scripts and
+`uv run python -m rag_pipeline` accept the same subcommands and flags.
 
 ## Usage
 

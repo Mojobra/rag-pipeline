@@ -41,6 +41,7 @@ dependencies = [
 
 [project.scripts]
 rag-pipeline = "rag_pipeline.cli:main"
+rag = "rag_pipeline.cli:main"
 
 [project.urls]
 Repository = "https://github.com/Mojobra/rag-pipeline"

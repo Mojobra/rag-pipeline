@@ -5,7 +5,7 @@ explains which technologies are currently used, where each one fits, and which
 trade-offs or limitations matter in a production discussion.
 
 - **Project version:** 0.4.0 (prepared, not yet released)
-- **Last verified:** 2026-10-21
+- **Last verified:** 2026-10-27
 - **Current product surface:** Local Python CLI, manual SharePoint,
   Confluence, Google Drive, Slack, and Teams imports, and read-only HTTP API
 
@@ -517,10 +517,11 @@ concurrency, confidence intervals, memory peaks, or hosted-provider costs.
 
 ## CLI And Configuration
 
-The CLI uses only Python's `argparse`. The installed console script and module
-entry point are equivalent:
+The CLI uses only Python's `argparse`. Both installed console scripts and the
+module entry point are equivalent:
 
 ```powershell
+uv run rag --help
 uv run rag-pipeline --help
 uv run python -m rag_pipeline --help
 ```
